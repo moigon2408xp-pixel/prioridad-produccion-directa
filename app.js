@@ -1,15 +1,184 @@
-const $=q=>document.querySelector(q);const store={get(k,v){try{return JSON.parse(localStorage.getItem(k))??v}catch{return v}},set(k,v){localStorage.setItem(k,JSON.stringify(v))},remove(k){localStorage.removeItem(k)}};const state={session:store.get("pp_profile_session",null),screen:"now",filter:"all",data:store.get("pp_profile_data",{myOrders:[],teamCritical:[],allOrders:[],users:[]}),offline:false};const esc=(v="")=>String(v).replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));const active=o=>!["Entregado","Cancelado"].includes(o.estado);const hrs=o=>o.entrega?(new Date(o.entrega)-Date.now())/36e5:Infinity;const level=o=>o.estado==="Bloqueado"||o.diseno==="No"||o.material==="No"?"blocked":hrs(o)<=4?"now":hrs(o)<=24?"today":"later";const levelText={blocked:"Bloqueado",now:"Hacer ahora",today:"Hacer hoy",later:"Programar"};const order=(a,b)=>({blocked:0,now:1,today:2,later:3}[level(a)]-{blocked:0,now:1,today:2,later:3}[level(b)])||(new Date(a.entrega||"2999")-new Date(b.entrega||"2999"));const dt=v=>{const d=new Date(v);return v&&!Number.isNaN(d)?new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short"}).format(d):"Sin fecha"};const isLead=()=>["manager","jefa"].includes(state.session?.role);const isManager=()=>state.session?.role==="manager";
-function toast(t){const n=$("#toast");n.textContent=t;n.classList.add("show");clearTimeout(window.ppToast);window.ppToast=setTimeout(()=>n.classList.remove("show"),3200)}
-function api(action,extra={}){return new Promise((resolve,reject)=>{const base=window.PRIORIDAD_CONFIG?.appsScriptUrl||"";if(!base.startsWith("https://"))return reject(new Error("Falta configurar la URL de Apps Script."));const callback=`ppc_${Date.now()}_${Math.random().toString(36).slice(2)}`;const script=document.createElement("script");const cleanup=()=>{delete window[callback];script.remove()};const timer=setTimeout(()=>{cleanup();reject(new Error("Google Sheets tardó demasiado en responder."))},20000);window[callback]=r=>{clearTimeout(timer);cleanup();r.ok?resolve(r):reject(new Error(r.error||"No se pudo completar la acción."))};const payload=encodeURIComponent(JSON.stringify({action,token:state.session?.token||"",...extra}));script.src=`${base}${base.includes("?")?"&":"?"}callback=${callback}&payload=${payload}`;script.onerror=()=>{clearTimeout(timer);cleanup();reject(new Error("No se pudo comunicar con Google Sheets."))};document.head.append(script)})}
-async function refresh(show=true){$("#refresh").textContent="…";try{const r=await api("profile_dashboard");state.data=r.data;state.offline=false;store.set("pp_profile_data",state.data);render();if(show)toast("Información actualizada.")}catch(e){state.offline=true;render();if(show)toast(e.message)}finally{$("#refresh").textContent="↻"}}
-function pill(o){const p=level(o);return `<span class="priority priority-${p}">${levelText[p]}</span>`}function card(o,i){return `<button class="order-card" data-action="detail" data-id="${esc(o.id)}"><div class="order-top"><div><h3>${i===undefined?"":`${i+1}. `}${esc(o.cliente||"Sin cliente")}</h3><p>${esc(o.tipo||"Sin tipo")}</p></div>${pill(o)}</div><div class="meta">Entrega: ${esc(dt(o.entrega))}<br/>Responsable: ${esc(o.responsable||"Sin asignar")} · ${esc(o.tiempoMinutos||0)} min</div></button>`}
-function nowView(){const mine=(state.data.myOrders||[]).filter(active).sort(order),next=mine[0],critical=(state.data.teamCritical||[]).sort(order);return `${state.offline?'<p class="offline">Mostrando la última información guardada.</p>':""}${next?`<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${pill(next)}<h2>${esc(next.cliente)}</h2><p>${esc(next.tipo)} · Entrega ${esc(dt(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${esc(next.id)}">Ver detalle</button></div></article>`:'<div class="empty"><strong>Tu cola está al día</strong>Las nuevas asignaciones aparecerán aquí.</div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(card).join("")||'<div class="team-note">No hay bloqueos ni vencimientos inmediatos.</div>'}</div>`}
-function queueView(){const list=(state.data.myOrders||[]).filter(active).filter(o=>state.filter==="all"||level(o)===state.filter).sort(order);const filters=[["all","Todo"],["now","Ahora"],["today","Hoy"],["blocked","Bloqueados"]];return `<div class="filter-row">${filters.map(([k,l])=>`<button class="filter ${state.filter===k?"active":""}" data-action="filter" data-filter="${k}">${l}</button>`).join("")}</div>${list.length?`<div class="order-list">${list.map(card).join("")}</div>`:'<div class="empty"><strong>No hay pedidos en este filtro</strong>Prueba otra categoría.</div>'}`}
-function teamView(){const users=(state.data.users||[]).filter(u=>u.active),orders=(state.data.allOrders||[]).filter(active),critical=(state.data.teamCritical||[]).sort(order);if(!isLead())return `<p class="section-heading">ATENCIÓN DEL EQUIPO</p><div class="order-list">${critical.map(card).join("")||'<div class="team-note">No hay casos críticos.</div>'}</div>`;return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">CARGA ACTUAL</p><div class="load-grid">${users.filter(u=>u.role!=="manager").map(u=>{const q=orders.filter(o=>o.responsable===u.name);return `<div class="load-card"><strong>${esc(u.name)}</strong><span>${q.length} pedidos · ${q.reduce((s,o)=>s+Number(o.tiempoMinutos||0),0)} min</span></div>`}).join("")||'<div class="team-note">Aún no hay trabajadores registrados.</div>'}</div><p class="section-heading">PEDIDOS ACTIVOS</p><div class="order-list">${orders.sort(order).map(card).join("")||'<div class="team-note">No hay pedidos activos.</div>'}</div>`}
-function settingsView(){const s=state.session;return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${esc(s.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${esc(s.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager()?`<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${(state.data.users||[]).map(u=>`<div class="user-card"><div><strong>${esc(u.name)}</strong><span>${esc(u.role)} · ${u.active?"activo":"inactivo"}</span></div>${u.name!==s.name?`<button class="secondary-button" data-action="toggle-user" data-name="${esc(u.name)}" data-active="${u.active?"false":"true"}">${u.active?"Desactivar":"Activar"}</button>`:""}</div>`).join("")}</div>`:""}<p class="section-heading">SINCRONIZACIÓN</p><div class="team-note">${state.offline?"Sin conexión. Se muestra la última información disponible.":"Conectada al registro central de Google Sheets."}</div>`}
-function render(){if(!state.session)return;const names={now:"Ahora",queue:"Mi cola",team:"Equipo",settings:"Ajustes"};$("#screen-title").textContent=names[state.screen];$("#role-label").textContent=`${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;$("#screen").innerHTML=({now:nowView,queue:queueView,team:teamView,settings:settingsView})[state.screen]();document.querySelectorAll(".nav-button").forEach(b=>b.classList.toggle("active",b.dataset.screen===state.screen))}
-function open(x){const m=$("#modal");m.innerHTML=`<div class="modal-content">${x}</div>`;m.showModal()}const close=()=>$("#modal").close();function detail(o){const editable=isLead()||o.responsable===state.session.name;const people=(state.data.users||[]).filter(u=>u.active&&u.role!=="manager");open(`<div class="modal-head"><div><p class="eyebrow">${esc(o.id)}</p><h2>${esc(o.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div><p style="color:var(--blue);font-weight:800">${esc(o.tipo)}</p><div class="detail-grid"><div class="detail-row"><span>ENTREGA</span><strong>${esc(dt(o.entrega))}</strong></div><div class="detail-row"><span>RESPONSABLE</span><strong>${esc(o.responsable||"Sin asignar")}</strong></div><div class="detail-row"><span>DESCRIPCIÓN</span><strong>${esc(o.descripcion||"Sin descripción")}</strong></div><div class="detail-row"><span>NOTAS</span><strong>${esc(o.notas||"Sin notas")}</strong></div><div class="detail-row"><span>PREPARACIÓN</span><strong>Diseño: ${esc(o.diseno)} · Material: ${esc(o.material)}</strong></div></div>${isLead()?`<label class="field"><span class="field-label">ASIGNAR RESPONSABLE</span><select id="assign-select"><option value="">Sin asignar</option>${people.map(u=>`<option ${u.name===o.responsable?"selected":""}>${esc(u.name)}</option>`).join("")}</select></label><button class="primary-button" data-action="assign" data-id="${esc(o.id)}">Guardar responsable</button>`:""}${editable?`<div class="toggle-actions"><button data-action="toggle-ready" data-id="${esc(o.id)}" data-key="diseno" data-value="${o.diseno==="Sí"?"No":"Sí"}">Diseño ${o.diseno==="Sí"?"pendiente":"listo"}</button><button data-action="toggle-ready" data-id="${esc(o.id)}" data-key="material" data-value="${o.material==="Sí"?"No":"Sí"}">Material ${o.material==="Sí"?"pendiente":"listo"}</button><button data-action="note" data-id="${esc(o.id)}">Añadir nota</button></div>`:"<div class=\"team-note\">Este pedido pertenece a otra persona.</div>"}`)}
-function formOrder(){const people=(state.data.users||[]).filter(u=>u.active&&u.role!=="manager");open(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid"><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA</span><input type="time" name="horaEntrega" required></label></div><div class="form-inline"><label class="field"><span class="field-label">TIEMPO (MIN)</span><input type="number" min="1" name="tiempoMinutos" required></label><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label></div><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map(u=>`<option>${esc(u.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS</span><textarea name="notas"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Registrar</button></div></form>`);$("#order-form").addEventListener("submit",async e=>{e.preventDefault();try{await api("profile_create_order",{form:Object.fromEntries(new FormData(e.currentTarget))});close();await refresh(false);toast("Pedido registrado.")}catch(x){toast(x.message)}})}
-function formUser(){open(`<div class="modal-head"><h2>Nuevo perfil</h2><button class="close-button" data-action="close">×</button></div><form id="user-form" class="form-grid"><label class="field"><span class="field-label">NOMBRE</span><input name="name" required placeholder="Ej. Valentina"></label><label class="field"><span class="field-label">PERFIL</span><select name="role"><option value="trabajador">Trabajador</option><option value="jefa">Jefa</option><option value="manager">Manager</option></select></label><label class="field"><span class="field-label">PIN DE SEIS DÍGITOS</span><input name="pin" inputmode="numeric" pattern="[0-9]{6}" required placeholder="Ej. 123456"></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Crear perfil</button></div></form>`);$("#user-form").addEventListener("submit",async e=>{e.preventDefault();try{await api("profile_create_user",{user:Object.fromEntries(new FormData(e.currentTarget))});close();await refresh(false);toast("Perfil creado.")}catch(x){toast(x.message)}})}
-function formNote(id){open(`<div class="modal-head"><h2>Registrar avance</h2><button class="close-button" data-action="close">×</button></div><form id="note-form" class="form-grid"><label class="field"><span class="field-label">NOTA OPERATIVA</span><textarea name="notes" required></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Guardar</button></div></form>`);$("#note-form").addEventListener("submit",async e=>{e.preventDefault();const note=new FormData(e.currentTarget).get("notes");try{await api("profile_update_order",{id,changes:{appendNote:note}});close();await refresh(false);toast("Nota guardada.")}catch(x){toast(x.message)}})}
-$("#login-form").addEventListener("submit",async e=>{e.preventDefault();$("#login-error").textContent="";try{const r=await api("profile_login",{name:$("#login-name").value.trim(),pin:$("#login-pin").value.trim()});state.session=r.session;store.set("pp_profile_session",state.session);$("#login-view").classList.add("hidden");$("#workspace").classList.remove("hidden");await refresh(false)}catch(x){$("#login-error").textContent=x.message}});$("#refresh").addEventListener("click",()=>refresh());document.querySelectorAll(".nav-button").forEach(b=>b.addEventListener("click",()=>{state.screen=b.dataset.screen;render()}));document.addEventListener("click",async e=>{const b=e.target.closest("[data-action]");if(!b)return;const d=b.dataset;if(d.action==="close")return close();if(d.action==="filter"){state.filter=d.filter;return render()}if(d.action==="detail"){const o=(state.data.allOrders||[]).find(x=>x.id===d.id);if(o)detail(o);return}if(d.action==="new-order")return formOrder();if(d.action==="new-user")return formUser();if(d.action==="note")return formNote(d.id);if(d.action==="logout"){store.remove("pp_profile_session");state.session=null;$("#workspace").classList.add("hidden");$("#login-view").classList.remove("hidden");return}try{if(d.action==="assign"){await api("profile_update_order",{id:d.id,changes:{responsable:$("#assign-select").value}})}if(d.action==="toggle-ready"){await api("profile_update_order",{id:d.id,changes:{[d.key]:d.value}})}if(d.action==="toggle-user"){await api("profile_update_user",{name:d.name,active:d.active==="true"})}close();await refresh(false);toast("Cambio guardado.")}catch(x){toast(x.message)}});if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});if(state.session){$("#login-view").classList.add("hidden");$("#workspace").classList.remove("hidden");render();refresh(false)}
+const $ = (selector) => document.querySelector(selector);
+const store = {
+  get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
+  set(key, value) { localStorage.setItem(key, JSON.stringify(value)); },
+  remove(key) { localStorage.removeItem(key); },
+};
+
+const state = {
+  session: store.get("pp_profile_session", null),
+  screen: "now",
+  filter: "all",
+  offline: false,
+  data: store.get("pp_profile_data", { myOrders: [], teamCritical: [], allOrders: [], users: [] }),
+};
+
+const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
+const active = (order) => !["Entregado", "Cancelado"].includes(order.estado);
+const operable = (order) => active(order) && !["Terminado", "Listo para entregar"].includes(order.estado);
+const hoursRemaining = (order) => order.entrega ? (new Date(order.entrega) - Date.now()) / 3600000 : Infinity;
+const priority = (order) => order.estado === "Bloqueado" || order.diseno === "No" || order.material === "No" ? "blocked" : hoursRemaining(order) <= 4 ? "now" : hoursRemaining(order) <= 24 ? "today" : "later";
+const priorityLabel = { blocked: "Bloqueado", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
+const orderByPriority = (left, right) => ({ blocked: 0, now: 1, today: 2, later: 3 }[priority(left)] - { blocked: 0, now: 1, today: 2, later: 3 }[priority(right)]) || (new Date(left.entrega || "2999") - new Date(right.entrega || "2999"));
+const isLead = () => ["manager", "jefa"].includes(state.session?.role);
+const isManager = () => state.session?.role === "manager";
+const formatDate = (value) => { const date = new Date(value); return value && !Number.isNaN(date) ? new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Sin fecha"; };
+
+function showToast(message) {
+  const toast = $("#toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  clearTimeout(window.ppToast);
+  window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
+}
+
+function api(action, extra = {}) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "";
+    if (!baseUrl.startsWith("https://")) return reject(new Error("Falta configurar la URL de Apps Script."));
+    const callback = `ppc_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const finish = () => { delete window[callback]; script.remove(); };
+    const timer = setTimeout(() => { finish(); reject(new Error("Google Sheets tardó demasiado en responder.")); }, 20000);
+    window[callback] = (response) => { clearTimeout(timer); finish(); response.ok ? resolve(response) : reject(new Error(response.error || "No se pudo completar la acción.")); };
+    const payload = encodeURIComponent(JSON.stringify({ action, token: state.session?.token || "", ...extra }));
+    script.src = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}callback=${callback}&payload=${payload}`;
+    script.onerror = () => { clearTimeout(timer); finish(); reject(new Error("No se pudo comunicar con Google Sheets.")); };
+    document.head.append(script);
+  });
+}
+
+async function refresh(showMessage = true) {
+  $("#refresh").textContent = "…";
+  try {
+    const response = await api("profile_dashboard");
+    state.data = response.data;
+    state.offline = false;
+    store.set("pp_profile_data", state.data);
+    render();
+    if (showMessage) showToast("Información actualizada.");
+  } catch (error) {
+    state.offline = true;
+    render();
+    if (showMessage) showToast(error.message);
+  } finally {
+    $("#refresh").textContent = "↻";
+  }
+}
+
+function priorityPill(order) { const value = priority(order); return `<span class="priority priority-${value}">${priorityLabel[value]}</span>`; }
+function orderCard(order, position) {
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: ${escapeHtml(order.estado || "Pendiente")}<br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Responsable: ${escapeHtml(order.responsable || "Sin asignar")} · ${escapeHtml(order.tiempoMinutos || 0)} min</div></button>`;
+}
+
+function nowView() {
+  const myOpenOrders = (state.data.myOrders || []).filter(operable).sort(orderByPriority);
+  const next = myOpenOrders[0];
+  const critical = (state.data.teamCritical || []).sort(orderByPriority);
+  return `${state.offline ? '<p class="offline">Mostrando la última información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong>Las nuevas asignaciones aparecerán aquí.</div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay bloqueos ni vencimientos inmediatos.</div>'}</div>`;
+}
+
+function queueView() {
+  const list = (state.data.myOrders || []).filter(active).filter((order) => state.filter === "all" || priority(order) === state.filter).sort(orderByPriority);
+  const filters = [["all", "Todo"], ["now", "Ahora"], ["today", "Hoy"], ["blocked", "Bloqueados"]];
+  return `<div class="filter-row">${filters.map(([key, label]) => `<button class="filter ${state.filter === key ? "active" : ""}" data-action="filter" data-filter="${key}">${label}</button>`).join("")}</div>${list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No hay pedidos en este filtro</strong>Prueba otra categoría.</div>'}`;
+}
+
+function teamView() {
+  const users = (state.data.users || []).filter((user) => user.active);
+  const orders = (state.data.allOrders || []).filter(active);
+  const critical = (state.data.teamCritical || []).sort(orderByPriority);
+  if (!isLead()) return `<p class="section-heading">ATENCIÓN DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
+  const load = users.filter((user) => user.role !== "manager").map((user) => {
+    const assigned = orders.filter((order) => order.responsable === user.name);
+    return `<div class="load-card"><strong>${escapeHtml(user.name)}</strong><span>${assigned.length} pedidos · ${assigned.reduce((sum, order) => sum + Number(order.tiempoMinutos || 0), 0)} min</span></div>`;
+  }).join("");
+  return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">CARGA ACTUAL</p><div class="load-grid">${load || '<div class="team-note">Aún no hay trabajadores registrados.</div>'}</div><p class="section-heading">PEDIDOS ACTIVOS</p><div class="order-list">${orders.sort(orderByPriority).map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
+}
+
+function settingsView() {
+  const session = state.session;
+  const accessList = (state.data.users || []).map((user) => `<div class="user-card"><div><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(user.role)} · ${user.active ? "activo" : "inactivo"}</span></div>${user.name !== session.name ? `<button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(user.name)}" data-active="${user.active ? "false" : "true"}">${user.active ? "Desactivar" : "Activar"}</button>` : ""}</div>`).join("");
+  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">SINCRONIZACIÓN</p><div class="team-note">${state.offline ? "Sin conexión. Se muestra la última información disponible." : "Conectada al registro central de Google Sheets."}</div>`;
+}
+
+function render() {
+  if (!state.session) return;
+  const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", settings: "Ajustes" };
+  $("#screen-title").textContent = screenNames[state.screen];
+  $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
+  $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, settings: settingsView })[state.screen]();
+  document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.screen === state.screen));
+}
+
+function openModal(content) { const modal = $("#modal"); modal.innerHTML = `<div class="modal-content">${content}</div>`; modal.showModal(); }
+function closeModal() { $("#modal").close(); }
+
+function detail(order) {
+  const editable = isLead() || order.responsable === state.session.name;
+  const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
+  const workerStates = ["En proceso", "Terminado", "Listo para entregar"];
+  const leadStates = ["Pendiente", "En proceso", "Terminado", "Listo para entregar", "Entregado", "Bloqueado"];
+  const states = isLead() ? leadStates : workerStates;
+  openModal(`<div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div><p style="color:var(--blue);font-weight:800">${escapeHtml(order.tipo)}</p><div class="detail-grid"><div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div><div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div><div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div><div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div><div class="detail-row"><span>NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div><div class="detail-row"><span>PREPARACIÓN</span><strong>Diseño: ${escapeHtml(order.diseno)} · Material: ${escapeHtml(order.material)}</strong></div></div>${isLead() ? `<label class="field"><span class="field-label">ASIGNAR RESPONSABLE</span><select id="assign-select"><option value="">Sin asignar</option>${people.map((user) => `<option ${user.name === order.responsable ? "selected" : ""}>${escapeHtml(user.name)}</option>`).join("")}</select></label><button class="primary-button" data-action="assign" data-id="${escapeHtml(order.id)}">Guardar responsable</button>` : ""}${editable ? `<p class="section-heading">AVANCE DEL TRABAJO</p><div class="toggle-actions">${states.filter((item) => item !== order.estado).map((item) => `<button data-action="progress" data-id="${escapeHtml(order.id)}" data-state="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div><p class="section-heading">PREPARACIÓN</p><div class="toggle-actions"><button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="diseno" data-value="${order.diseno === "Sí" ? "No" : "Sí"}">Diseño ${order.diseno === "Sí" ? "pendiente" : "listo"}</button><button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="material" data-value="${order.material === "Sí" ? "No" : "Sí"}">Material ${order.material === "Sí" ? "pendiente" : "listo"}</button><button data-action="note" data-id="${escapeHtml(order.id)}">Añadir nota</button></div>` : '<div class="team-note">Este pedido pertenece a otra persona.</div>'}`);
+}
+
+function formOrder() {
+  const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
+  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid"><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA</span><input type="time" name="horaEntrega" required></label></div><div class="form-inline"><label class="field"><span class="field-label">TIEMPO (MIN)</span><input type="number" min="1" name="tiempoMinutos" required></label><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label></div><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS</span><textarea name="notas"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Registrar</button></div></form>`);
+  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = event.currentTarget.querySelector("button[type=submit]"); button.disabled = true; button.textContent = "Registrando…"; try { await api("profile_create_order", { form: Object.fromEntries(new FormData(event.currentTarget)) }); closeModal(); await refresh(false); showToast("Pedido registrado."); } catch (error) { showToast(error.message); button.disabled = false; button.textContent = "Registrar"; } });
+}
+
+function formUser() {
+  openModal(`<div class="modal-head"><h2>Nuevo perfil</h2><button class="close-button" data-action="close">×</button></div><form id="user-form" class="form-grid"><label class="field"><span class="field-label">NOMBRE</span><input name="name" required placeholder="Ej. Valentina"></label><label class="field"><span class="field-label">PERFIL</span><select name="role"><option value="trabajador">Trabajador</option><option value="jefa">Jefa</option><option value="manager">Manager</option></select></label><label class="field"><span class="field-label">PIN DE SEIS DÍGITOS</span><input name="pin" inputmode="numeric" pattern="[0-9]{6}" required placeholder="Ej. 123456"></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Crear perfil</button></div></form>`);
+  $("#user-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await api("profile_create_user", { user: Object.fromEntries(new FormData(event.currentTarget)) }); closeModal(); await refresh(false); showToast("Perfil creado."); } catch (error) { showToast(error.message); } });
+}
+
+function formNote(id) {
+  openModal(`<div class="modal-head"><h2>Registrar avance</h2><button class="close-button" data-action="close">×</button></div><form id="note-form" class="form-grid"><label class="field"><span class="field-label">NOTA OPERATIVA</span><textarea name="notes" required></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Guardar</button></div></form>`);
+  $("#note-form").addEventListener("submit", (event) => { event.preventDefault(); saveUpdate(id, { appendNote: new FormData(event.currentTarget).get("notes") }, "Nota guardada."); });
+}
+
+function formArchive() {
+  openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe solo los ID de prueba, separados por comas. Se moverán a la pestaña Pedidos_Archivo; no se eliminarán definitivamente.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
+  $("#archive-form").addEventListener("submit", async (event) => { event.preventDefault(); const ids = String(new FormData(event.currentTarget).get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean); try { await api("profile_archive_orders", { ids }); closeModal(); await refresh(false); showToast("Pedidos archivados."); } catch (error) { showToast(error.message); } });
+}
+
+function updateLocalOrder(id, changes) {
+  const transform = (order) => order.id !== id ? order : { ...order, ...changes, notas: changes.appendNote ? [order.notas, `• ${state.session.name}: ${changes.appendNote}`].filter(Boolean).join("\n") : order.notas };
+  state.data = { ...state.data, myOrders: (state.data.myOrders || []).map(transform), teamCritical: (state.data.teamCritical || []).map(transform), allOrders: (state.data.allOrders || []).map(transform) };
+  store.set("pp_profile_data", state.data);
+  render();
+}
+
+async function saveUpdate(id, changes, successText) {
+  updateLocalOrder(id, changes);
+  closeModal();
+  showToast("Guardando…");
+  try { await api("profile_update_order", { id, changes }); showToast(successText); refresh(false); } catch (error) { showToast(error.message); refresh(false); }
+}
+
+$("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); $("#login-error").textContent = ""; try { const response = await api("profile_login", { name: $("#login-name").value.trim(), pin: $("#login-pin").value.trim() }); state.session = response.session; store.set("pp_profile_session", state.session); $("#login-view").classList.add("hidden"); $("#workspace").classList.remove("hidden"); await refresh(false); } catch (error) { $("#login-error").textContent = error.message; } });
+$("#refresh").addEventListener("click", () => refresh());
+document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => { state.screen = button.dataset.screen; render(); }));
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-action]"); if (!button) return;
+  const data = button.dataset;
+  if (data.action === "close") return closeModal();
+  if (data.action === "filter") { state.filter = data.filter; return render(); }
+  if (data.action === "detail") { const order = (state.data.allOrders || []).find((item) => item.id === data.id); if (order) detail(order); return; }
+  if (data.action === "new-order") return formOrder();
+  if (data.action === "new-user") return formUser();
+  if (data.action === "note") return formNote(data.id);
+  if (data.action === "archive") return formArchive();
+  if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
+  if (data.action === "progress") return saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
+  if (data.action === "toggle-ready") return saveUpdate(data.id, { [data.key]: data.value }, "Preparación actualizada.");
+  try {
+    if (data.action === "assign") return saveUpdate(data.id, { responsable: $("#assign-select").value }, "Responsable actualizado.");
+    if (data.action === "toggle-user") { await api("profile_update_user", { name: data.name, active: data.active === "true" }); await refresh(false); showToast("Acceso actualizado."); }
+  } catch (error) { showToast(error.message); }
+});
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+if (state.session) { $("#login-view").classList.add("hidden"); $("#workspace").classList.remove("hidden"); render(); refresh(false); }
