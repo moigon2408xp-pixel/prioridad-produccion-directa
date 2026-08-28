@@ -24,6 +24,17 @@ const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 const isManager = () => state.session?.role === "manager";
 const formatDate = (value) => { const date = new Date(value); return value && !Number.isNaN(date) ? new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Sin fecha"; };
 
+async function enablePush() {
+  try {
+    const { activatePushNotifications } = await import("./push.js");
+    await activatePushNotifications(
+      async (deviceToken) => { await api("profile_register_device", { deviceToken }); },
+      (payload) => showToast(payload.notification?.title || "Nueva actualización de producción.")
+    );
+    showToast("Este dispositivo quedó registrado para recibir avisos.");
+  } catch (error) { showToast(error.message); }
+}
+
 function showToast(message) {
   const toast = $("#toast");
   toast.textContent = message;
@@ -99,7 +110,7 @@ function teamView() {
 function settingsView() {
   const session = state.session;
   const accessList = (state.data.users || []).map((user) => `<div class="user-card"><div><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(user.role)} · ${user.active ? "activo" : "inactivo"}</span></div>${user.name !== session.name ? `<button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(user.name)}" data-active="${user.active ? "false" : "true"}">${user.active ? "Desactivar" : "Activar"}</button>` : ""}</div>`).join("");
-  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">SINCRONIZACIÓN</p><div class="team-note">${state.offline ? "Sin conexión. Se muestra la última información disponible." : "Conectada al registro central de Google Sheets."}</div>`;
+  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">AVISOS DEL DISPOSITIVO</p><button class="primary-button" data-action="enable-push">Activar notificaciones</button><p class="team-note">Los avisos push se habilitan una vez que Firebase esté configurado.</p><p class="section-heading">SINCRONIZACIÓN</p><div class="team-note">${state.offline ? "Sin conexión. Se muestra la última información disponible." : "Conectada al registro central de Google Sheets."}</div>`;
 }
 
 function render() {
@@ -171,6 +182,7 @@ document.addEventListener("click", async (event) => {
   if (data.action === "new-user") return formUser();
   if (data.action === "note") return formNote(data.id);
   if (data.action === "archive") return formArchive();
+  if (data.action === "enable-push") return enablePush();
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
   if (data.action === "progress") return saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
   if (data.action === "toggle-ready") return saveUpdate(data.id, { [data.key]: data.value }, "Preparación actualizada.");
