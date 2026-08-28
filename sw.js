@@ -1,5 +1,5 @@
-const CACHE = "prioridad-produccion-perfiles-v8";
-const ASSETS = ["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icons/icon-192.png","./icons/icon-512.png"];
+const CACHE = "prioridad-produccion-perfiles-v9";
+const ASSETS = ["./","./index.html","./styles.css","./app-registrar-fix.js","./manifest.webmanifest","./icons/icon-192.png","./icons/icon-512.png"];
 try {
   importScripts("./firebase-config.js");
   const config = self.PRIORIDAD_FIREBASE_CONFIG || {};
