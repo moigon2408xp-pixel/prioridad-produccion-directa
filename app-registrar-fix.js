@@ -179,8 +179,29 @@ async function uploadEvidence(id, files) {
   const images = await Promise.all(files.map(imageAsJpegData));
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "";
   if (!baseUrl.startsWith("https://")) throw new Error("Falta configurar la conexión con Google Sheets.");
-  await fetch(baseUrl, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "profile_upload_evidence", token: state.session?.token || "", id, images: images.map((data) => ({ data })) }) });
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const payload = JSON.stringify({ action: "profile_upload_evidence", token: state.session?.token || "", id, images: images.map((data) => ({ data })) });
+  const frame = document.createElement("iframe");
+  frame.name = `pp_upload_${Date.now()}`;
+  frame.style.display = "none";
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = baseUrl;
+  form.target = frame.name;
+  form.style.display = "none";
+  const field = document.createElement("textarea");
+  field.name = "payload";
+  field.value = payload;
+  form.appendChild(field);
+  document.body.append(frame, form);
+  form.submit();
+  setTimeout(() => { form.remove(); frame.remove(); }, 15000);
+  let status = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1800 : 1200));
+    status = await api("profile_evidence_status", { id });
+    if (Number(status.data?.count || 0) >= files.length) return status;
+  }
+  throw new Error(`Apps Script no confirmó el guardado de las ${files.length} foto(s). Revisa la autorización de Drive en la cuenta secundaria.`);
 }
 
 function formArchive() {
