@@ -23,6 +23,7 @@ const orderByPriority = (left, right) => ({ blocked: 0, now: 1, today: 2, later:
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 const isManager = () => state.session?.role === "manager";
 const formatDate = (value) => { const date = new Date(value); return value && !Number.isNaN(date) ? new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Sin fecha"; };
+const durationLabel = (order) => order.finProduccion ? `${Math.round(Number(order.duracionRealMin || 0))} min reales` : order.inicioProduccion ? "En proceso" : "Aún no iniciado";
 
 async function enablePush() {
   try {
@@ -79,7 +80,7 @@ async function refresh(showMessage = true) {
 
 function priorityPill(order) { const value = priority(order); return `<span class="priority priority-${value}">${priorityLabel[value]}</span>`; }
 function orderCard(order, position) {
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: ${escapeHtml(order.estado || "Pendiente")}<br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Responsable: ${escapeHtml(order.responsable || "Sin asignar")} · ${escapeHtml(order.tiempoMinutos || 0)} min</div></button>`;
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: ${escapeHtml(order.estado || "Pendiente")}<br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Responsable: ${escapeHtml(order.responsable || "Sin asignar")} · ${escapeHtml(durationLabel(order))}</div></button>`;
 }
 
 function nowView() {
@@ -95,6 +96,12 @@ function queueView() {
   return `<div class="filter-row">${filters.map(([key, label]) => `<button class="filter ${state.filter === key ? "active" : ""}" data-action="filter" data-filter="${key}">${label}</button>`).join("")}</div>${list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No hay pedidos en este filtro</strong>Prueba otra categoría.</div>'}`;
 }
 
+function historyView() {
+  const orders = (state.data.finishedOrders || []).sort((left, right) => new Date(right.entregadoEn || right.finProduccion || 0) - new Date(left.entregadoEn || left.finProduccion || 0));
+  if (!orders.length) return '<div class="empty"><strong>Aún no hay proyectos terminados</strong>Los pedidos aparecerán aquí al marcarlos como terminados, listos para entregar o entregados.</div>';
+  return `<p class="team-note">Consulta la duración real, la entrega y las fotografías de cada proyecto finalizado.</p><div class="order-list">${orders.map((order) => { const links = String(order.evidenciasDrive || '').split("\n").filter(Boolean); const delay = Number(order.retrasoMin || 0); return `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente || 'Sin cliente')}</h3><p>${escapeHtml(order.tipo || 'Sin tipo')}</p></div><span class="priority priority-${order.estado === 'Entregado' ? 'later' : 'today'}">${escapeHtml(order.estado)}</span></div><div class="meta">Responsable: ${escapeHtml(order.responsable || 'Sin asignar')}<br/>Finalizado: ${escapeHtml(formatDate(order.finProduccion))}<br/>Duración: ${escapeHtml(durationLabel(order))}<br/>Entrega: ${escapeHtml(formatDate(order.entregadoEn))}${order.entregadoEn ? ` · ${delay ? `${delay} min de retraso` : 'A tiempo'}` : ''}<br/>Cierre: ${escapeHtml(order.comentarioCierre || 'Sin comentario')}</div>${links.length ? `<div class="actions">${links.map((url, index) => `<a class="secondary-button" href="${escapeHtml(url)}" target="_blank" rel="noopener">Ver foto ${index + 1}</a>`).join('')}</div>` : '<p class="team-note">Sin fotos adjuntas.</p>'}</article>`; }).join('')}</div>`;
+}
+
 function teamView() {
   const users = (state.data.users || []).filter((user) => user.active);
   const orders = (state.data.allOrders || []).filter(active);
@@ -102,7 +109,7 @@ function teamView() {
   if (!isLead()) return `<p class="section-heading">ATENCIÓN DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
   const load = users.filter((user) => user.role !== "manager").map((user) => {
     const assigned = orders.filter((order) => order.responsable === user.name);
-    return `<div class="load-card"><strong>${escapeHtml(user.name)}</strong><span>${assigned.length} pedidos · ${assigned.reduce((sum, order) => sum + Number(order.tiempoMinutos || 0), 0)} min</span></div>`;
+    return `<div class="load-card"><strong>${escapeHtml(user.name)}</strong><span>${assigned.length} pedidos activos</span></div>`;
   }).join("");
   return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">CARGA ACTUAL</p><div class="load-grid">${load || '<div class="team-note">Aún no hay trabajadores registrados.</div>'}</div><p class="section-heading">PEDIDOS ACTIVOS</p><div class="order-list">${orders.sort(orderByPriority).map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
 }
@@ -115,10 +122,10 @@ function settingsView() {
 
 function render() {
   if (!state.session) return;
-  const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", settings: "Ajustes" };
+  const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
   $("#screen-title").textContent = screenNames[state.screen];
   $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
-  $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, settings: settingsView })[state.screen]();
+  $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
   document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.screen === state.screen));
 }
 
@@ -136,7 +143,7 @@ function detail(order) {
 
 function formOrder() {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
-  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid"><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA</span><input type="time" name="horaEntrega" required></label></div><div class="form-inline"><label class="field"><span class="field-label">TIEMPO (MIN)</span><input type="number" min="1" name="tiempoMinutos" required></label><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label></div><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS</span><textarea name="notas"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Registrar</button></div></form>`);
+  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid"><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label></div><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS INICIALES</span><textarea name="notas"></textarea></label><p class="team-note">El tiempo real se calculará desde que el pedido pase a «En proceso» hasta que se marque «Terminado».</p><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Registrar</button></div></form>`);
   $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = event.currentTarget.querySelector("button[type=submit]"); button.disabled = true; button.textContent = "Registrando…"; try { await api("profile_create_order", { form: Object.fromEntries(new FormData(event.currentTarget)) }); closeModal(); await refresh(false); showToast("Pedido registrado."); } catch (error) { showToast(error.message); button.disabled = false; button.textContent = "Registrar"; } });
 }
 
@@ -150,14 +157,40 @@ function formNote(id) {
   $("#note-form").addEventListener("submit", (event) => { event.preventDefault(); saveUpdate(id, { appendNote: new FormData(event.currentTarget).get("notes") }, "Nota guardada."); });
 }
 
+function formCloseOrder(id) {
+  openModal(`<div class="modal-head"><h2>Cerrar producción</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Se guardará el tiempo real desde «En proceso». Indica cualquier imprevisto, detalle de entrega o aclaración final.</p><form id="close-order-form" class="form-grid"><label class="field"><span class="field-label">COMENTARIO DE CIERRE</span><textarea name="closeComment" placeholder="Ej. Se terminó sin imprevistos."></textarea></label><label class="field"><span class="field-label">FOTOS DE EVIDENCIA (OPCIONAL)</span><input id="evidence-files" type="file" accept="image/*" capture="environment" multiple><small>Máximo tres fotos. Se comprimirán antes de guardarse de forma privada en Drive.</small></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Marcar terminado</button></div></form>`);
+  $("#close-order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button[type=submit]"); const files = [...$("#evidence-files").files]; button.disabled = true; button.textContent = "Guardando…"; try { await api("profile_update_order", { id, changes: { estado: "Terminado", closeComment: String(new FormData(form).get("closeComment") || "").trim() } }); if (files.length) await uploadEvidence(id, files); closeModal(); await refresh(false); showToast(files.length ? "Producción terminada y fotos guardadas." : "Producción terminada y tiempo real registrado."); } catch (error) { showToast(error.message); button.disabled = false; button.textContent = "Marcar terminado"; } });
+}
+
+async function imageAsJpegData(file) {
+  const source = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); });
+  const maxSide = 1600;
+  const scale = Math.min(1, maxSide / Math.max(source.naturalWidth, source.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(source.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(source.naturalHeight * scale));
+  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.78);
+}
+
+async function uploadEvidence(id, files) {
+  if (!files.length) return;
+  if (files.length > 3) throw new Error("Puedes adjuntar como máximo tres fotos por cierre.");
+  const images = await Promise.all(files.map(imageAsJpegData));
+  const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "";
+  if (!baseUrl.startsWith("https://")) throw new Error("Falta configurar la conexión con Google Sheets.");
+  await fetch(baseUrl, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "profile_upload_evidence", token: state.session?.token || "", id, images: images.map((data) => ({ data })) }) });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+}
+
 function formArchive() {
   openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe solo los ID de prueba, separados por comas. Se moverán a la pestaña Pedidos_Archivo; no se eliminarán definitivamente.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
   $("#archive-form").addEventListener("submit", async (event) => { event.preventDefault(); const ids = String(new FormData(event.currentTarget).get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean); try { await api("profile_archive_orders", { ids }); closeModal(); await refresh(false); showToast("Pedidos archivados."); } catch (error) { showToast(error.message); } });
 }
 
 function updateLocalOrder(id, changes) {
-  const transform = (order) => order.id !== id ? order : { ...order, ...changes, notas: changes.appendNote ? [order.notas, `• ${state.session.name}: ${changes.appendNote}`].filter(Boolean).join("\n") : order.notas };
-  state.data = { ...state.data, myOrders: (state.data.myOrders || []).map(transform), teamCritical: (state.data.teamCritical || []).map(transform), allOrders: (state.data.allOrders || []).map(transform) };
+  const transform = (order) => order.id !== id ? order : { ...order, ...changes, comentarioCierre: Object.prototype.hasOwnProperty.call(changes, "closeComment") ? changes.closeComment : order.comentarioCierre, notas: changes.appendNote ? [order.notas, `• ${state.session.name}: ${changes.appendNote}`].filter(Boolean).join("\n") : order.notas };
+  state.data = { ...state.data, myOrders: (state.data.myOrders || []).map(transform), teamCritical: (state.data.teamCritical || []).map(transform), allOrders: (state.data.allOrders || []).map(transform), finishedOrders: (state.data.finishedOrders || []).map(transform) };
   store.set("pp_profile_data", state.data);
   render();
 }
@@ -177,14 +210,14 @@ document.addEventListener("click", async (event) => {
   const data = button.dataset;
   if (data.action === "close") return closeModal();
   if (data.action === "filter") { state.filter = data.filter; return render(); }
-  if (data.action === "detail") { const order = (state.data.allOrders || []).find((item) => item.id === data.id); if (order) detail(order); return; }
+  if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find((item) => item.id === data.id); if (order) detail(order); return; }
   if (data.action === "new-order") return formOrder();
   if (data.action === "new-user") return formUser();
   if (data.action === "note") return formNote(data.id);
   if (data.action === "archive") return formArchive();
   if (data.action === "enable-push") return enablePush();
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
-  if (data.action === "progress") return saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
+  if (data.action === "progress") return data.state === "Terminado" ? formCloseOrder(data.id) : saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
   if (data.action === "toggle-ready") return saveUpdate(data.id, { [data.key]: data.value }, "Preparación actualizada.");
   try {
     if (data.action === "assign") return saveUpdate(data.id, { responsable: $("#assign-select").value }, "Responsable actualizado.");
