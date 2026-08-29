@@ -1,4 +1,4 @@
-const CACHE = "prioridad-produccion-perfiles-v9";
+const CACHE_NAME = 'prioridad-v13';
 const ASSETS = ["./","./index.html","./styles.css","./app-registrar-fix.js","./manifest.webmanifest","./icons/icon-192.png","./icons/icon-512.png"];
 try {
   importScripts("./firebase-config.js");
