@@ -8,7 +8,10 @@ const store = {
 const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: store.get("pp_frequent_clients", [
-    { name: "Carolai Toppers", phone: "584120000000" }
+    { name: "Carolai Toppers", phone: "04120000000" }
+  ]),
+  frequentTypes: store.get("pp_frequent_types", [
+    "Topper Acrílico", "DTF", "Camisas", "Impresiones", "Sublimación"
   ]),
   screen: "now",
   filter: "all",
@@ -33,12 +36,13 @@ const durationLabel = (order) => {
   return "Aún no iniciado";
 };
 
-// Formatea el teléfono para que abra el chat directo de WhatsApp automáticamente (añade el código 58 si falta)
+// Formatea el teléfono para que abra el chat directo de WhatsApp (añade prefijo venezolano 58 si no lo tiene)
 function cleanPhoneNumber(phone = "") {
   let num = String(phone).replace(/\D/g, "");
   if (!num) return "";
   if (num.startsWith("04")) num = "58" + num.slice(1);
   else if (num.startsWith("4") && num.length === 10) num = "58" + num;
+  else if (num.length === 10 && !num.startsWith("58")) num = "58" + num;
   return num;
 }
 
@@ -137,6 +141,16 @@ function settingsView() {
     </div>
   `).join("");
 
+  const ftList = state.frequentTypes.map((t, index) => `
+    <div class="user-card">
+      <div><strong>${escapeHtml(t)}</strong></div>
+      <div style="display:flex; gap:6px;">
+        <button class="secondary-button" data-action="edit-ft" data-index="${index}">✏️</button>
+        <button class="secondary-button" style="border-color:red; color:red;" data-action="delete-ft" data-index="${index}">🗑</button>
+      </div>
+    </div>
+  `).join("");
+
   return `
     <div class="card settings-card">
       <h3>Mi espacio</h3>
@@ -149,12 +163,16 @@ function settingsView() {
     <button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button>
     <div class="user-list" style="margin-top:10px;">${fcList || '<div class="team-note">No hay clientes guardados.</div>'}</div>
 
+    <p class="section-heading">TIPOS DE TRABAJO FRECUENTES</p>
+    <button class="primary-button" data-action="new-frequent-type">＋ Agregar Tipo de Trabajo</button>
+    <div class="user-list" style="margin-top:10px;">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
+
     ${isManager() ? `
       <p class="section-heading">ACCESOS DEL EQUIPO</p>
       <button class="primary-button" data-action="new-user">＋ Crear perfil</button>
       <div class="user-list">${accessList}</div>
       <p class="section-heading">LIMPIEZA DE PRUEBAS</p>
-      <button class="secondary-button" style="border-color:orange; color:orange;" data-action="archive">🗑 Eliminar pedidos que contengan "prueba"</button>
+      <button class="secondary-button" style="border-color:orange; color:orange;" data-action="archive">🗑 Eliminar pedidos de prueba</button>
     ` : ""}
   `;
 }
@@ -178,13 +196,14 @@ function detail(order) {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
   const availableStates = ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado"];
   
-  const rawPhone = cleanPhoneNumber(order.telefono || order.phone || "");
+  const phoneVal = order.telefono || order.phone || order.celular || "";
+  const rawPhone = cleanPhoneNumber(phoneVal);
   const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} ya está listo. ¡Ya puedes pasar a retirarlo!`);
   
-  // Utiliza el endpoint universal api.whatsapp.com/send para abrir el chat de la persona directamente
+  // Utiliza el formato universal directo wa.me para abrir el chat del contacto automáticamente
   const whatsappUrl = rawPhone 
-    ? `https://api.whatsapp.com/send?phone=${rawPhone}&text=${whatsappMsg}` 
-    : `https://api.whatsapp.com/send?text=${whatsappMsg}`;
+    ? `https://wa.me/${rawPhone}?text=${whatsappMsg}` 
+    : `https://wa.me/?text=${whatsappMsg}`;
 
   openModal(`
     <div class="modal-head">
@@ -200,14 +219,14 @@ function detail(order) {
       <div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div>
       <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div>
-      <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || order.phone || "No registrado")}</strong></div>
+      <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(phoneVal || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
       <div class="detail-row"><span>NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div>
     </div>
 
     <div class="actions" style="margin-top:12px;">
-      <a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#25D366; color:white; border:none; padding:8px 12px; border-radius:6px; font-weight:bold;">
-        📲 Notificar por WhatsApp ${rawPhone ? `a ${order.cliente}` : ''}
+      <a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#25D366; color:white; border:none; padding:10px; border-radius:6px; font-weight:bold; width:100%;">
+        📲 Notificar por WhatsApp ${rawPhone ? `a ${escapeHtml(order.cliente)}` : ''}
       </a>
     </div>
 
@@ -246,6 +265,7 @@ function detail(order) {
 function formOrder() {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
   const clients = state.frequentClients;
+  const types = state.frequentTypes;
 
   openModal(`
     <div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div>
@@ -262,8 +282,19 @@ function formOrder() {
 
       <label class="field"><span class="field-label">CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Ej. Carolai Toppers"></label>
       <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input id="input-telefono" name="telefono" placeholder="Ej. 04121234567"></label>
-      <label class="field"><span class="field-label">TIPO</span><input name="tipo" required placeholder="Ej. Topper Acrílico"></label>
       
+      <label class="field">
+        <span class="field-label">TIPO DE TRABAJO</span>
+        ${types.length ? `
+          <select id="tipo-select" style="margin-bottom:6px;">
+            <option value="">-- Seleccionar tipo frecuente --</option>
+            ${types.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+            <option value="__CUSTOM__">✏️ Escribir otro manualmente...</option>
+          </select>
+        ` : ''}
+        <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico / DTF">
+      </label>
+
       <div class="form-inline">
         <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label>
         <label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label>
@@ -293,6 +324,19 @@ function formOrder() {
         const selected = clients[idx];
         $("#input-cliente").value = selected.name;
         $("#input-telefono").value = selected.phone;
+      }
+    });
+  }
+
+  const selectTipo = $("#tipo-select");
+  if (selectTipo) {
+    selectTipo.addEventListener("change", (e) => {
+      const val = e.target.value;
+      if (val && val !== "__CUSTOM__") {
+        $("#input-tipo").value = val;
+      } else if (val === "__CUSTOM__") {
+        $("#input-tipo").value = "";
+        $("#input-tipo").focus();
       }
     });
   }
@@ -345,6 +389,35 @@ function formFrequentClient(editIndex = null) {
     closeModal();
     render();
     showToast(isEdit ? "Cliente actualizado." : "Cliente guardado.");
+  });
+}
+
+function formFrequentType(editIndex = null) {
+  const isEdit = editIndex !== null;
+  const current = isEdit ? state.frequentTypes[editIndex] : "";
+
+  openModal(`
+    <div class="modal-head"><h2>${isEdit ? "Editar" : "Nuevo"} Tipo de Trabajo</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="ft-form" class="form-grid">
+      <label class="field"><span class="field-label">NOMBRE DEL TIPO DE TRABAJO</span><input name="typeName" value="${escapeHtml(current)}" required placeholder="Ej. DTF / Sublimación"></label>
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">Guardar</button>
+      </div>
+    </form>
+  `);
+
+  $("#ft-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const val = new FormData(e.currentTarget).get("typeName").trim();
+    if (!val) return;
+    if (isEdit) state.frequentTypes[editIndex] = val;
+    else state.frequentTypes.push(val);
+
+    store.set("pp_frequent_types", state.frequentTypes);
+    closeModal();
+    render();
+    showToast(isEdit ? "Tipo de trabajo guardado." : "Tipo de trabajo guardado.");
   });
 }
 
@@ -412,8 +485,19 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  if (data.action === "new-frequent-type") return formFrequentType();
+  if (data.action === "edit-ft") return formFrequentType(Number(data.index));
+  if (data.action === "delete-ft") {
+    if (window.confirm("¿Deseas eliminar este tipo de trabajo?")) {
+      state.frequentTypes.splice(Number(data.index), 1);
+      store.set("pp_frequent_types", state.frequentTypes);
+      render();
+      showToast("Tipo de trabajo eliminado.");
+    }
+    return;
+  }
   if (data.action === "archive") {
-    if (window.confirm("¿Deseas eliminar de la hoja de Google Sheets todos los pedidos que digan 'prueba'?")) {
+    if (window.confirm("¿Deseas eliminar de la hoja de Google Sheets todos los pedidos de prueba?")) {
       try {
         showToast("Eliminando registros de prueba…");
         const res = await api("profile_archive_test_orders");
