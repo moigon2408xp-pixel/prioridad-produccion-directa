@@ -15,7 +15,7 @@ const state = {
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 const active = (order) => !["Entregado", "Cancelado"].includes(order.estado);
-const operable = (order) => active(order) && !["Terminado", "Listo para entregar"].includes(order.estado);
+const operable = (order) => active(order) && order.estado !== "Terminado";
 const hoursRemaining = (order) => order.entrega ? (new Date(order.entrega) - Date.now()) / 3600000 : Infinity;
 const priority = (order) => order.estado === "Bloqueado" || order.diseno === "No" || order.material === "No" ? "blocked" : hoursRemaining(order) <= 4 ? "now" : hoursRemaining(order) <= 24 ? "today" : "later";
 const priorityLabel = { blocked: "Bloqueado", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
@@ -23,7 +23,12 @@ const orderByPriority = (left, right) => ({ blocked: 0, now: 1, today: 2, later:
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 const isManager = () => state.session?.role === "manager";
 const formatDate = (value) => { const date = new Date(value); return value && !Number.isNaN(date) ? new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Sin fecha"; };
-const durationLabel = (order) => order.finProduccion ? `${Math.round(Number(order.duracionRealMin || 0))} min reales` : order.inicioProduccion ? "En proceso" : "Aún no iniciado";
+const durationLabel = (order) => {
+  if (order.estado === "Pausado") return "Pausado temporalmente";
+  if (order.finProduccion) return `${Math.round(Number(order.duracionRealMin || 0))} min reales`;
+  if (order.inicioProduccion) return "En proceso";
+  return "Aún no iniciado";
+};
 
 async function enablePush() {
   try {
@@ -87,7 +92,7 @@ function nowView() {
   const myOpenOrders = (state.data.myOrders || []).filter(operable).sort(orderByPriority);
   const next = myOpenOrders[0];
   const critical = (state.data.teamCritical || []).sort(orderByPriority);
-  return `${state.offline ? '<p class="offline">Mostrando la última información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong>Las nuevas asignaciones aparecerán aquí.</div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay bloqueos ni vencimientos inmediatos.</div>'}</div>`;
+  return `${state.offline ? '<p class="offline">Mostrando la última información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong>Las nuevas asignaciones aparecerán aquí.</div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
 }
 
 function queueView() {
@@ -98,8 +103,8 @@ function queueView() {
 
 function historyView() {
   const orders = (state.data.finishedOrders || []).sort((left, right) => new Date(right.entregadoEn || right.finProduccion || 0) - new Date(left.entregadoEn || left.finProduccion || 0));
-  if (!orders.length) return '<div class="empty"><strong>Aún no hay proyectos terminados</strong>Los pedidos aparecerán aquí al marcarlos como terminados, listos para entregar o entregados.</div>';
-  return `<p class="team-note">Consulta la duración real, la entrega y las fotografías de cada proyecto finalizado.</p><div class="order-list">${orders.map((order) => { const links = String(order.evidenciasDrive || '').split("\n").filter(Boolean); const delay = Number(order.retrasoMin || 0); return `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente || 'Sin cliente')}</h3><p>${escapeHtml(order.tipo || 'Sin tipo')}</p></div><span class="priority priority-${order.estado === 'Entregado' ? 'later' : 'today'}">${escapeHtml(order.estado)}</span></div><div class="meta">Responsable: ${escapeHtml(order.responsable || 'Sin asignar')}<br/>Finalizado: ${escapeHtml(formatDate(order.finProduccion))}<br/>Duración: ${escapeHtml(durationLabel(order))}<br/>Entrega: ${escapeHtml(formatDate(order.entregadoEn))}${order.entregadoEn ? ` · ${delay ? `${delay} min de retraso` : 'A tiempo'}` : ''}<br/>Cierre: ${escapeHtml(order.comentarioCierre || 'Sin comentario')}</div>${links.length ? `<div class="actions">${links.map((url, index) => `<a class="secondary-button" href="${escapeHtml(url)}" target="_blank" rel="noopener">Ver foto ${index + 1}</a>`).join('')}</div>` : '<p class="team-note">Sin fotos adjuntas.</p>'}</article>`; }).join('')}</div>`;
+  if (!orders.length) return '<div class="empty"><strong>Aún no hay proyectos terminados</strong>Los pedidos aparecerán aquí al marcarlos como terminados o entregados.</div>';
+  return `<p class="team-note">Consulta la duración real, la fecha de entrega y las fotografías de cada proyecto finalizado.</p><div class="order-list">${orders.map((order) => { const links = String(order.evidenciasDrive || '').split("\n").filter(Boolean); const delay = Number(order.retrasoMin || 0); return `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente || 'Sin cliente')}</h3><p>${escapeHtml(order.tipo || 'Sin tipo')}</p></div><span class="priority priority-${order.estado === 'Entregado' ? 'later' : 'today'}">${escapeHtml(order.estado)}</span></div><div class="meta">Responsable: ${escapeHtml(order.responsable || 'Sin asignar')}<br/>Finalizado: ${escapeHtml(formatDate(order.finProduccion))}<br/>Duración real: ${escapeHtml(durationLabel(order))}<br/>Entrega: ${escapeHtml(formatDate(order.entregadoEn))}${order.entregadoEn ? ` · ${delay > 0 ? `${delay} min de retraso` : 'A tiempo'}` : ''}<br/>Cierre: ${escapeHtml(order.comentarioCierre || 'Sin comentario')}</div>${links.length ? `<div class="actions">${links.map((url, index) => `<a class="secondary-button" href="${escapeHtml(url)}" target="_blank" rel="noopener">Ver foto ${index + 1}</a>`).join('')}</div>` : '<p class="team-note">Sin fotos adjuntas.</p>'}</article>`; }).join('')}</div>`;
 }
 
 function teamView() {
@@ -134,17 +139,76 @@ function closeModal() { $("#modal").close(); }
 
 function detail(order) {
   const editable = isLead() || order.responsable === state.session.name;
+  const isDelivered = order.estado === "Entregado";
+  const canModifyState = editable && (!isDelivered || isLead());
+  
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
-  const workerStates = ["En proceso", "Terminado", "Listo para entregar"];
-  const leadStates = ["Pendiente", "En proceso", "Terminado", "Listo para entregar", "Entregado", "Bloqueado"];
-  const states = isLead() ? leadStates : workerStates;
-  openModal(`<div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div><p style="color:var(--blue);font-weight:800">${escapeHtml(order.tipo)}</p><div class="detail-grid"><div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div><div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div><div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div><div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div><div class="detail-row"><span>NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div><div class="detail-row"><span>PREPARACIÓN</span><strong>Diseño: ${escapeHtml(order.diseno)} · Material: ${escapeHtml(order.material)}</strong></div></div>${isLead() ? `<label class="field"><span class="field-label">ASIGNAR RESPONSABLE</span><select id="assign-select"><option value="">Sin asignar</option>${people.map((user) => `<option ${user.name === order.responsable ? "selected" : ""}>${escapeHtml(user.name)}</option>`).join("")}</select></label><button class="primary-button" data-action="assign" data-id="${escapeHtml(order.id)}">Guardar responsable</button>` : ""}${editable ? `<p class="section-heading">AVANCE DEL TRABAJO</p><div class="toggle-actions">${states.filter((item) => item !== order.estado).map((item) => `<button data-action="progress" data-id="${escapeHtml(order.id)}" data-state="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div><p class="section-heading">PREPARACIÓN</p><div class="toggle-actions"><button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="diseno" data-value="${order.diseno === "Sí" ? "No" : "Sí"}">Diseño ${order.diseno === "Sí" ? "pendiente" : "listo"}</button><button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="material" data-value="${order.material === "Sí" ? "No" : "Sí"}">Material ${order.material === "Sí" ? "pendiente" : "listo"}</button><button data-action="note" data-id="${escapeHtml(order.id)}">Añadir nota</button></div>` : '<div class="team-note">Este pedido pertenece a otra persona.</div>'}`);
+  const availableStates = ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado"];
+  
+  const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} (${order.id}) se encuentra en estado: ${order.estado}.`);
+  const whatsappUrl = `https://wa.me/?text=${whatsappMsg}`;
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">${escapeHtml(order.id)}</p>
+        <h2>${escapeHtml(order.cliente)}</h2>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <p style="color:var(--blue);font-weight:800">${escapeHtml(order.tipo)}</p>
+    
+    <div class="detail-grid">
+      <div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div>
+      <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
+      <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div>
+      <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
+      <div class="detail-row"><span>HISTORIAL NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div>
+      <div class="detail-row"><span>PREPARACIÓN</span><strong>Diseño: ${escapeHtml(order.diseno)} · Material: ${escapeHtml(order.material)}</strong></div>
+    </div>
+
+    <div class="actions" style="margin-top:12px;">
+      <a href="${whatsappUrl}" target="_blank" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+        📲 Compartir en WhatsApp
+      </a>
+    </div>
+
+    ${isLead() ? `
+      <label class="field" style="margin-top:12px;">
+        <span class="field-label">ASIGNAR RESPONSABLE</span>
+        <select id="assign-select">
+          <option value="">Sin asignar</option>
+          ${people.map((user) => `<option ${user.name === order.responsable ? "selected" : ""}>${escapeHtml(user.name)}</option>`).join("")}
+        </select>
+      </label>
+      <button class="primary-button" data-action="assign" data-id="${escapeHtml(order.id)}">Guardar responsable</button>
+    ` : ""}
+
+    ${canModifyState ? `
+      <p class="section-heading">CAMBIAR ESTADO</p>
+      <div class="toggle-actions">
+        ${availableStates.filter((item) => item !== order.estado).map((item) => `<button data-action="progress" data-id="${escapeHtml(order.id)}" data-state="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}
+      </div>
+      
+      <p class="section-heading">PREPARACIÓN Y APUNTES</p>
+      <div class="toggle-actions">
+        <button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="diseno" data-value="${order.diseno === "Sí" ? "No" : "Sí"}">Diseño ${order.diseno === "Sí" ? "pendiente" : "listo"}</button>
+        <button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="material" data-value="${order.material === "Sí" ? "No" : "Sí"}">Material ${order.material === "Sí" ? "pendiente" : "listo"}</button>
+        <button data-action="note" data-id="${escapeHtml(order.id)}">Añadir nota</button>
+      </div>
+    ` : '<div class="team-note" style="margin-top:12px;">Este pedido está entregado y cerrado. Solo un Jefe/Manager puede reabrirlo.</div>'}
+
+    ${isManager() ? `
+      <p class="section-heading" style="color:var(--red, red);">ADMINISTRACIÓN</p>
+      <button class="secondary-button" style="border-color:red; color:red;" data-action="delete-single-order" data-id="${escapeHtml(order.id)}">🗑 Eliminar pedido definitivamente</button>
+    ` : ""}
+  `);
 }
 
 function formOrder() {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
-  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid" novalidate><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label></div><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS INICIALES</span><textarea name="notas"></textarea></label><p class="team-note">El tiempo real se calculará desde que el pedido pase a «En proceso» hasta que se marque «Terminado».</p><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button type="submit" class="primary-button">Registrar</button></div></form>`);
-  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button:not([type=button])") || form.querySelector(".primary-button") || form.querySelector("button"); const progressTimer = setTimeout(() => { button.textContent = "Esperando respuesta de Google Sheets…"; }, 5000); button.disabled = true; button.textContent = "Registrando…"; try { const values = Object.fromEntries(new FormData(form)); if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa cliente y tipo de trabajo."); if (!String(values.fechaEntrega || "").trim() || !String(values.horaEntrega || "").trim()) throw new Error("Completa fecha y hora de entrega."); await api("profile_create_order", { form: values }); closeModal(); await refresh(false); showToast("Pedido registrado correctamente."); } catch (error) { button.disabled = false; button.textContent = "Registrar"; window.alert(`No se pudo registrar el pedido. No vuelvas a pulsar el botón hasta revisar este mensaje.\n\nDetalle: ${error.message}`); } finally { clearTimeout(progressTimer); } });
+  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid" novalidate><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label></div><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS INICIALES</span><textarea name="notas"></textarea></label><p class="team-note">El tiempo real descontará los lapsos en «Pausado».</p><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button type="submit" class="primary-button">Registrar</button></div></form>`);
+  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button:not([type=button])") || form.querySelector(".primary-button") || form.querySelector("button"); const progressTimer = setTimeout(() => { button.textContent = "Esperando respuesta de Google Sheets…"; }, 5000); button.disabled = true; button.textContent = "Registrando…"; try { const values = Object.fromEntries(new FormData(form)); if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa cliente y tipo de trabajo."); if (!String(values.fechaEntrega || "").trim() || !String(values.horaEntrega || "").trim()) throw new Error("Completa fecha y hora de entrega."); await api("profile_create_order", { form: values }); closeModal(); await refresh(false); showToast("Pedido registrado correctamente."); } catch (error) { button.disabled = false; button.textContent = "Registrar"; window.alert(`No se pudo registrar el pedido: ${error.message}`); } finally { clearTimeout(progressTimer); } });
 }
 
 function formUser() {
@@ -158,8 +222,8 @@ function formNote(id) {
 }
 
 function formCloseOrder(id) {
-  openModal(`<div class="modal-head"><h2>Cerrar producción</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Se guardará el tiempo real desde «En proceso». Indica cualquier imprevisto, detalle de entrega o aclaración final.</p><form id="close-order-form" class="form-grid"><label class="field"><span class="field-label">COMENTARIO DE CIERRE</span><textarea name="closeComment" placeholder="Ej. Se terminó sin imprevistos."></textarea></label><label class="field"><span class="field-label">FOTOS DE EVIDENCIA (OPCIONAL)</span><input id="evidence-files" type="file" accept="image/*" capture="environment" multiple><small>Máximo tres fotos. Se comprimirán antes de guardarse de forma privada en Drive.</small></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Marcar terminado</button></div></form>`);
-  $("#close-order-form").addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget; const files = [...$("#evidence-files").files]; const closeComment = String(new FormData(form).get("closeComment") || "").trim(); closeModal(); updateLocalOrder(id, { estado: "Terminado", closeComment }); showToast("Marcando pedido como terminado…"); api("profile_update_order", { id, changes: { estado: "Terminado", closeComment } }).then(() => { refresh(false); showToast(files.length ? "Pedido terminado. Guardando fotos…" : "Pedido terminado y tiempo real registrado."); if (files.length) uploadEvidence(id, files).then(async () => { await refresh(false); showToast("Fotos de evidencia guardadas."); }).catch((error) => { showToast("Pedido terminado, pero las fotos no se guardaron."); window.alert(`Las fotos no pudieron guardarse: ${error.message}`); }); }).catch(async (error) => { await refresh(false); showToast("No se pudo confirmar el pedido terminado."); window.alert(`Google Sheets no confirmó el cambio. El pedido se volvió a cargar con la información real.\n\nDetalle: ${error.message}`); }); });
+  openModal(`<div class="modal-head"><h2>Cerrar producción</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Se guardará el tiempo real descontando las pausas. Indica cualquier imprevisto o aclaración final.</p><form id="close-order-form" class="form-grid"><label class="field"><span class="field-label">COMENTARIO DE CIERRE</span><textarea name="closeComment" placeholder="Ej. Se terminó sin imprevistos."></textarea></label><label class="field"><span class="field-label">FOTOS DE EVIDENCIA (OPCIONAL)</span><input id="evidence-files" type="file" accept="image/*" capture="environment" multiple><small>Máximo tres fotos.</small></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Marcar terminado</button></div></form>`);
+  $("#close-order-form").addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget; const files = [...$("#evidence-files").files]; const closeComment = String(new FormData(form).get("closeComment") || "").trim(); closeModal(); updateLocalOrder(id, { estado: "Terminado", closeComment }); showToast("Marcando pedido como terminado…"); api("profile_update_order", { id, changes: { estado: "Terminado", closeComment } }).then(() => { refresh(false); showToast(files.length ? "Pedido terminado. Guardando fotos…" : "Pedido terminado y tiempo real registrado."); if (files.length) uploadEvidence(id, files).then(async () => { await refresh(false); showToast("Fotos de evidencia guardadas."); }).catch((error) => { showToast("Pedido terminado, pero las fotos no se guardaron."); window.alert(`Las fotos no pudieron guardarse: ${error.message}`); }); }).catch(async (error) => { await refresh(false); showToast("No se pudo confirmar el pedido terminado."); window.alert(`Error al actualizar: ${error.message}`); }); });
 }
 
 async function imageAsJpegData(file) {
@@ -168,7 +232,7 @@ async function imageAsJpegData(file) {
   const scale = Math.min(1, maxSide / Math.max(source.naturalWidth, source.naturalHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(source.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(source.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(source.naturalHeight * scale));
   canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.78);
 }
@@ -187,28 +251,16 @@ async function uploadEvidence(pedidoId, archivosImagen, tokenSesion = state.sess
       }
     }
 
-    const payloadData = {
-      action: 'profile_upload_evidence',
-      token: tokenSesion || '',
-      id: pedidoId,
-      images: imagenesBase64
-    };
-
+    const payloadData = { action: 'profile_upload_evidence', token: tokenSesion || '', id: pedidoId, images: imagenesBase64 };
     const response = await fetch(window.PRIORIDAD_CONFIG.appsScriptUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payloadData)
     });
 
     const resultado = await response.json();
-
-    if (resultado.ok) {
-      return resultado;
-    } else {
-      throw new Error(resultado.error || 'Error al guardar evidencias');
-    }
+    if (resultado.ok) return resultado;
+    throw new Error(resultado.error || 'Error al guardar evidencias');
   } catch (error) {
     console.error('Error en uploadEvidence:', error);
     throw error;
@@ -219,7 +271,7 @@ window.uploadEvidence = uploadEvidence;
 window.subirEvidenciasPedido = uploadEvidence;
 
 function formArchive() {
-  openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe solo los ID de prueba, separados por comas. Se moverán a la pestaña Pedidos_Archivo; no se eliminarán definitivamente.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
+  openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe los ID separados por comas para moverlos al archivo.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
   $("#archive-form").addEventListener("submit", async (event) => { event.preventDefault(); const ids = String(new FormData(event.currentTarget).get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean); try { await api("profile_archive_orders", { ids }); closeModal(); await refresh(false); showToast("Pedidos archivados."); } catch (error) { showToast(error.message); } });
 }
 
@@ -254,6 +306,21 @@ document.addEventListener("click", async (event) => {
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
   if (data.action === "progress") return data.state === "Terminado" ? formCloseOrder(data.id) : saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
   if (data.action === "toggle-ready") return saveUpdate(data.id, { [data.key]: data.value }, "Preparación actualizada.");
+  
+  if (data.action === "delete-single-order") {
+    if (window.confirm(`¿Estás seguro de eliminar permanentemente el pedido ${data.id}?`)) {
+      try {
+        await api("profile_delete_order", { id: data.id });
+        closeModal();
+        await refresh(false);
+        showToast("Pedido eliminado correctamente.");
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+    return;
+  }
+
   try {
     if (data.action === "assign") return saveUpdate(data.id, { responsable: $("#assign-select").value }, "Responsable actualizado.");
     if (data.action === "toggle-user") { await api("profile_update_user", { name: data.name, active: data.active === "true" }); await refresh(false); showToast("Acceso actualizado."); }
