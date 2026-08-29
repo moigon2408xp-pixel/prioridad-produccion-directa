@@ -182,12 +182,28 @@ function fileToBase64(file) {
   });
 }
 
-async function subirEvidenciasPedido(pedidoId, tokenSesion, archivosImagen) {
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadEvidence(pedidoId, tokenSesion, archivosImagen) {
   try {
     const imagenesBase64 = [];
-    for (const file of archivosImagen) {
-      const base64Data = await fileToBase64(file);
-      imagenesBase64.push({ data: base64Data });
+    if (archivosImagen && archivosImagen.length > 0) {
+      for (const file of archivosImagen) {
+        // Si ya es base64 o si es un File de HTML
+        if (typeof file === 'string') {
+          imagenesBase64.push({ data: file });
+        } else {
+          const base64Data = await fileToBase64(file);
+          imagenesBase64.push({ data: base64Data });
+        }
+      }
     }
 
     const payloadData = {
@@ -208,14 +224,18 @@ async function subirEvidenciasPedido(pedidoId, tokenSesion, archivosImagen) {
     const resultado = await response.json();
 
     if (resultado.ok) {
-      alert('¡Fotografías adjuntadas correctamente!');
+      return resultado;
     } else {
-      alert('Error: ' + resultado.error);
+      throw new Error(resultado.error || 'Error al guardar evidencias');
     }
   } catch (error) {
-    alert('Ocurrió un fallo al conectar con el servidor.');
+    console.error('Error en uploadEvidence:', error);
+    throw error;
   }
 }
+
+// Alias de respaldo para evitar incompatibilidades de nombre
+const subirEvidenciasPedido = uploadEvidence;
 
 function formArchive() {
   openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe solo los ID de prueba, separados por comas. Se moverán a la pestaña Pedidos_Archivo; no se eliminarán definitivamente.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
