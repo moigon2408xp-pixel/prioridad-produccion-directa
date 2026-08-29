@@ -144,7 +144,7 @@ function detail(order) {
 function formOrder() {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
   openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid" novalidate><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label></div><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS INICIALES</span><textarea name="notas"></textarea></label><p class="team-note">El tiempo real se calculará desde que el pedido pase a «En proceso» hasta que se marque «Terminado».</p><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button type="submit" class="primary-button">Registrar</button></div></form>`);
-  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button:not([type=button])") || form.querySelector(".primary-button") || form.querySelector("button"); const progressTimer = setTimeout(() => { button.textContent = "Esperando respuesta de Google Sheets…"; }, 5000); button.disabled = true; button.textContent = "Registrando…"; try { const values = Object.fromEntries(new FormData(form)); if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa cliente y tipo de trabajo."); if (!String(values.fechaEntrega || "").trim() || !String(values.horaEntrega || "").trim()) throw new Error("Completa fecha y hora de entrega."); await api("profile_create_order", { form: values }); closeModal(); await refresh(false); showToast("Pedido registrado correctamente."); } catch (error) { button.disabled = false; button.textContent = "Registrar"; window.alert(`No se pudo registrar el pedido. No vuelvas a pulsar el botón hasta revisar este mensaje.\\n\\nDetalle: ${error.message}`); } finally { clearTimeout(progressTimer); } });
+  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button:not([type=button])") || form.querySelector(".primary-button") || form.querySelector("button"); const progressTimer = setTimeout(() => { button.textContent = "Esperando respuesta de Google Sheets…"; }, 5000); button.disabled = true; button.textContent = "Registrando…"; try { const values = Object.fromEntries(new FormData(form)); if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa cliente y tipo de trabajo."); if (!String(values.fechaEntrega || "").trim() || !String(values.horaEntrega || "").trim()) throw new Error("Completa fecha y hora de entrega."); await api("profile_create_order", { form: values }); closeModal(); await refresh(false); showToast("Pedido registrado correctamente."); } catch (error) { button.disabled = false; button.textContent = "Registrar"; window.alert(`No se pudo registrar el pedido. No vuelvas a pulsar el botón hasta revisar este mensaje.\n\nDetalle: ${error.message}`); } finally { clearTimeout(progressTimer); } });
 }
 
 function formUser() {
@@ -168,39 +168,12 @@ async function imageAsJpegData(file) {
   const scale = Math.min(1, maxSide / Math.max(source.naturalWidth, source.naturalHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(source.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(source.naturalHeight * scale));
+  canvas.height = Math.max(1, Math.round(source.naturalWidth * scale));
   canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.78);
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-async function uploadEvidence(pedidoId, tokenSesion, archivosImagen) {
+async function uploadEvidence(pedidoId, archivosImagen, tokenSesion = state.session?.token) {
   try {
     const imagenesBase64 = [];
     if (archivosImagen && archivosImagen.length > 0) {
@@ -208,15 +181,15 @@ async function uploadEvidence(pedidoId, tokenSesion, archivosImagen) {
         if (typeof file === 'string') {
           imagenesBase64.push({ data: file });
         } else {
-          const base64Data = await fileToBase64(file);
-          imagenesBase64.push({ data: base64Data });
+          const compressedData = await imageAsJpegData(file);
+          imagenesBase64.push({ data: compressedData });
         }
       }
     }
 
     const payloadData = {
       action: 'profile_upload_evidence',
-      token: tokenSesion,
+      token: tokenSesion || '',
       id: pedidoId,
       images: imagenesBase64
     };
@@ -242,7 +215,6 @@ async function uploadEvidence(pedidoId, tokenSesion, archivosImagen) {
   }
 }
 
-// Asignación al ámbito global para que la interfaz lo reconozca
 window.uploadEvidence = uploadEvidence;
 window.subirEvidenciasPedido = uploadEvidence;
 
