@@ -9,6 +9,7 @@ const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: store.get("pp_frequent_clients", []),
   frequentTypes: store.get("pp_frequent_types", ["Topper Acrílico", "DTF", "Camisas", "Impresiones", "Sublimación"]),
+  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} (Código: {id}) ya se encuentra listo para entrega."),
   screen: "now",
   filter: "all",
   offline: false,
@@ -112,7 +113,7 @@ async function refresh(showMessage = true) {
 
 function priorityPill(order) { const value = priority(order); return `<span class="priority priority-${value}">${priorityLabel[value]}</span>`; }
 function orderCard(order, position) {
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: ${escapeHtml(order.estado || "Pendiente")}<br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Teléfono: ${escapeHtml(order.telefono || "No registrado")}</div></button>`;
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: <strong>${escapeHtml(order.estado || "Pendiente")}</strong><br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Teléfono: ${escapeHtml(order.telefono || "No registrado")}</div></button>`;
 }
 
 function nowView() {
@@ -149,6 +150,18 @@ function settingsView() {
       <div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div>
       <button class="secondary-button" data-action="logout">Cerrar sesión</button>
     </div>
+
+    ${isLead() ? `
+      <p class="section-heading">MENSAJE DE WHATSAPP (PLANTILLA)</p>
+      <div class="card settings-card" style="margin-bottom:15px;">
+        <label class="field">
+          <span class="field-label">PLANTILLA DEL MENSAJE</span>
+          <textarea id="wa-template-input" style="min-height:80px;">${escapeHtml(state.waTemplate)}</textarea>
+          <small style="color:#666; font-size:11px; margin-top:4px;">Variables disponibles: <code>{cliente}</code>, <code>{tipo}</code>, <code>{id}</code>, <code>{estado}</code></small>
+        </label>
+        <button class="primary-button" id="save-wa-template" style="margin-top:8px;">Guardar Mensaje WhatsApp</button>
+      </div>
+    ` : ''}
     
     <p class="section-heading">CLIENTES FRECUENTES</p>
     <button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button>
@@ -167,6 +180,18 @@ function render() {
   $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
   $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
   document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.screen === state.screen));
+
+  const saveWaBtn = $("#save-wa-template");
+  if (saveWaBtn) {
+    saveWaBtn.addEventListener("click", () => {
+      const val = $("#wa-template-input").value.trim();
+      if (val) {
+        state.waTemplate = val;
+        store.set("pp_wa_template", val);
+        showToast("Plantilla de WhatsApp guardada.");
+      }
+    });
+  }
 }
 
 function openModal(content) { const modal = $("#modal"); modal.innerHTML = `<div class="modal-content">${content}</div>`; modal.showModal(); }
@@ -175,14 +200,29 @@ function closeModal() { $("#modal").close(); }
 function detail(order) {
   const phoneVal = order.telefono || order.phone || order.celular || "";
   const rawPhone = cleanPhoneNumber(phoneVal);
-  const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} ya está listo.`);
+  
+  // Mensaje dinámico basado en la plantilla de configuración
+  const rawMsg = state.waTemplate
+    .replace(/{cliente}/g, order.cliente || "")
+    .replace(/{tipo}/g, order.tipo || "")
+    .replace(/{id}/g, order.id || "")
+    .replace(/{estado}/g, order.estado || "");
+
+  const whatsappMsg = encodeURIComponent(rawMsg);
   const whatsappUrl = rawPhone ? `https://wa.me/${rawPhone}?text=${whatsappMsg}` : `https://wa.me/?text=${whatsappMsg}`;
+
+  const availableStatuses = ["Pendiente", "En proceso", "Pausado", "Bloqueado", "Terminado", "Entregado", "Cancelado"];
 
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="detail-grid">
       <div class="detail-row"><span>TIPO</span><strong>${escapeHtml(order.tipo)}</strong></div>
-      <div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div>
+      <div class="detail-row">
+        <span>CAMBIAR ESTADO</span>
+        <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; font-weight:bold; border-radius:6px; border:1px solid #ccc;">
+          ${availableStatuses.map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
+        </select>
+      </div>
       <div class="detail-row"><span>FECHA Y HORA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(phoneVal || "No registrado")}</strong></div>
@@ -195,10 +235,27 @@ function detail(order) {
     </div>
     ${isLead() ? `<p class="section-heading" style="color:red;">ADMINISTRACIÓN</p><button class="secondary-button" style="border-color:red; color:red;" data-action="delete-single-order" data-id="${escapeHtml(order.id)}">🗑 Eliminar pedido</button>` : ""}
   `);
+
+  const selectStatus = $("#status-change-select");
+  if (selectStatus) {
+    selectStatus.addEventListener("change", async (e) => {
+      const newStatus = e.target.value;
+      selectStatus.disabled = true;
+      try {
+        await api("profile_update_order", { id: order.id, changes: { estado: newStatus } });
+        order.estado = newStatus;
+        showToast(`Estado actualizado a ${newStatus}`);
+        closeModal();
+        await refresh(false);
+      } catch (err) {
+        selectStatus.disabled = false;
+        window.alert(`Error al actualizar estado: ${err.message}`);
+      }
+    });
+  }
 }
 
 function formOrder() {
-  // Muestra a todos los usuarios registrados que no estén explícitamente desactivados
   const people = (state.data.users || []).filter((user) => user && user.name && String(user.active) !== "false");
   const clients = state.frequentClients;
   const types = state.frequentTypes;
@@ -309,6 +366,7 @@ function formOrder() {
     }
   });
 }
+
 function formFrequentClient() {
   openModal(`
     <div class="modal-head"><h2>Nuevo Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
