@@ -292,6 +292,41 @@ function promptFinishOrder(order) {
         <span class="field-label">FOTO DE EVIDENCIA (OPCIONAL)</span>
         <input type="file" id="evidencia-file-input" accept="image/*">
         <small style="color:#666;">Se guardará en tu Google Drive automáticamente.</small>
+        // Capturar el formulario que acabas de renderizar
+  const form = document.getElementById("finish-order-form");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // Deshabilitar botón mientras guarda
+    const btnSubmit = form.querySelector('button[type="submit"]');
+    if (btnSubmit) {
+      btnSubmit.disabled = true;
+      btnSubmit.innerText = "Guardando...";
+    }
+
+    const comentario = form.elements["comentarioCierre"] ? form.elements["comentarioCierre"].value : "";
+    const fileInput = document.getElementById("evidencia-file-input");
+    const fotosArray = [];
+
+    // Procesar las imágenes seleccionadas
+    if (fileInput && fileInput.files.length > 0) {
+      for (const file of fileInput.files) {
+        try {
+          const base64String = await convertirArchivoBase64(file);
+          fotosArray.push({
+            bytes: base64String.split(",")[1], // Extrae los bytes en Base64
+            mimeType: file.type
+          });
+        } catch (err) {
+          console.error("Error al procesar la foto:", err);
+        }
+      }
+    }
+
+    // Enviar a la función global que añadiste en index.html
+    window.enviarCierreOrden(order.id, comentario, fotosArray);
+  });
       </label>
       <div class="modal-footer">
         <button type="button" class="secondary-button" data-action="close">Cancelar</button>
