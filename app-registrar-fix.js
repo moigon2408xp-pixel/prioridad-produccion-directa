@@ -280,6 +280,7 @@ function openModal(content) { const modal = $("#modal"); modal.innerHTML = `<div
 function closeModal() { $("#modal").close(); }
 
 function promptFinishOrder(order) {
+  // 1. DIBUJAR EL MODAL (HTML)
   openModal(`
     <div class="modal-head"><h2>Finalizar Pedido</h2><button class="close-button" data-action="close">×</button></div>
     <form id="finish-order-form" class="form-grid">
@@ -292,13 +293,19 @@ function promptFinishOrder(order) {
         <span class="field-label">FOTO DE EVIDENCIA (OPCIONAL)</span>
         <input type="file" id="evidencia-file-input" accept="image/*">
         <small style="color:#666;">Se guardará en tu Google Drive automáticamente.</small>
-        // Capturar el formulario que acabas de renderizar
+      </label>
+      <div style="margin-top: 1rem; display: flex; gap: 8px;">
+        <button type="submit" class="primary-button">Marcar como Terminado</button>
+      </div>
+    </form>
+  `); // <-- AQUÍ CIERRA OPENMODAL. NO PEGAR CÓDIGO DENTRO DE LAS COMILLAS INVERTIDAS.
+
+  // 2. LÓGICA DE ENVÍO (JAVASCRIPT) - VA AFUERA DE OPENMODAL
   const form = document.getElementById("finish-order-form");
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    // Deshabilitar botón mientras guarda
     const btnSubmit = form.querySelector('button[type="submit"]');
     if (btnSubmit) {
       btnSubmit.disabled = true;
@@ -309,13 +316,12 @@ function promptFinishOrder(order) {
     const fileInput = document.getElementById("evidencia-file-input");
     const fotosArray = [];
 
-    // Procesar las imágenes seleccionadas
     if (fileInput && fileInput.files.length > 0) {
       for (const file of fileInput.files) {
         try {
           const base64String = await convertirArchivoBase64(file);
           fotosArray.push({
-            bytes: base64String.split(",")[1], // Extrae los bytes en Base64
+            bytes: base64String.split(",")[1],
             mimeType: file.type
           });
         } catch (err) {
@@ -324,53 +330,8 @@ function promptFinishOrder(order) {
       }
     }
 
-    // Enviar a la función global que añadiste en index.html
+    // Ejecuta la función del index.html
     window.enviarCierreOrden(order.id, comentario, fotosArray);
-  });
-      </label>
-      <div class="modal-footer">
-        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button" style="background:#2e7d32;">Marcar como Terminado</button>
-      </div>
-    </form>
-  `);
-
-  $("#finish-order-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.currentTarget.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "Subiendo foto y guardando...";
-
-    const comentarioCierre = new FormData(e.currentTarget).get("comentarioCierre").trim();
-    const fileInput = $("#evidencia-file-input");
-    let evidencia = null;
-
-    if (fileInput && fileInput.files.length > 0) {
-      const file = fileInput.files[0];
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result);
-        reader.readAsDataURL(file);
-      });
-      evidencia = { base64, mimeType: file.type };
-    }
-
-    try {
-      await api("profile_update_order", {
-        id: order.id,
-        changes: { estado: "Terminado", comentarioCierre: comentarioCierre },
-        evidencia: evidencia
-      });
-      order.estado = "Terminado";
-      order.comentarioCierre = comentarioCierre;
-      closeModal();
-      await refresh(false);
-      showToast("Pedido finalizado con éxito.");
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "Marcar como Terminado";
-      window.alert(`Error al finalizar pedido: ${err.message}`);
-    }
   });
 }
 
