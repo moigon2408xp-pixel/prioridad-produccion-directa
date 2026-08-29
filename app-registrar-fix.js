@@ -33,8 +33,13 @@ const durationLabel = (order) => {
   return "Aún no iniciado";
 };
 
+// Formatea el teléfono para que abra el chat directo de WhatsApp automáticamente (añade el código 58 si falta)
 function cleanPhoneNumber(phone = "") {
-  return String(phone).replace(/\D/g, "");
+  let num = String(phone).replace(/\D/g, "");
+  if (!num) return "";
+  if (num.startsWith("04")) num = "58" + num.slice(1);
+  else if (num.startsWith("4") && num.length === 10) num = "58" + num;
+  return num;
 }
 
 function showToast(message) {
@@ -118,7 +123,40 @@ function teamView() {
 function settingsView() {
   const session = state.session;
   const accessList = (state.data.users || []).map((user) => `<div class="user-card"><div><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(user.role)} · ${user.active ? "activo" : "inactivo"}</span></div>${user.name !== session.name ? `<button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(user.name)}" data-active="${user.active ? "false" : "true"}">${user.active ? "Desactivar" : "Activar"}</button>` : ""}</div>`).join("");
-  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">CLIENTES FRECUENTES</p><button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button><div class="team-note" style="margin-top:8px;">${state.frequentClients.map(c => `• <strong>${escapeHtml(c.name)}</strong> (${escapeHtml(c.phone)})`).join('<br>') || 'No hay clientes guardados.'}</div>`;
+  
+  const fcList = state.frequentClients.map((c, index) => `
+    <div class="user-card">
+      <div>
+        <strong>${escapeHtml(c.name)}</strong>
+        <span>${escapeHtml(c.phone)}</span>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button class="secondary-button" data-action="edit-fc" data-index="${index}">✏️</button>
+        <button class="secondary-button" style="border-color:red; color:red;" data-action="delete-fc" data-index="${index}">🗑</button>
+      </div>
+    </div>
+  `).join("");
+
+  return `
+    <div class="card settings-card">
+      <h3>Mi espacio</h3>
+      <div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div>
+      <div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div>
+      <button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button>
+    </div>
+    
+    <p class="section-heading">CLIENTES FRECUENTES</p>
+    <button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button>
+    <div class="user-list" style="margin-top:10px;">${fcList || '<div class="team-note">No hay clientes guardados.</div>'}</div>
+
+    ${isManager() ? `
+      <p class="section-heading">ACCESOS DEL EQUIPO</p>
+      <button class="primary-button" data-action="new-user">＋ Crear perfil</button>
+      <div class="user-list">${accessList}</div>
+      <p class="section-heading">LIMPIEZA DE PRUEBAS</p>
+      <button class="secondary-button" style="border-color:orange; color:orange;" data-action="archive">🗑 Eliminar pedidos que contengan "prueba"</button>
+    ` : ""}
+  `;
 }
 
 function render() {
@@ -142,7 +180,11 @@ function detail(order) {
   
   const rawPhone = cleanPhoneNumber(order.telefono || order.phone || "");
   const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} ya está listo. ¡Ya puedes pasar a retirarlo!`);
-  const whatsappUrl = rawPhone ? `https://wa.me/${rawPhone}?text=${whatsappMsg}` : `https://wa.me/?text=${whatsappMsg}`;
+  
+  // Utiliza el endpoint universal api.whatsapp.com/send para abrir el chat de la persona directamente
+  const whatsappUrl = rawPhone 
+    ? `https://api.whatsapp.com/send?phone=${rawPhone}&text=${whatsappMsg}` 
+    : `https://api.whatsapp.com/send?text=${whatsappMsg}`;
 
   openModal(`
     <div class="modal-head">
@@ -164,7 +206,7 @@ function detail(order) {
     </div>
 
     <div class="actions" style="margin-top:12px;">
-      <a href="${whatsappUrl}" target="_blank" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#25D366; color:white; border:none; padding:8px 12px; border-radius:6px; font-weight:bold;">
+      <a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#25D366; color:white; border:none; padding:8px 12px; border-radius:6px; font-weight:bold;">
         📲 Notificar por WhatsApp ${rawPhone ? `a ${order.cliente}` : ''}
       </a>
     </div>
@@ -194,8 +236,8 @@ function detail(order) {
       </div>
     ` : '<div class="team-note" style="margin-top:12px;">Este pedido está entregado. Solo Manager o Jefa pueden reabrirlo.</div>'}
 
-    ${isManager() ? `
-      <p class="section-heading" style="color:var(--red, red);">ADMINISTRACIÓN</p>
+    ${isLead() ? `
+      <p class="section-heading" style="color:red;">ADMINISTRACIÓN</p>
       <button class="secondary-button" style="border-color:red; color:red;" data-action="delete-single-order" data-id="${escapeHtml(order.id)}">🗑 Eliminar pedido definitivamente</button>
     ` : ""}
   `);
@@ -219,7 +261,7 @@ function formOrder() {
       ` : ''}
 
       <label class="field"><span class="field-label">CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Ej. Carolai Toppers"></label>
-      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input id="input-telefono" name="telefono" placeholder="Ej. 584121234567"></label>
+      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input id="input-telefono" name="telefono" placeholder="Ej. 04121234567"></label>
       <label class="field"><span class="field-label">TIPO</span><input name="tipo" required placeholder="Ej. Topper Acrílico"></label>
       
       <div class="form-inline">
@@ -276,26 +318,33 @@ function formOrder() {
   });
 }
 
-function formFrequentClient() {
+function formFrequentClient(editIndex = null) {
+  const isEdit = editIndex !== null;
+  const current = isEdit ? state.frequentClients[editIndex] : { name: "", phone: "" };
+
   openModal(`
-    <div class="modal-head"><h2>Nuevo Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
+    <div class="modal-head"><h2>${isEdit ? "Editar" : "Nuevo"} Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
     <form id="fc-form" class="form-grid">
-      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input name="name" required placeholder="Ej. Carolai Toppers"></label>
-      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input name="phone" required placeholder="Ej. 584121234567"></label>
+      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input name="name" value="${escapeHtml(current.name)}" required placeholder="Ej. Carolai Toppers"></label>
+      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input name="phone" value="${escapeHtml(current.phone)}" required placeholder="Ej. 04121234567"></label>
       <div class="modal-footer">
         <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button">Guardar Cliente</button>
+        <button type="submit" class="primary-button">Guardar</button>
       </div>
     </form>
   `);
+  
   $("#fc-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const values = Object.fromEntries(new FormData(e.currentTarget));
-    state.frequentClients.push({ name: values.name.trim(), phone: values.phone.trim() });
+    const newItem = { name: values.name.trim(), phone: values.phone.trim() };
+    if (isEdit) state.frequentClients[editIndex] = newItem;
+    else state.frequentClients.push(newItem);
+    
     store.set("pp_frequent_clients", state.frequentClients);
     closeModal();
     render();
-    showToast("Cliente frecuente guardado.");
+    showToast(isEdit ? "Cliente actualizado." : "Cliente guardado.");
   });
 }
 
@@ -353,6 +402,29 @@ document.addEventListener("click", async (event) => {
   if (data.action === "new-order") return formOrder();
   if (data.action === "new-user") return formUser();
   if (data.action === "new-frequent-client") return formFrequentClient();
+  if (data.action === "edit-fc") return formFrequentClient(Number(data.index));
+  if (data.action === "delete-fc") {
+    if (window.confirm("¿Deseas eliminar este cliente frecuente?")) {
+      state.frequentClients.splice(Number(data.index), 1);
+      store.set("pp_frequent_clients", state.frequentClients);
+      render();
+      showToast("Cliente eliminado.");
+    }
+    return;
+  }
+  if (data.action === "archive") {
+    if (window.confirm("¿Deseas eliminar de la hoja de Google Sheets todos los pedidos que digan 'prueba'?")) {
+      try {
+        showToast("Eliminando registros de prueba…");
+        const res = await api("profile_archive_test_orders");
+        await refresh(false);
+        showToast(`Se eliminaron ${res.count} pedidos de prueba.`);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+    return;
+  }
   if (data.action === "note") return formNote(data.id);
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
   if (data.action === "progress") return data.state === "Terminado" ? formCloseOrder(data.id) : saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
@@ -367,7 +439,7 @@ document.addEventListener("click", async (event) => {
         showToast("Pedido eliminado correctamente.");
         await refresh(false);
       } catch (err) {
-        showToast(err.message);
+        window.alert(`Error al eliminar: ${err.message}`);
       }
     }
     return;
