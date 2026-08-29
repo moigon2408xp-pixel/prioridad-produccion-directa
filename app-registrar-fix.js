@@ -7,9 +7,9 @@ const store = {
 
 const state = {
   session: store.get("pp_profile_session", null),
-  frequentClients: store.get("pp_frequent_clients", []),
-  frequentTypes: store.get("pp_frequent_types", ["Topper Acrílico", "DTF", "Camisas", "Impresiones", "Sublimación"]),
-  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
+  frequentClients: [],
+  frequentTypes: [],
+  waTemplate: "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega.",
   screen: "now",
   filter: "all",
   offline: false,
@@ -98,6 +98,9 @@ async function refresh(showMessage = true) {
   try {
     const response = await api("profile_dashboard");
     state.data = response.data;
+    state.frequentClients = response.data.frequentClients || [];
+    state.frequentTypes = response.data.frequentTypes || ["Topper Acrílico", "DTF", "Camisas", "Impresiones", "Sublimación"];
+    state.waTemplate = response.data.waTemplate || "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega.";
     state.offline = false;
     store.set("pp_profile_data", state.data);
     render();
@@ -113,14 +116,16 @@ async function refresh(showMessage = true) {
 
 function priorityPill(order) { const value = priority(order); return `<span class="priority priority-${value}">${priorityLabel[value]}</span>`; }
 function orderCard(order, position) {
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(order.tipo || "Sin tipo")}</p></div>${priorityPill(order)}</div><div class="meta">Estado: <strong>${escapeHtml(order.estado || "Pendiente")}</strong><br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Teléfono: ${escapeHtml(order.telefono || "No registrado")}</div></button>`;
+  const tipoDisplay = order.tipo || order['tipo de trabajo'] || order.trabajo || order.producto || "Sin tipo";
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(tipoDisplay)}</p></div>${priorityPill(order)}</div><div class="meta">Estado: <strong>${escapeHtml(order.estado || "Pendiente")}</strong><br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Teléfono: ${escapeHtml(order.telefono || "No registrado")}</div></button>`;
 }
 
 function nowView() {
   const myOpenOrders = (state.data.myOrders || []).filter(operable);
   const next = myOpenOrders[0];
   const critical = (state.data.teamCritical || []);
-  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
+  const tipoDisplay = next ? (next.tipo || next['tipo de trabajo'] || next.trabajo || next.producto || "Sin tipo") : "";
+  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(tipoDisplay)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
 }
 
 function queueView() {
@@ -131,7 +136,10 @@ function queueView() {
 function historyView() {
   const orders = (state.data.finishedOrders || []);
   if (!orders.length) return '<div class="empty"><strong>Aún no hay proyectos terminados</strong></div>';
-  return `<div class="order-list">${orders.map((order) => `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div></div><div class="meta">Entrega: ${escapeHtml(formatDate(order.entrega))}</div></article>`).join('')}</div>`;
+  return `<div class="order-list">${orders.map((order) => {
+    const tipoDisplay = order.tipo || order['tipo de trabajo'] || order.trabajo || order.producto || "Sin tipo";
+    return `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(tipoDisplay)}</p></div></div><div class="meta">Entrega: ${escapeHtml(formatDate(order.entrega))}</div></article>`;
+  }).join('')}</div>`;
 }
 
 function teamView() {
@@ -163,11 +171,11 @@ function settingsView() {
       </div>
     ` : ''}
     
-    <p class="section-heading">CLIENTES FRECUENTES</p>
+    <p class="section-heading">CLIENTES FRECUENTES (RESPALDADO EN CLOUD)</p>
     <button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button>
     <div class="user-list" style="margin-top:10px;">${fcList || '<div class="team-note">No hay clientes guardados.</div>'}</div>
 
-    <p class="section-heading">TIPOS DE TRABAJO FRECUENTES</p>
+    <p class="section-heading">TIPOS DE TRABAJO FRECUENTES (RESPALDADO EN CLOUD)</p>
     <button class="primary-button" data-action="new-frequent-type">＋ Agregar Tipo de Trabajo</button>
     <div class="user-list" style="margin-top:10px;">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
   `;
@@ -183,12 +191,19 @@ function render() {
 
   const saveWaBtn = $("#save-wa-template");
   if (saveWaBtn) {
-    saveWaBtn.addEventListener("click", () => {
+    saveWaBtn.addEventListener("click", async () => {
       const val = $("#wa-template-input").value.trim();
       if (val) {
-        state.waTemplate = val;
-        store.set("pp_wa_template", val);
-        showToast("Plantilla de WhatsApp guardada.");
+        saveWaBtn.disabled = true;
+        try {
+          await api("profile_save_setting", { key: "wa_template", value: val });
+          state.waTemplate = val;
+          showToast("Plantilla guardada permanentemente en Google Sheets.");
+        } catch (err) {
+          window.alert(`Error al guardar: ${err.message}`);
+        } finally {
+          saveWaBtn.disabled = false;
+        }
       }
     });
   }
@@ -200,10 +215,11 @@ function closeModal() { $("#modal").close(); }
 function detail(order) {
   const phoneVal = order.telefono || order.phone || order.celular || "";
   const rawPhone = cleanPhoneNumber(phoneVal);
+  const tipoDisplay = order.tipo || order['tipo de trabajo'] || order.trabajo || order.producto || "Sin tipo";
   
   const rawMsg = state.waTemplate
     .replace(/{cliente}/g, order.cliente || "")
-    .replace(/{tipo}/g, order.tipo || "")
+    .replace(/{tipo}/g, tipoDisplay)
     .replace(/{estado}/g, order.estado || "");
 
   const whatsappMsg = encodeURIComponent(rawMsg);
@@ -214,7 +230,7 @@ function detail(order) {
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="detail-grid">
-      <div class="detail-row"><span>TIPO</span><strong>${escapeHtml(order.tipo)}</strong></div>
+      <div class="detail-row"><span>TIPO</span><strong>${escapeHtml(tipoDisplay)}</strong></div>
       <div class="detail-row">
         <span>CAMBIAR ESTADO</span>
         <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; font-weight:bold; border-radius:6px; border:1px solid #ccc;">
@@ -303,6 +319,10 @@ function formOrder() {
             <option value="05:00 PM">05:00 PM</option>
             <option value="06:00 PM">06:00 PM</option>
             <option value="07:00 PM">07:00 PM</option>
+            <option value="07:30 PM">07:30 PM</option>
+            <option value="08:00 PM">08:00 PM</option>
+            <option value="08:30 PM">08:30 PM</option>
+            <option value="09:00 PM">09:00 PM</option>
           </select>
         </label>
       </div>
@@ -337,11 +357,16 @@ function formOrder() {
   }
 
   const selectTipo = $("#tipo-select");
-  if (selectTipo) {
+  const inputTipo = $("#input-tipo");
+  if (selectTipo && inputTipo) {
     selectTipo.addEventListener("change", (e) => {
       const val = e.target.value;
-      if (val && val !== "__CUSTOM__") $("#input-tipo").value = val;
-      else if (val === "__CUSTOM__") { $("#input-tipo").value = ""; $("#input-tipo").focus(); }
+      if (val && val !== "__CUSTOM__") {
+        inputTipo.value = val;
+      } else if (val === "__CUSTOM__") {
+        inputTipo.value = "";
+        inputTipo.focus();
+      }
     });
   }
 
@@ -354,13 +379,16 @@ function formOrder() {
     try {
       const values = Object.fromEntries(new FormData(form));
 
-      const selectedTipo = selectTipo ? selectTipo.value : "";
-      const manualTipo = $("#input-tipo") ? $("#input-tipo").value.trim() : "";
-      values.tipo = (selectedTipo && selectedTipo !== "__CUSTOM__") ? selectedTipo : manualTipo;
-
-      if (!values.tipo) {
-        throw new Error("Debes seleccionar o escribir un Tipo de Trabajo.");
+      let finalTipo = inputTipo ? inputTipo.value.trim() : "";
+      if (!finalTipo && selectTipo && selectTipo.value && selectTipo.value !== "__CUSTOM__") {
+        finalTipo = selectTipo.value;
       }
+
+      if (!finalTipo) {
+        throw new Error("Debes especificar el tipo de trabajo.");
+      }
+
+      values.tipo = finalTipo;
 
       await api("profile_create_order", { form: values });
       closeModal();
@@ -382,19 +410,25 @@ function formFrequentClient() {
       <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input name="phone" required placeholder="Ej. 04121234567"></label>
       <div class="modal-footer">
         <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button">Guardar</button>
+        <button type="submit" class="primary-button">Guardar en Google Sheets</button>
       </div>
     </form>
   `);
   
-  $("#fc-form").addEventListener("submit", (e) => {
+  $("#fc-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const values = Object.fromEntries(new FormData(e.currentTarget));
-    state.frequentClients.push({ name: values.name.trim(), phone: values.phone.trim() });
-    store.set("pp_frequent_clients", state.frequentClients);
-    closeModal();
-    render();
-    showToast("Cliente frecuente guardado.");
+    const btn = e.currentTarget.querySelector(".primary-button");
+    btn.disabled = true;
+    try {
+      const values = Object.fromEntries(new FormData(e.currentTarget));
+      await api("profile_save_client", { name: values.name.trim(), phone: values.phone.trim() });
+      closeModal();
+      await refresh(false);
+      showToast("Cliente frecuente respaldado en Google Sheets.");
+    } catch (err) {
+      btn.disabled = false;
+      window.alert(`Error: ${err.message}`);
+    }
   });
 }
 
@@ -405,20 +439,26 @@ function formFrequentType() {
       <label class="field"><span class="field-label">NOMBRE DEL TIPO</span><input name="typeName" required placeholder="Ej. DTF / Sublimación"></label>
       <div class="modal-footer">
         <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button">Guardar</button>
+        <button type="submit" class="primary-button">Guardar en Google Sheets</button>
       </div>
     </form>
   `);
 
-  $("#ft-form").addEventListener("submit", (e) => {
+  $("#ft-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const btn = e.currentTarget.querySelector(".primary-button");
     const val = new FormData(e.currentTarget).get("typeName").trim();
     if (val) {
-      state.frequentTypes.push(val);
-      store.set("pp_frequent_types", state.frequentTypes);
-      closeModal();
-      render();
-      showToast("Tipo de trabajo guardado.");
+      btn.disabled = true;
+      try {
+        await api("profile_save_type", { typeName: val });
+        closeModal();
+        await refresh(false);
+        showToast("Tipo de trabajo respaldado en Google Sheets.");
+      } catch (err) {
+        btn.disabled = false;
+        window.alert(`Error: ${err.message}`);
+      }
     }
   });
 }
@@ -433,9 +473,21 @@ document.addEventListener("click", async (event) => {
   if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find((item) => String(item.id) === String(data.id)); if (order) detail(order); return; }
   if (data.action === "new-order") return formOrder();
   if (data.action === "new-frequent-client") return formFrequentClient();
-  if (data.action === "delete-fc") { state.frequentClients.splice(Number(data.index), 1); store.set("pp_frequent_clients", state.frequentClients); render(); return; }
+  if (data.action === "delete-fc") {
+    if (window.confirm("¿Eliminar cliente frecuente de Google Sheets?")) {
+      await api("profile_delete_client", { index: Number(data.index) });
+      await refresh(false);
+    }
+    return;
+  }
   if (data.action === "new-frequent-type") return formFrequentType();
-  if (data.action === "delete-ft") { state.frequentTypes.splice(Number(data.index), 1); store.set("pp_frequent_types", state.frequentTypes); render(); return; }
+  if (data.action === "delete-ft") {
+    if (window.confirm("¿Eliminar tipo de trabajo de Google Sheets?")) {
+      await api("profile_delete_type", { index: Number(data.index) });
+      await refresh(false);
+    }
+    return;
+  }
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
   if (data.action === "delete-single-order") {
     if (window.confirm("¿Eliminar pedido?")) {
