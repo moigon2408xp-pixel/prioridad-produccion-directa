@@ -7,6 +7,9 @@ const store = {
 
 const state = {
   session: store.get("pp_profile_session", null),
+  frequentClients: store.get("pp_frequent_clients", [
+    { name: "Carolai Toppers", phone: "584120000000" }
+  ]),
   screen: "now",
   filter: "all",
   offline: false,
@@ -30,15 +33,8 @@ const durationLabel = (order) => {
   return "Aún no iniciado";
 };
 
-async function enablePush() {
-  try {
-    const { activatePushNotifications } = await import("./push.js");
-    await activatePushNotifications(
-      async (deviceToken) => { await api("profile_register_device", { deviceToken }); },
-      (payload) => showToast(payload.notification?.title || "Nueva actualización de producción.")
-    );
-    showToast("Este dispositivo quedó registrado para recibir avisos.");
-  } catch (error) { showToast(error.message); }
+function cleanPhoneNumber(phone = "") {
+  return String(phone).replace(/\D/g, "");
 }
 
 function showToast(message) {
@@ -57,7 +53,7 @@ function api(action, extra = {}) {
     const script = document.createElement("script");
     const finish = () => { delete window[callback]; script.remove(); };
     const timer = setTimeout(() => { finish(); reject(new Error("Google Sheets tardó demasiado en responder.")); }, 20000);
-    window[callback] = (response) => { clearTimeout(timer); finish(); response.ok ? resolve(response) : reject(new Error(response.error || "No se pudo completar la acción.")); };
+    window[callback] = (response) => { clearTimeout(timer); finish(); (response && response.ok) ? resolve(response) : reject(new Error(response?.error || "No se pudo completar la acción.")); };
     const payload = encodeURIComponent(JSON.stringify({ action, token: state.session?.token || "", ...extra }));
     script.src = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}callback=${callback}&payload=${payload}`;
     script.onerror = () => { clearTimeout(timer); finish(); reject(new Error("No se pudo comunicar con Google Sheets.")); };
@@ -122,7 +118,7 @@ function teamView() {
 function settingsView() {
   const session = state.session;
   const accessList = (state.data.users || []).map((user) => `<div class="user-card"><div><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(user.role)} · ${user.active ? "activo" : "inactivo"}</span></div>${user.name !== session.name ? `<button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(user.name)}" data-active="${user.active ? "false" : "true"}">${user.active ? "Desactivar" : "Activar"}</button>` : ""}</div>`).join("");
-  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">AVISOS DEL DISPOSITIVO</p><button class="primary-button" data-action="enable-push">Activar notificaciones</button><p class="team-note">Los avisos push se habilitan una vez que Firebase esté configurado.</p><p class="section-heading">SINCRONIZACIÓN</p><div class="team-note">${state.offline ? "Sin conexión. Se muestra la última información disponible." : "Conectada al registro central de Google Sheets."}</div>`;
+  return `<div class="card settings-card"><h3>Mi espacio</h3><div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div><div class="detail-row"><span>PERFIL</span><strong>${escapeHtml(session.role)}</strong></div><button class="secondary-button" data-action="logout">Cerrar sesión en este dispositivo</button></div>${isManager() ? `<p class="section-heading">ACCESOS DEL EQUIPO</p><button class="primary-button" data-action="new-user">＋ Crear perfil</button><div class="user-list">${accessList}</div><p class="section-heading">LIMPIEZA DE PRUEBAS</p><button class="secondary-button" data-action="archive">Archivar pedidos de prueba</button>` : ""}<p class="section-heading">CLIENTES FRECUENTES</p><button class="primary-button" data-action="new-frequent-client">＋ Agregar Cliente Frecuente</button><div class="team-note" style="margin-top:8px;">${state.frequentClients.map(c => `• <strong>${escapeHtml(c.name)}</strong> (${escapeHtml(c.phone)})`).join('<br>') || 'No hay clientes guardados.'}</div>`;
 }
 
 function render() {
@@ -141,12 +137,12 @@ function detail(order) {
   const editable = isLead() || order.responsable === state.session.name;
   const isDelivered = order.estado === "Entregado";
   const canModifyState = editable && (!isDelivered || isLead());
-  
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
   const availableStates = ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado"];
   
-  const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} (${order.id}) se encuentra en estado: ${order.estado}.`);
-  const whatsappUrl = `https://wa.me/?text=${whatsappMsg}`;
+  const rawPhone = cleanPhoneNumber(order.telefono || order.phone || "");
+  const whatsappMsg = encodeURIComponent(`Hola ${order.cliente || ''}, tu pedido de ${order.tipo || ''} ya está listo. ¡Ya puedes pasar a retirarlo!`);
+  const whatsappUrl = rawPhone ? `https://wa.me/${rawPhone}?text=${whatsappMsg}` : `https://wa.me/?text=${whatsappMsg}`;
 
   openModal(`
     <div class="modal-head">
@@ -162,14 +158,14 @@ function detail(order) {
       <div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div>
       <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div>
+      <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || order.phone || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
-      <div class="detail-row"><span>HISTORIAL NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div>
-      <div class="detail-row"><span>PREPARACIÓN</span><strong>Diseño: ${escapeHtml(order.diseno)} · Material: ${escapeHtml(order.material)}</strong></div>
+      <div class="detail-row"><span>NOTAS</span><strong>${escapeHtml(order.notas || "Sin notas")}</strong></div>
     </div>
 
     <div class="actions" style="margin-top:12px;">
-      <a href="${whatsappUrl}" target="_blank" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
-        📲 Compartir en WhatsApp
+      <a href="${whatsappUrl}" target="_blank" class="secondary-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#25D366; color:white; border:none; padding:8px 12px; border-radius:6px; font-weight:bold;">
+        📲 Notificar por WhatsApp ${rawPhone ? `a ${order.cliente}` : ''}
       </a>
     </div>
 
@@ -196,7 +192,7 @@ function detail(order) {
         <button data-action="toggle-ready" data-id="${escapeHtml(order.id)}" data-key="material" data-value="${order.material === "Sí" ? "No" : "Sí"}">Material ${order.material === "Sí" ? "pendiente" : "listo"}</button>
         <button data-action="note" data-id="${escapeHtml(order.id)}">Añadir nota</button>
       </div>
-    ` : '<div class="team-note" style="margin-top:12px;">Este pedido está entregado y cerrado. Solo un Jefe/Manager puede reabrirlo.</div>'}
+    ` : '<div class="team-note" style="margin-top:12px;">Este pedido está entregado. Solo Manager o Jefa pueden reabrirlo.</div>'}
 
     ${isManager() ? `
       <p class="section-heading" style="color:var(--red, red);">ADMINISTRACIÓN</p>
@@ -207,8 +203,113 @@ function detail(order) {
 
 function formOrder() {
   const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
-  openModal(`<div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div><form id="order-form" class="form-grid" novalidate><label class="field"><span class="field-label">CLIENTE</span><input name="cliente" required></label><label class="field"><span class="field-label">TIPO</span><input name="tipo" required></label><div class="form-inline"><label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label><label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label></div><label class="field"><span class="field-label">CANTIDAD</span><input type="number" min="1" name="cantidad" value="1"></label><label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label><div class="form-inline"><label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label><label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label></div><label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label><label class="field"><span class="field-label">NOTAS INICIALES</span><textarea name="notas"></textarea></label><p class="team-note">El tiempo real descontará los lapsos en «Pausado».</p><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button type="submit" class="primary-button">Registrar</button></div></form>`);
-  $("#order-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button:not([type=button])") || form.querySelector(".primary-button") || form.querySelector("button"); const progressTimer = setTimeout(() => { button.textContent = "Esperando respuesta de Google Sheets…"; }, 5000); button.disabled = true; button.textContent = "Registrando…"; try { const values = Object.fromEntries(new FormData(form)); if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa cliente y tipo de trabajo."); if (!String(values.fechaEntrega || "").trim() || !String(values.horaEntrega || "").trim()) throw new Error("Completa fecha y hora de entrega."); await api("profile_create_order", { form: values }); closeModal(); await refresh(false); showToast("Pedido registrado correctamente."); } catch (error) { button.disabled = false; button.textContent = "Registrar"; window.alert(`No se pudo registrar el pedido: ${error.message}`); } finally { clearTimeout(progressTimer); } });
+  const clients = state.frequentClients;
+
+  openModal(`
+    <div class="modal-head"><h2>Nuevo pedido</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="order-form" class="form-grid" novalidate>
+      ${clients.length ? `
+        <label class="field">
+          <span class="field-label">SELECCIONAR CLIENTE FRECUENTE</span>
+          <select id="frequent-client-select">
+            <option value="">-- Cliente nuevo / Manual --</option>
+            ${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone)})</option>`).join("")}
+          </select>
+        </label>
+      ` : ''}
+
+      <label class="field"><span class="field-label">CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Ej. Carolai Toppers"></label>
+      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input id="input-telefono" name="telefono" placeholder="Ej. 584121234567"></label>
+      <label class="field"><span class="field-label">TIPO</span><input name="tipo" required placeholder="Ej. Topper Acrílico"></label>
+      
+      <div class="form-inline">
+        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label>
+        <label class="field"><span class="field-label">HORA DE ENTREGA</span><input type="time" name="horaEntrega" required></label>
+      </div>
+
+      <label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label>
+      
+      <div class="form-inline">
+        <label class="field"><span class="field-label">DISEÑO</span><select name="diseno"><option>Sí</option><option>No</option></select></label>
+        <label class="field"><span class="field-label">MATERIAL</span><select name="material"><option>Sí</option><option>No</option></select></label>
+      </div>
+      
+      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label>
+      
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">Registrar</button>
+      </div>
+    </form>
+  `);
+
+  const selectFC = $("#frequent-client-select");
+  if (selectFC) {
+    selectFC.addEventListener("change", (e) => {
+      const idx = e.target.value;
+      if (idx !== "") {
+        const selected = clients[idx];
+        $("#input-cliente").value = selected.name;
+        $("#input-telefono").value = selected.phone;
+      }
+    });
+  }
+
+  $("#order-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector(".primary-button");
+    button.disabled = true;
+    button.textContent = "Registrando…";
+    try {
+      const values = Object.fromEntries(new FormData(form));
+      if (!String(values.cliente || "").trim() || !String(values.tipo || "").trim()) throw new Error("Completa el cliente y tipo de trabajo.");
+      await api("profile_create_order", { form: values });
+      closeModal();
+      await refresh(false);
+      showToast("Pedido registrado correctamente.");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Registrar";
+      window.alert(`No se pudo registrar: ${error.message}`);
+    }
+  });
+}
+
+function formFrequentClient() {
+  openModal(`
+    <div class="modal-head"><h2>Nuevo Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="fc-form" class="form-grid">
+      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input name="name" required placeholder="Ej. Carolai Toppers"></label>
+      <label class="field"><span class="field-label">WHATSAPP / TELÉFONO</span><input name="phone" required placeholder="Ej. 584121234567"></label>
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">Guardar Cliente</button>
+      </div>
+    </form>
+  `);
+  $("#fc-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const values = Object.fromEntries(new FormData(e.currentTarget));
+    state.frequentClients.push({ name: values.name.trim(), phone: values.phone.trim() });
+    store.set("pp_frequent_clients", state.frequentClients);
+    closeModal();
+    render();
+    showToast("Cliente frecuente guardado.");
+  });
+}
+
+function removeOrderFromLocalState(id) {
+  const filterList = (list = []) => list.filter((o) => String(o.id).trim() !== String(id).trim());
+  state.data = {
+    ...state.data,
+    myOrders: filterList(state.data.myOrders),
+    teamCritical: filterList(state.data.teamCritical),
+    allOrders: filterList(state.data.allOrders),
+    finishedOrders: filterList(state.data.finishedOrders),
+  };
+  store.set("pp_profile_data", state.data);
+  render();
 }
 
 function formUser() {
@@ -222,61 +323,12 @@ function formNote(id) {
 }
 
 function formCloseOrder(id) {
-  openModal(`<div class="modal-head"><h2>Cerrar producción</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Se guardará el tiempo real descontando las pausas. Indica cualquier imprevisto o aclaración final.</p><form id="close-order-form" class="form-grid"><label class="field"><span class="field-label">COMENTARIO DE CIERRE</span><textarea name="closeComment" placeholder="Ej. Se terminó sin imprevistos."></textarea></label><label class="field"><span class="field-label">FOTOS DE EVIDENCIA (OPCIONAL)</span><input id="evidence-files" type="file" accept="image/*" capture="environment" multiple><small>Máximo tres fotos.</small></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Marcar terminado</button></div></form>`);
-  $("#close-order-form").addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget; const files = [...$("#evidence-files").files]; const closeComment = String(new FormData(form).get("closeComment") || "").trim(); closeModal(); updateLocalOrder(id, { estado: "Terminado", closeComment }); showToast("Marcando pedido como terminado…"); api("profile_update_order", { id, changes: { estado: "Terminado", closeComment } }).then(() => { refresh(false); showToast(files.length ? "Pedido terminado. Guardando fotos…" : "Pedido terminado y tiempo real registrado."); if (files.length) uploadEvidence(id, files).then(async () => { await refresh(false); showToast("Fotos de evidencia guardadas."); }).catch((error) => { showToast("Pedido terminado, pero las fotos no se guardaron."); window.alert(`Las fotos no pudieron guardarse: ${error.message}`); }); }).catch(async (error) => { await refresh(false); showToast("No se pudo confirmar el pedido terminado."); window.alert(`Error al actualizar: ${error.message}`); }); });
-}
-
-async function imageAsJpegData(file) {
-  const source = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); });
-  const maxSide = 1600;
-  const scale = Math.min(1, maxSide / Math.max(source.naturalWidth, source.naturalHeight));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(source.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(source.naturalHeight * scale));
-  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.78);
-}
-
-async function uploadEvidence(pedidoId, archivosImagen, tokenSesion = state.session?.token) {
-  try {
-    const imagenesBase64 = [];
-    if (archivosImagen && archivosImagen.length > 0) {
-      for (const file of archivosImagen) {
-        if (typeof file === 'string') {
-          imagenesBase64.push({ data: file });
-        } else {
-          const compressedData = await imageAsJpegData(file);
-          imagenesBase64.push({ data: compressedData });
-        }
-      }
-    }
-
-    const payloadData = { action: 'profile_upload_evidence', token: tokenSesion || '', id: pedidoId, images: imagenesBase64 };
-    const response = await fetch(window.PRIORIDAD_CONFIG.appsScriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payloadData)
-    });
-
-    const resultado = await response.json();
-    if (resultado.ok) return resultado;
-    throw new Error(resultado.error || 'Error al guardar evidencias');
-  } catch (error) {
-    console.error('Error en uploadEvidence:', error);
-    throw error;
-  }
-}
-
-window.uploadEvidence = uploadEvidence;
-window.subirEvidenciasPedido = uploadEvidence;
-
-function formArchive() {
-  openModal(`<div class="modal-head"><h2>Archivar pruebas</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Escribe los ID separados por comas para moverlos al archivo.</p><form id="archive-form" class="form-grid"><label class="field"><span class="field-label">ID DE PEDIDOS</span><textarea name="ids" required placeholder="Ej. PED-0001, PED-0002"></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Archivar</button></div></form>`);
-  $("#archive-form").addEventListener("submit", async (event) => { event.preventDefault(); const ids = String(new FormData(event.currentTarget).get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean); try { await api("profile_archive_orders", { ids }); closeModal(); await refresh(false); showToast("Pedidos archivados."); } catch (error) { showToast(error.message); } });
+  openModal(`<div class="modal-head"><h2>Cerrar producción</h2><button class="close-button" data-action="close">×</button></div><p class="team-note">Se guardará el tiempo real descontando las pausas. Indica cualquier imprevisto o aclaración final.</p><form id="close-order-form" class="form-grid"><label class="field"><span class="field-label">COMENTARIO DE CIERRE</span><textarea name="closeComment" placeholder="Ej. Se terminó sin imprevistos."></textarea></label><div class="modal-footer"><button type="button" class="secondary-button" data-action="close">Cancelar</button><button class="primary-button">Marcar terminado</button></div></form>`);
+  $("#close-order-form").addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget; const closeComment = String(new FormData(form).get("closeComment") || "").trim(); closeModal(); updateLocalOrder(id, { estado: "Terminado", closeComment }); showToast("Marcando pedido como terminado…"); api("profile_update_order", { id, changes: { estado: "Terminado", closeComment } }).then(() => { refresh(false); showToast("Pedido terminado y tiempo real registrado."); }).catch(async (error) => { await refresh(false); showToast("No se pudo confirmar el pedido terminado."); window.alert(`Error al actualizar: ${error.message}`); }); });
 }
 
 function updateLocalOrder(id, changes) {
-  const transform = (order) => order.id !== id ? order : { ...order, ...changes, comentarioCierre: Object.prototype.hasOwnProperty.call(changes, "closeComment") ? changes.closeComment : order.comentarioCierre, notas: changes.appendNote ? [order.notas, `• ${state.session.name}: ${changes.appendNote}`].filter(Boolean).join("\n") : order.notas };
+  const transform = (order) => order.id !== id ? order : { ...order, ...changes };
   state.data = { ...state.data, myOrders: (state.data.myOrders || []).map(transform), teamCritical: (state.data.teamCritical || []).map(transform), allOrders: (state.data.allOrders || []).map(transform), finishedOrders: (state.data.finishedOrders || []).map(transform) };
   store.set("pp_profile_data", state.data);
   render();
@@ -297,12 +349,11 @@ document.addEventListener("click", async (event) => {
   const data = button.dataset;
   if (data.action === "close") return closeModal();
   if (data.action === "filter") { state.filter = data.filter; return render(); }
-  if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find((item) => item.id === data.id); if (order) detail(order); return; }
+  if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find((item) => String(item.id) === String(data.id)); if (order) detail(order); return; }
   if (data.action === "new-order") return formOrder();
   if (data.action === "new-user") return formUser();
+  if (data.action === "new-frequent-client") return formFrequentClient();
   if (data.action === "note") return formNote(data.id);
-  if (data.action === "archive") return formArchive();
-  if (data.action === "enable-push") return enablePush();
   if (data.action === "logout") { store.remove("pp_profile_session"); state.session = null; $("#workspace").classList.add("hidden"); $("#login-view").classList.remove("hidden"); return; }
   if (data.action === "progress") return data.state === "Terminado" ? formCloseOrder(data.id) : saveUpdate(data.id, { estado: data.state }, `Estado: ${data.state}.`);
   if (data.action === "toggle-ready") return saveUpdate(data.id, { [data.key]: data.value }, "Preparación actualizada.");
@@ -311,9 +362,10 @@ document.addEventListener("click", async (event) => {
     if (window.confirm(`¿Estás seguro de eliminar permanentemente el pedido ${data.id}?`)) {
       try {
         await api("profile_delete_order", { id: data.id });
+        removeOrderFromLocalState(data.id);
         closeModal();
-        await refresh(false);
         showToast("Pedido eliminado correctamente.");
+        await refresh(false);
       } catch (err) {
         showToast(err.message);
       }
@@ -327,5 +379,4 @@ document.addEventListener("click", async (event) => {
   } catch (error) { showToast(error.message); }
 });
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 if (state.session) { $("#login-view").classList.add("hidden"); $("#workspace").classList.remove("hidden"); render(); refresh(false); }
