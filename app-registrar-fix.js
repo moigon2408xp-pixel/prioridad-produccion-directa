@@ -9,7 +9,7 @@ const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: store.get("pp_frequent_clients", []),
   frequentTypes: store.get("pp_frequent_types", ["Topper Acrílico", "DTF", "Camisas", "Impresiones", "Sublimación"]),
-  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} (Código: {id}) ya se encuentra listo para entrega."),
+  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
   filter: "all",
   offline: false,
@@ -19,8 +19,8 @@ const state = {
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 const active = (order) => !["Entregado", "Cancelado"].includes(order.estado);
 const operable = (order) => active(order) && order.estado !== "Terminado";
-const priority = (order) => order.estado === "Bloqueado" || order.diseno === "No" || order.material === "No" ? "blocked" : "now";
-const priorityLabel = { blocked: "Bloqueado", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
+const priority = (order) => order.diseno === "No" || order.material === "No" ? "blocked" : "now";
+const priorityLabel = { blocked: "Pendiente Material/Diseño", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
 const formatDate = (value) => {
@@ -157,7 +157,7 @@ function settingsView() {
         <label class="field">
           <span class="field-label">PLANTILLA DEL MENSAJE</span>
           <textarea id="wa-template-input" style="min-height:80px;">${escapeHtml(state.waTemplate)}</textarea>
-          <small style="color:#666; font-size:11px; margin-top:4px;">Variables disponibles: <code>{cliente}</code>, <code>{tipo}</code>, <code>{id}</code>, <code>{estado}</code></small>
+          <small style="color:#666; font-size:11px; margin-top:4px;">Variables disponibles: <code>{cliente}</code>, <code>{tipo}</code>, <code>{estado}</code></small>
         </label>
         <button class="primary-button" id="save-wa-template" style="margin-top:8px;">Guardar Mensaje WhatsApp</button>
       </div>
@@ -201,17 +201,15 @@ function detail(order) {
   const phoneVal = order.telefono || order.phone || order.celular || "";
   const rawPhone = cleanPhoneNumber(phoneVal);
   
-  // Mensaje dinámico basado en la plantilla de configuración
   const rawMsg = state.waTemplate
     .replace(/{cliente}/g, order.cliente || "")
     .replace(/{tipo}/g, order.tipo || "")
-    .replace(/{id}/g, order.id || "")
     .replace(/{estado}/g, order.estado || "");
 
   const whatsappMsg = encodeURIComponent(rawMsg);
   const whatsappUrl = rawPhone ? `https://wa.me/${rawPhone}?text=${whatsappMsg}` : `https://wa.me/?text=${whatsappMsg}`;
 
-  const availableStatuses = ["Pendiente", "En proceso", "Pausado", "Bloqueado", "Terminado", "Entregado", "Cancelado"];
+  const availableStatuses = ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"];
 
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
@@ -355,6 +353,15 @@ function formOrder() {
     button.textContent = "Registrando…";
     try {
       const values = Object.fromEntries(new FormData(form));
+
+      const selectedTipo = selectTipo ? selectTipo.value : "";
+      const manualTipo = $("#input-tipo") ? $("#input-tipo").value.trim() : "";
+      values.tipo = (selectedTipo && selectedTipo !== "__CUSTOM__") ? selectedTipo : manualTipo;
+
+      if (!values.tipo) {
+        throw new Error("Debes seleccionar o escribir un Tipo de Trabajo.");
+      }
+
       await api("profile_create_order", { form: values });
       closeModal();
       await refresh(false);
