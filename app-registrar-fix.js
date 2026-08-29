@@ -21,22 +21,49 @@ const operable = (order) => active(order) && order.estado !== "Terminado";
 const priority = (order) => order.estado === "Bloqueado" || order.diseno === "No" || order.material === "No" ? "blocked" : "now";
 const priorityLabel = { blocked: "Bloqueado", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
-const isManager = () => state.session?.role === "manager";
 
-// Formateador limpio de fecha/hora sin conversiones erróneas de zona horaria
 const formatDate = (value) => {
   if (!value) return "Sin fecha";
-  if (typeof value === "string" && (value.includes("AM") || value.includes("PM"))) return value;
+  let str = String(value).trim();
+  
+  if (str.includes("AM") || str.includes("PM")) {
+    const parts = str.split(" - ");
+    if (parts.length === 2 && parts[0].includes("-")) {
+      const [y, m, d] = parts[0].split("-");
+      return `${d}/${m}/${y} a las ${parts[1]}`;
+    }
+    if (str.includes("-")) {
+      const spaceParts = str.split(" ");
+      const datePart = spaceParts[0];
+      const timePart = spaceParts.slice(1).join(" ");
+      if (datePart.includes("-")) {
+        const [y, m, d] = datePart.split("-");
+        return `${d}/${m}/${y} a las ${timePart}`;
+      }
+    }
+    return str;
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
+
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+  const strTime = `${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+
+  return `${day}/${month}/${year} a las ${strTime}`;
 };
 
 function cleanPhoneNumber(phone = "") {
   let num = String(phone).replace(/\D/g, "");
   if (!num) return "";
-  if (num.startsWith("04")) num = "58" + num.slice(1);
-  else if (num.startsWith("4") && num.length === 10) num = "58" + num;
+  if (num.startsWith("0")) num = "58" + num.slice(1);
   else if (num.length === 10 && !num.startsWith("58")) num = "58" + num;
   return num;
 }
@@ -92,7 +119,7 @@ function nowView() {
   const myOpenOrders = (state.data.myOrders || []).filter(operable);
   const next = myOpenOrders[0];
   const critical = (state.data.teamCritical || []);
-  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
+  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
 }
 
 function queueView() {
@@ -156,7 +183,7 @@ function detail(order) {
     <div class="detail-grid">
       <div class="detail-row"><span>TIPO</span><strong>${escapeHtml(order.tipo)}</strong></div>
       <div class="detail-row"><span>ESTADO</span><strong>${escapeHtml(order.estado || "Pendiente")}</strong></div>
-      <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
+      <div class="detail-row"><span>FECHA Y HORA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable || "Sin asignar")}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(phoneVal || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
