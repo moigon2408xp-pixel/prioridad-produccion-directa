@@ -198,7 +198,8 @@ function detail(order) {
 }
 
 function formOrder() {
-  const people = (state.data.users || []).filter((user) => user.active && user.role !== "manager");
+  // Muestra a todos los usuarios registrados que no estén explícitamente desactivados
+  const people = (state.data.users || []).filter((user) => user && user.name && String(user.active) !== "false");
   const clients = state.frequentClients;
   const types = state.frequentTypes;
 
@@ -251,7 +252,14 @@ function formOrder() {
         </label>
       </div>
 
-      <label class="field"><span class="field-label">RESPONSABLE</span><select name="responsable"><option value="">Sin asignar</option>${people.map((user) => `<option>${escapeHtml(user.name)}</option>`).join("")}</select></label>
+      <label class="field">
+        <span class="field-label">RESPONSABLE</span>
+        <select name="responsable">
+          <option value="">Sin asignar</option>
+          ${people.map((user) => `<option value="${escapeHtml(user.name)}">${escapeHtml(user.name)}</option>`).join("")}
+        </select>
+      </label>
+      
       <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label>
       
       <div class="modal-footer">
@@ -301,7 +309,6 @@ function formOrder() {
     }
   });
 }
-
 function formFrequentClient() {
   openModal(`
     <div class="modal-head"><h2>Nuevo Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
