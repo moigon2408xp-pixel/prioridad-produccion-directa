@@ -13,37 +13,57 @@ const state = {
   screen: "now",
   filter: "all",
   offline: false,
-  data: store.get("pp_profile_data", { myOrders: [], teamCritical: [], allOrders: [], users: [] }),
+  data: store.get("pp_profile_data", { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [] }),
 };
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
-const active = (order) => !["Entregado", "Cancelado"].includes(order.estado);
-const operable = (order) => active(order) && order.estado !== "Terminado";
-const priority = (order) => order.diseno === "No" || order.material === "No" ? "blocked" : "now";
-const priorityLabel = { blocked: "Pendiente Material/Diseño", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
+
+function getDeliveryDateObj(entregaStr) {
+  if (!entregaStr) return null;
+  let str = String(entregaStr).trim();
+  if (str.includes(" - ")) str = str.split(" - ")[0];
+  if (str.includes(" a las ")) str = str.split(" a las ")[0];
+  
+  if (str.includes("/")) {
+    const parts = str.split(" ")[0].split("/");
+    if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]);
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+const priority = (order) => {
+  if (order.diseno === "No" || order.material === "No") return "blocked";
+  const deliveryDate = getDeliveryDateObj(order.entrega);
+  if (!deliveryDate) return "now";
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const checkDate = new Date(deliveryDate);
+  checkDate.setHours(0, 0, 0, 0);
+
+  if (checkDate < today) return "overdue";
+  if (checkDate.getTime() === today.getTime()) return "today";
+  return "later";
+};
+
+const priorityLabel = {
+  overdue: "🚨 ¡RETRASADO!",
+  blocked: "Pendiente Material/Diseño",
+  now: "Hacer ahora",
+  today: "Hacer hoy",
+  later: "Programar"
+};
+
+const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado);
+const operable = (order) => active(order);
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
 const formatDate = (value) => {
   if (!value) return "Sin fecha";
   let str = String(value).trim();
-  
-  if (str.includes("AM") || str.includes("PM")) {
-    const parts = str.split(" - ");
-    if (parts.length === 2 && parts[0].includes("-")) {
-      const [y, m, d] = parts[0].split("-");
-      return `${d}/${m}/${y} a las ${parts[1]}`;
-    }
-    if (str.includes("-")) {
-      const spaceParts = str.split(" ");
-      const datePart = spaceParts[0];
-      const timePart = spaceParts.slice(1).join(" ");
-      if (datePart.includes("-")) {
-        const [y, m, d] = datePart.split("-");
-        return `${d}/${m}/${y} a las ${timePart}`;
-      }
-    }
-    return str;
-  }
+  if (str.includes("AM") || str.includes("PM")) return str;
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
@@ -56,9 +76,7 @@ const formatDate = (value) => {
   const minutes = date.getMinutes().toString().padStart(2, '0');
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
-  const strTime = `${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-
-  return `${day}/${month}/${year} a las ${strTime}`;
+  return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
 };
 
 function cleanPhoneNumber(phone = "") {
@@ -114,37 +132,86 @@ async function refresh(showMessage = true) {
   }
 }
 
-function priorityPill(order) { const value = priority(order); return `<span class="priority priority-${value}">${priorityLabel[value]}</span>`; }
+function priorityPill(order) {
+  const val = priority(order);
+  const isOverdue = val === "overdue";
+  const bgStyle = isOverdue ? 'background-color:#d32f2f; color:white; font-weight:bold; padding:4px 8px; border-radius:4px;' : '';
+  return `<span class="priority priority-${val}" style="${bgStyle}">${priorityLabel[val]}</span>`;
+}
+
 function orderCard(order, position) {
   const tipoDisplay = order.tipo || order['tipo de trabajo'] || order.trabajo || order.producto || "Sin tipo";
   return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}"><div class="order-top"><div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente || "Sin cliente")}</h3><p>${escapeHtml(tipoDisplay)}</p></div>${priorityPill(order)}</div><div class="meta">Estado: <strong>${escapeHtml(order.estado || "Pendiente")}</strong><br/>Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>Teléfono: ${escapeHtml(order.telefono || "No registrado")}</div></button>`;
 }
 
+function sortOrdersByUrgency(orders) {
+  return orders.slice().sort((a, b) => {
+    const prioOrder = { overdue: 0, blocked: 1, today: 2, now: 3, later: 4 };
+    const pA = prioOrder[priority(a)];
+    const pB = prioOrder[priority(b)];
+    if (pA !== pB) return pA - pB;
+    const dA = getDeliveryDateObj(a.entrega) || new Date(9999, 0, 1);
+    const dB = getDeliveryDateObj(b.entrega) || new Date(9999, 0, 1);
+    return dA - dB;
+  });
+}
+
 function nowView() {
-  const myOpenOrders = (state.data.myOrders || []).filter(operable);
+  const myOpenOrders = sortOrdersByUrgency((state.data.myOrders || []).filter(operable));
   const next = myOpenOrders[0];
-  const critical = (state.data.teamCritical || []);
+  const critical = sortOrdersByUrgency((state.data.teamCritical || []));
   const tipoDisplay = next ? (next.tipo || next['tipo de trabajo'] || next.trabajo || next.producto || "Sin tipo") : "";
-  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(tipoDisplay)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}<p class="section-heading">CRÍTICOS DEL EQUIPO</p><div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
+
+  return `${state.offline ? '<p class="offline">Mostrando información guardada.</p>' : ""}
+  ${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(tipoDisplay)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola está al día</strong></div>'}
+  <p class="section-heading">CRÍTICOS DEL EQUIPO</p>
+  <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay casos críticos.</div>'}</div>`;
 }
 
 function queueView() {
-  const list = (state.data.myOrders || []).filter(active);
+  const list = sortOrdersByUrgency((state.data.myOrders || []).filter(active));
   return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No hay pedidos pendientes</strong></div>';
 }
 
 function historyView() {
-  const orders = (state.data.finishedOrders || []);
+  const all = [...(state.data.finishedOrders || []), ...(state.data.allOrders || [])];
+  const finishedMap = new Map();
+  
+  all.forEach((order) => {
+    if (["Terminado", "Entregado", "Cancelado"].includes(order.estado)) {
+      finishedMap.set(String(order.id), order);
+    }
+  });
+
+  const orders = Array.from(finishedMap.values());
   if (!orders.length) return '<div class="empty"><strong>Aún no hay proyectos terminados</strong></div>';
+
   return `<div class="order-list">${orders.map((order) => {
     const tipoDisplay = order.tipo || order['tipo de trabajo'] || order.trabajo || order.producto || "Sin tipo";
-    return `<article class="order-card"><div class="order-top"><div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(tipoDisplay)}</p></div></div><div class="meta">Entrega: ${escapeHtml(formatDate(order.entrega))}</div></article>`;
+    const foto = order.fotoEvidencia || order.foto;
+    return `
+      <article class="order-card">
+        <div class="order-top">
+          <div>
+            <h3>${escapeHtml(order.cliente)}</h3>
+            <p>${escapeHtml(tipoDisplay)}</p>
+          </div>
+          <span class="priority" style="background:#2e7d32; color:white;">${escapeHtml(order.estado)}</span>
+        </div>
+        <div class="meta">
+          Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
+          Responsable: ${escapeHtml(order.responsable || "Sin asignar")}<br/>
+          ${order.comentarioCierre ? `<strong>Nota de cierre:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
+          ${foto ? `<a href="${escapeHtml(foto)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline;">📷 Ver Evidencia en Drive</a>` : ""}
+        </div>
+      </article>
+    `;
   }).join('')}</div>`;
 }
 
 function teamView() {
-  const orders = (state.data.allOrders || []).filter(active);
-  return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">PEDIDOS ACTIVOS</p><div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
+  const orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
+  return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">PEDIDOS ACTIVOS (${orders.length})</p><div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
 }
 
 function settingsView() {
@@ -212,6 +279,66 @@ function render() {
 function openModal(content) { const modal = $("#modal"); modal.innerHTML = `<div class="modal-content">${content}</div>`; modal.showModal(); }
 function closeModal() { $("#modal").close(); }
 
+function promptFinishOrder(order) {
+  openModal(`
+    <div class="modal-head"><h2>Finalizar Pedido</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="finish-order-form" class="form-grid">
+      <p><strong>Cliente:</strong> ${escapeHtml(order.cliente)}</p>
+      <label class="field">
+        <span class="field-label">COMENTARIO / OBSERVACIÓN DE CIERRE</span>
+        <textarea name="comentarioCierre" placeholder="Ej. Trabajo entregado conforme. Se incluyeron 2 piezas extra."></textarea>
+      </label>
+      <label class="field">
+        <span class="field-label">FOTO DE EVIDENCIA (OPCIONAL)</span>
+        <input type="file" id="evidencia-file-input" accept="image/*">
+        <small style="color:#666;">Se guardará en tu Google Drive automáticamente.</small>
+      </label>
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button" style="background:#2e7d32;">Marcar como Terminado</button>
+      </div>
+    </form>
+  `);
+
+  $("#finish-order-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.currentTarget.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Subiendo foto y guardando...";
+
+    const comentarioCierre = new FormData(e.currentTarget).get("comentarioCierre").trim();
+    const fileInput = $("#evidencia-file-input");
+    let evidencia = null;
+
+    if (fileInput && fileInput.files.length > 0) {
+      const file = fileInput.files[0];
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result);
+        reader.readAsDataURL(file);
+      });
+      evidencia = { base64, mimeType: file.type };
+    }
+
+    try {
+      await api("profile_update_order", {
+        id: order.id,
+        changes: { estado: "Terminado", comentarioCierre: comentarioCierre },
+        evidencia: evidencia
+      });
+      order.estado = "Terminado";
+      order.comentarioCierre = comentarioCierre;
+      closeModal();
+      await refresh(false);
+      showToast("Pedido finalizado con éxito.");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Marcar como Terminado";
+      window.alert(`Error al finalizar pedido: ${err.message}`);
+    }
+  });
+}
+
 function detail(order) {
   const phoneVal = order.telefono || order.phone || order.celular || "";
   const rawPhone = cleanPhoneNumber(phoneVal);
@@ -254,6 +381,11 @@ function detail(order) {
   if (selectStatus) {
     selectStatus.addEventListener("change", async (e) => {
       const newStatus = e.target.value;
+      if (newStatus === "Terminado") {
+        closeModal();
+        promptFinishOrder(order);
+        return;
+      }
       selectStatus.disabled = true;
       try {
         await api("profile_update_order", { id: order.id, changes: { estado: newStatus } });
@@ -378,16 +510,12 @@ function formOrder() {
     button.textContent = "Registrando…";
     try {
       const values = Object.fromEntries(new FormData(form));
-
       let finalTipo = inputTipo ? inputTipo.value.trim() : "";
       if (!finalTipo && selectTipo && selectTipo.value && selectTipo.value !== "__CUSTOM__") {
         finalTipo = selectTipo.value;
       }
 
-      if (!finalTipo) {
-        throw new Error("Debes especificar el tipo de trabajo.");
-      }
-
+      if (!finalTipo) throw new Error("Debes especificar el tipo de trabajo.");
       values.tipo = finalTipo;
 
       await api("profile_create_order", { form: values });
@@ -414,7 +542,7 @@ function formFrequentClient() {
       </div>
     </form>
   `);
-  
+
   $("#fc-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.currentTarget.querySelector(".primary-button");
@@ -470,7 +598,7 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-action]"); if (!button) return;
   const data = button.dataset;
   if (data.action === "close") return closeModal();
-  if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find((item) => String(item.id) === String(data.id)); if (order) detail(order); return; }
+  if (data.action === "detail") { const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || []), ...(state.data.myOrders || [])].find((item) => String(item.id) === String(data.id)); if (order) detail(order); return; }
   if (data.action === "new-order") return formOrder();
   if (data.action === "new-frequent-client") return formFrequentClient();
   if (data.action === "delete-fc") {
