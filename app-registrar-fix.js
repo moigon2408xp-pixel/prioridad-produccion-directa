@@ -173,35 +173,48 @@ async function imageAsJpegData(file) {
   return canvas.toDataURL("image/jpeg", 0.78);
 }
 
-async function uploadEvidence(id, files) {
-  if (!files.length) return;
-  if (files.length > 3) throw new Error("Puedes adjuntar como máximo tres fotos por cierre.");
-  const images = await Promise.all(files.map(imageAsJpegData));
-  const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "";
-  if (!baseUrl.startsWith("https://")) throw new Error("Falta configurar la conexión con Google Sheets.");
-  const payload = JSON.stringify({ action: "profile_upload_evidence", token: state.session?.token || "", id, images: images.map((data) => ({ data })) });
-  const frame = document.createElement("iframe");
-  frame.name = `pp_upload_${Date.now()}`;
-  frame.style.display = "none";
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = baseUrl;
-  form.target = frame.name;
-  form.style.display = "none";
-  const field = document.createElement("textarea");
-  field.name = "payload";
-  field.value = payload;
-  form.appendChild(field);
-  document.body.append(frame, form);
-  form.submit();
-  setTimeout(() => { form.remove(); frame.remove(); }, 15000);
-  let status = null;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1800 : 1200));
-    status = await api("profile_evidence_status", { id });
-    if (Number(status.data?.count || 0) >= files.length) return status;
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function subirEvidenciasPedido(pedidoId, tokenSesion, archivosImagen) {
+  try {
+    const imagenesBase64 = [];
+    for (const file of archivosImagen) {
+      const base64Data = await fileToBase64(file);
+      imagenesBase64.push({ data: base64Data });
+    }
+
+    const payloadData = {
+      action: 'profile_upload_evidence',
+      token: tokenSesion,
+      id: pedidoId,
+      images: imagenesBase64
+    };
+
+    const response = await fetch(window.PRIORIDAD_CONFIG.appsScriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payloadData)
+    });
+
+    const resultado = await response.json();
+
+    if (resultado.ok) {
+      alert('¡Fotografías adjuntadas correctamente!');
+    } else {
+      alert('Error: ' + resultado.error);
+    }
+  } catch (error) {
+    alert('Ocurrió un fallo al conectar con el servidor.');
   }
-  throw new Error(`Apps Script no confirmó el guardado de las ${files.length} foto(s). Revisa la autorización de Drive en la cuenta secundaria.`);
 }
 
 function formArchive() {
