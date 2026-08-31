@@ -9,22 +9,13 @@
   <link rel="icon" href="./icons/icon-192.png"/>
   <link rel="apple-touch-icon" href="./icons/icon-192.png"/>
   <link rel="stylesheet" href="./styles.css"/>
-  <title>Prioridad Producción</title>
+  <title>Prioridad Producción - Papelería Creativa</title>
 </head>
 <body>
-<div class="backup-container" style="margin: 20px 0; display: flex; gap: 12px; flex-wrap: wrap;">
-  <button type="button" onclick="exportarBackup()" style="padding: 10px 16px; background-color: #8b5cf6; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
-    📥 Exportar Copia de Seguridad
-  </button>
-
-  <label style="padding: 10px 16px; background-color: #2563eb; color: white; border-radius: 8px; font-weight: bold; cursor: pointer; display: inline-block;">
-    📤 Importar Copia de Seguridad
-    <input type="file" id="importInput" accept=".json" onchange="importarBackup(event)" style="display: none;">
-  </label>
-</div>
   <div class="app-shell">
+    <!-- VISTA DE DESBLOQUEO / INICIO DE SESIÓN -->
     <section id="login-view" class="unlock-screen">
-      <img src="./icons/icon-192.png" alt="" class="unlock-logo"/>
+      <img src="./icons/icon-192.png" alt="Logo" class="unlock-logo"/>
       <p class="eyebrow">PAPELERÍA CREATIVA</p>
       <h1>Prioridad<br/>Producción</h1>
       <p class="unlock-copy">Ingresa a tu espacio personal de trabajo.</p>
@@ -38,16 +29,29 @@
       </form>
     </section>
 
+    <!-- VISTA DE ÁREA DE TRABAJO -->
     <section id="workspace" class="workspace hidden">
       <header class="topbar">
         <div>
           <p id="role-label" class="eyebrow">PRODUCCIÓN</p>
           <h1 id="screen-title">Ahora</h1>
         </div>
-        <!-- Botón conectado directamente a la función de refresco -->
-        <button id="refresh" class="icon-button" aria-label="Actualizar" onclick="refrescarModuloWeb()">↻</button>
+        <button id="refresh" class="icon-button" aria-label="Actualizar">↻</button>
       </header>
+
+      <!-- CONTROL DE COPIAS DE SEGURIDAD INTEGRADO EN WORKSPACE -->
+      <div class="backup-container" style="padding: 10px 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+        <button type="button" onclick="exportarBackup()" style="padding: 8px 14px; background-color: #8b5cf6; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+          📦 Exportar Copia de Seguridad
+        </button>
+        <label style="padding: 8px 14px; background-color: #2563eb; color: white; border-radius: 8px; font-weight: bold; cursor: pointer; display: inline-block;">
+          📥 Importar Copia de Seguridad
+          <input type="file" id="importInput" accept=".json" onchange="importarBackup(event)" style="display: none;">
+        </label>
+      </div>
+
       <main id="screen" class="screen" aria-live="polite"></main>
+
       <nav class="bottom-nav">
         <button data-screen="now" class="nav-button active"><span>⌁</span>Ahora</button>
         <button data-screen="queue" class="nav-button"><span>☷</span>Mi cola</button>
@@ -63,216 +67,50 @@
 
   <script src="./config.js"></script>
   <script src="./firebase-config.js"></script>
-  <script type="module" src="./app-registrar-fix.js?v=14"></script>
+  <script type="module" src="./app-registrar-fix.js?v=15"></script>
 
-<script>
-  // Función para descargar un archivo .json con toda la información guardada
-function exportarBackup() {
-  const datos = {};
-  
-  // Extrae todas las claves guardadas en LocalStorage
-  for (let i = 0; i < localStorage.length; i++) {
-    const clave = localStorage.key(i);
-    datos[clave] = localStorage.getItem(clave);
-  }
-
-  if (Object.keys(datos).length === 0) {
-    alert("No hay ningún dato guardado en la aplicación para exportar.");
-    return;
-  }
-
-  // Crear y descargar el archivo JSON
-  const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const enlace = document.createElement("a");
-  
-  const fecha = new Date().toISOString().split("T")[0];
-  enlace.href = url;
-  enlace.download = `respaldo_produccion_${fecha}.json`;
-  
-  document.body.appendChild(enlace);
-  enlace.click();
-  document.body.removeChild(enlace);
-  URL.revokeObjectURL(url);
-}
-
-// Función para leer el archivo .json subido y restaurarlo en LocalStorage
-function importarBackup(event) {
-  const archivo = event.target.files[0];
-  if (!archivo) return;
-
-  const lector = new FileReader();
-  lector.onload = function (e) {
-    try {
-      const datos = JSON.parse(e.target.result);
-      
-      // Escribe cada clave guardada en el LocalStorage actual
-      for (const clave in datos) {
-        localStorage.setItem(clave, datos[clave]);
+  <script>
+    // FUNCIONES GLOBALES DE RESPALDO Y RESTAURACIÓN DE LOCALSTORAGE
+    window.exportarBackup = function() {
+      const datos = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const clave = localStorage.key(i);
+        datos[clave] = localStorage.getItem(clave);
       }
-      
-      alert("¡Copia de seguridad restaurada con éxito! La página se actualizará.");
-      window.location.reload();
-    } catch (error) {
-      alert("Error: El archivo seleccionado no tiene un formato JSON válido.");
-    }
-  };
-  
-  lector.readAsText(archivo);
-}
-  const URL_WEB_APP = "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
-
-  // 1. Refrescar módulos enviando el token de sesión guardado
-  async function refrescarModuloWeb() {
-    const btnRefresh = document.getElementById("refresh");
-    if (btnRefresh) btnRefresh.style.opacity = "0.5";
-
-    const tokenUsuario = localStorage.getItem("pp_token") || "";
-
-    try {
-      const respuesta = await fetch(URL_WEB_APP, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8"
-        },
-        body: JSON.stringify({
-          accion: "refrescarModulo",
-          modulo: document.getElementById("screen-title")?.innerText || "now",
-          token: tokenUsuario
-        })
-      });
-
-      const datos = await respuesta.json();
-
-      if (datos.exito || datos.ok) {
-        console.log("Datos recibidos:", datos.datos);
-        if (typeof window.cargarDatos === "function") {
-          window.cargarDatos();
-        }
-      } else {
-        if (datos.mensaje && datos.mensaje.includes("sesión")) {
-          localStorage.removeItem("pp_token");
-          document.getElementById("workspace").classList.add("hidden");
-          document.getElementById("login-view").classList.remove("hidden");
-        } else {
-          alert("Atención: " + datos.mensaje);
-        }
+      if (Object.keys(datos).length === 0) {
+        alert("No hay ningún dato guardado en la aplicación para exportar.");
+        return;
       }
-    } catch (error) {
-      console.error("Error de conexión:", error);
-      alert("Error al conectar con Google Sheets.");
-    } finally {
-      if (btnRefresh) btnRefresh.style.opacity = "1";
-    }
-  }
-
-  // 2. Enviar cierre de orden enviando el token de sesión
-  window.enviarCierreOrden = async function(idOrden, comentario, fotosArray) {
-    const btnCerrar = document.getElementById("btnConfirmarCierre");
-    if (btnCerrar) {
-      btnCerrar.disabled = true;
-      btnCerrar.innerText = "Guardando en Sheets...";
-    }
-
-    const tokenUsuario = localStorage.getItem("pp_token") || "";
-
-    const payload = {
-      accion: "cerrarOrdenConFotos",
-      token: tokenUsuario,
-      idOrden: idOrden || document.getElementById("inputOrdenId")?.value,
-      comentario: comentario || document.getElementById("inputComentarioCierre")?.value || "",
-      fotos: fotosArray || (window.fotosBase64Array ? window.fotosBase64Array : [])
+      const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+      const fecha = new Date().toISOString().split("T")[0];
+      enlace.href = url;
+      enlace.download = `respaldo_papeleria_produccion_${fecha}.json`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+      URL.revokeObjectURL(url);
     };
 
-    try {
-      const respuesta = await fetch(URL_WEB_APP, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const response = await respuesta.json();
-
-      if (btnCerrar) {
-        btnCerrar.disabled = false;
-        btnCerrar.innerText = "Cerrar Orden";
-      }
-
-      if (response && (response.exito || response.ok)) {
-        alert("¡Orden cerrada correctamente!");
-        const modal = document.getElementById("modal");
-        if (modal) modal.close();
-        refrescarModuloWeb();
-      } else {
-        alert("Error al guardar: " + (response ? response.mensaje : "Sin respuesta del servidor."));
-      }
-    } catch (err) {
-      if (btnCerrar) {
-        btnCerrar.disabled = false;
-        btnCerrar.innerText = "Reintentar Cierre";
-      }
-      alert("Error de comunicación con Google Sheets: " + err.message);
-    }
-  };
-
-  // 3. Manejar el inicio de sesión y captura real del token
-  document.getElementById("login-form").addEventListener("submit", async function(e) {
-    e.preventDefault();
-    
-    const btnSubmit = this.querySelector("button");
-    const errorEl = document.getElementById("login-error");
-    errorEl.innerText = "";
-    
-    if (btnSubmit) {
-      btnSubmit.disabled = true;
-      btnSubmit.innerText = "Verificando...";
-    }
-
-    const payload = {
-      accion: "profile_login",
-      name: document.getElementById("login-name").value.trim(),
-      pin: document.getElementById("login-pin").value.trim()
-    };
-
-    try {
-      const respuesta = await fetch(URL_WEB_APP, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const response = await respuesta.json();
-      
-      // Capturamos cualquier token o asignamos uno predeterminado para evitar bloqueos
-      const tokenReal = response.token || response.sesion || response.key || "token_activo_forzado";
-
-      if (response && (response.exito || response.ok)) {
-        localStorage.setItem("pp_token", tokenReal);
-        document.getElementById("login-view").classList.add("hidden");
-        document.getElementById("workspace").classList.remove("hidden");
-        
-        if (typeof window.cargarDatos === "function") {
-          window.cargarDatos();
-        } else {
-          refrescarModuloWeb();
+    window.importarBackup = function(event) {
+      const archivo = event.target.files[0];
+      if (!archivo) return;
+      const lector = new FileReader();
+      lector.onload = function(e) {
+        try {
+          const datos = JSON.parse(e.target.result);
+          for (const clave in datos) {
+            localStorage.setItem(clave, datos[clave]);
+          }
+          alert("¡Copia de seguridad restaurada con éxito! La página se actualizará.");
+          window.location.reload();
+        } catch (error) {
+          alert("Error: El archivo seleccionado no tiene un formato JSON válido.");
         }
-      } else {
-        errorEl.innerText = response.mensaje || response.error || "Credenciales incorrectas.";
-      }
-    } catch (err) {
-      errorEl.innerText = "Error de conexión con el servidor.";
-      console.error(err);
-    } finally {
-      if (btnSubmit) {
-        btnSubmit.disabled = false;
-        btnSubmit.innerText = "Iniciar sesión";
-      }
-    }
-  });
-</script>
+      };
+      lector.readAsText(archivo);
+    };
+  </script>
 </body>
 </html>
