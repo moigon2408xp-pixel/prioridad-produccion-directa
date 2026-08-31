@@ -93,6 +93,54 @@ function getDeliveryDateObj(entregaStr) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// 1. Convertidor seguro de fechas (evita que JavaScript colapse con "Invalid time value")
+function safeParseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+
+  let str = String(value).trim();
+  if (!str) return null;
+
+  // Limpiar textos adicionales comunes
+  if (str.includes(" - ")) str = str.split(" - ")[0];
+  if (str.includes(" a las ")) str = str.split(" a las ")[0];
+
+  // Procesar formato latino DD/MM/YYYY o DD/MM/YYYY HH:MM
+  if (str.includes("/")) {
+    const parts = str.split(" ")[0].split("/");
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const parsed = new Date(year, month, day);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+  }
+
+  // Intento de conversión estándar
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// 2. Formateador de fechas a prueba de errores
+function formatDate(value) {
+  const date = safeParseDate(value);
+  if (!date) return value ? String(value) : "Sin fecha";
+
+  try {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+
+    return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+  } catch (e) {
+    return String(value);
+  }
+}
 const priority = (order) => {
   const deliveryDate = getDeliveryDateObj(order.entrega);
   if (!deliveryDate) return "now";
