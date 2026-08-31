@@ -123,24 +123,39 @@ function safeParseDate(value) {
 }
 
 // 2. Formateador de fechas a prueba de errores
+// Reemplaza cualquier declaración previa de formatDate por este único bloque:
 function formatDate(value) {
-  const date = safeParseDate(value);
-  if (!date) return value ? String(value) : "Sin fecha";
+  if (!value) return "Sin fecha";
+  let str = String(value).trim();
+  if (str.includes("AM") || str.includes("PM")) return str;
 
-  try {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    let hours = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
+  // Limpiar texto adicional
+  if (str.includes(" - ")) str = str.split(" - ")[0];
+  if (str.includes(" a las ")) str = str.split(" a las ")[0];
 
-    return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-  } catch (e) {
-    return String(value);
+  let date;
+  if (str.includes("/")) {
+    const parts = str.split(" ")[0].split("/");
+    if (parts.length === 3) {
+      date = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+    }
+  } else {
+    date = new Date(str);
   }
+
+  if (!date || isNaN(date.getTime())) return String(value);
+
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+
+  return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
 }
+
 const priority = (order) => {
   const deliveryDate = getDeliveryDateObj(order.entrega);
   if (!deliveryDate) return "now";
@@ -159,7 +174,6 @@ const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today:
 const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
-const formatDate = (value) => {
   if (!value) return "Sin fecha";
   let str = String(value).trim();
   if (str.includes("AM") || str.includes("PM")) return str;
