@@ -44,11 +44,6 @@ const normalizeOrder = (o) => ({
   comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
   fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || "").trim(),
   fotoReferencia: String(o.fotoReferencia || o.Referencia_Drive || o.referenciaDrive || "").trim(),
-  inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
-  finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
-  duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
-  ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
-  tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausado || 0),
   cerrado: String(o.cerrado || o.Cerrado || "No").trim()
 });
 
@@ -103,6 +98,43 @@ function applyTheme() {
     .eyebrow, .field-label, .section-heading, small, .meta strong { color: ${textSub}; }
     input, select, textarea { background-color: ${bgCard} !important; color: ${textMain} !important; border-color: ${border} !important; }
     .primary-button { background-color: ${primary} !important; color: #ffffff !important; }
+
+    /* INTEGRACIÓN Y CORRECCIÓN DE LA BARRA NAVEGADORA INFERIOR */
+    .bottom-nav, nav, .nav-bar, .navigation-bar {
+      background-color: ${bgCard} !important;
+      border-top: 1px solid ${border} !important;
+      display: flex !important;
+      justify-content: space-around !important;
+      align-items: center !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      padding: 6px 0 !important;
+      overflow: hidden !important;
+      border-radius: 0 !important;
+    }
+    .nav-button {
+      flex: 1 1 0 !important;
+      min-width: 0 !important;
+      background: transparent !important;
+      border: none !important;
+      color: ${textSub} !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-size: 11px !important;
+      padding: 4px 2px !important;
+    }
+    .nav-button.active {
+      color: ${primary} !important;
+      font-weight: bold !important;
+    }
+    .nav-button svg, .nav-button i, .nav-button span {
+      color: inherit !important;
+      fill: currentColor !important;
+    }
   `;
 }
 
@@ -133,7 +165,7 @@ const priority = (order) => {
 };
 
 const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
-const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
+const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && String(order.cerrado).toLowerCase() !== "sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
 const formatDate = (value) => {
@@ -190,7 +222,7 @@ async function refresh(showMessage = true) {
   try {
     const response = await api("profile_dashboard");
     const rawData = response.data || {};
-    
+
     state.data = {
       myOrders: (rawData.myOrders || []).map(normalizeOrder),
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
@@ -301,7 +333,7 @@ function historyView() {
       const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
       const isEntregado = order.estado === "Entregado";
       const searchHaystack = `${order.cliente} ${order.tipo} ${order.descripcion} ${order.id} ${order.responsable}`.toLowerCase();
-      
+
       return `
       <article class="order-card history-card-item" data-search="${escapeHtml(searchHaystack)}" data-responsable="${escapeHtml(order.responsable.toLowerCase())}" style="border-left: 5px solid ${isEntregado ? '#2e7d32' : '#f57c00'}; margin-bottom:10px;">
         <div class="order-top">
@@ -311,10 +343,9 @@ function historyView() {
         <div class="meta">
           Entrega pactada: ${escapeHtml(formatDate(order.entrega))}<br/>
           Responsable: <strong>${escapeHtml(order.responsable)}</strong><br/>
-          ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
           ${order.descripcion ? `<strong>Motivo/Detalles:</strong> ${escapeHtml(order.descripcion)}<br/>` : ""}
           ${order.comentarioCierre ? `<strong>Observación Cierre:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-          
+
           <div style="margin-top:6px;">
             ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#00838f; font-weight:bold; text-decoration:underline; margin-right:8px;">📌 Ref ${idx + 1}</a>`).join("")}
             ${links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline; margin-right:8px;">📷 Evidencia ${idx + 1}</a>`).join("")}
@@ -348,14 +379,14 @@ function teamView() {
 
 function settingsView() {
   const session = state.session;
-  
+
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
       ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
     </div>
   `).join("");
-  
+
   const ftList = state.frequentTypes.map((t) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:6px;">
       <strong>${escapeHtml(t)}</strong>
@@ -445,38 +476,23 @@ function render() {
   if (!state.session) return;
   applyTheme();
   const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
-  $("#screen-title").textContent = screenNames[state.screen];
-  $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
+  if ($("#screen-title")) $("#screen-title").textContent = screenNames[state.screen];
+  if ($("#role-label")) $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
   $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
-  
+
   document.querySelectorAll(".nav-button").forEach((btn) => btn.classList.toggle("active", btn.dataset.screen === state.screen));
 
-  // Búsqueda fluida sin perder el foco
+  // Búsqueda en tiempo real
   const histInput = $("#history-search-input");
-  if (histInput) {
-    histInput.addEventListener("input", (e) => {
-      state.filters.historySearch = e.target.value;
-      filterHistoryDOM();
-    });
-  }
+  if (histInput) histInput.addEventListener("input", (e) => { state.filters.historySearch = e.target.value; filterHistoryDOM(); });
 
   const histResp = $("#history-resp-filter");
-  if (histResp) {
-    histResp.addEventListener("change", (e) => {
-      state.filters.historyResponsable = e.target.value;
-      filterHistoryDOM();
-    });
-  }
+  if (histResp) histResp.addEventListener("change", (e) => { state.filters.historyResponsable = e.target.value; filterHistoryDOM(); });
 
   const teamInput = $("#team-search-input");
-  if (teamInput) {
-    teamInput.addEventListener("input", (e) => {
-      state.filters.teamSearch = e.target.value;
-      filterTeamDOM();
-    });
-  }
+  if (teamInput) teamInput.addEventListener("input", (e) => { state.filters.teamSearch = e.target.value; filterTeamDOM(); });
 
-  // Theme Listeners
+  // Eventos de selección de temas
   $("#theme-selector")?.addEventListener("change", (e) => {
     state.theme = e.target.value;
     store.set("pp_theme", state.theme);
@@ -488,7 +504,6 @@ function render() {
     applyTheme();
   });
 
-  // Guardar plantilla WhatsApp
   $("#btn-save-wa-template")?.addEventListener("click", async () => {
     const val = $("#wa-template-input").value.trim();
     if (!val) return alert("La plantilla no puede estar vacía");
@@ -496,10 +511,8 @@ function render() {
     store.set("pp_wa_template", val);
     try {
       await api("profile_save_wa_template", { template: val });
-      showToast("Plantilla guardada exitosamente.");
-    } catch (err) {
-      showToast("Guardada localmente.");
-    }
+      showToast("Plantilla guardada.");
+    } catch (err) { showToast("Guardada localmente."); }
   });
 }
 
@@ -508,11 +521,7 @@ function closeModal() { const m = $("#modal"); if (m) m.close(); }
 
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
-  const waMsg = state.waTemplate
-    .replace(/{cliente}/g, order.cliente)
-    .replace(/{tipo}/g, order.tipo)
-    .replace(/{estado}/g, order.estado);
-
+  const waMsg = state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado);
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(waMsg)}`;
 
   openModal(`
@@ -593,7 +602,7 @@ function openFinishModal(order, targetStatus) {
       });
       closeModal();
       await refresh(false);
-      showToast("Pedido finalizado con éxito.");
+      showToast("Pedido finalizado.");
     } catch (err) {
       btn.disabled = false;
       alert(`Error: ${err.message}`);
@@ -679,7 +688,7 @@ function formOrder() {
     if (detalles.length) descParts.push(`Detalles: ${detalles.join(" | ")}`);
 
     if (descParts.length) $("#input-descripcion").value = descParts.join("\n");
-    showToast("Campos autocompletados con éxito.");
+    showToast("Campos autocompletados.");
   });
 
   $("#fc-select")?.addEventListener("change", (e) => {
@@ -719,7 +728,7 @@ function formOrder() {
       });
       closeModal();
       await refresh(false);
-      showToast("Pedido guardado exitosamente.");
+      showToast("Pedido guardado.");
     } catch (err) {
       btn.disabled = false;
       alert(`Error: ${err.message}`);
@@ -808,7 +817,19 @@ document.addEventListener("click", async (e) => {
       try {
         await api("profile_reopen_order", { id: btn.dataset.id });
         await refresh(false);
-        showToast("Pedido reactivado y regresado a la bandeja activa.");
+        showToast("Pedido reactivado y devuelto a pendientes.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
+  if (act === "delete-order") {
+    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente?")) {
+      try {
+        await api("profile_delete_order", { id: btn.dataset.id });
+        closeModal();
+        await refresh(false);
+        showToast("Pedido eliminado.");
       } catch (err) { alert(err.message); }
     }
     return;
@@ -856,18 +877,6 @@ document.addEventListener("click", async (e) => {
         await api("profile_delete_type", { type: btn.dataset.type });
         await refresh(false);
         showToast("Tipo de trabajo eliminado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-
-  if (act === "delete-order") {
-    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente?")) {
-      try {
-        await api("profile_delete_order", { id: btn.dataset.id });
-        closeModal();
-        await refresh(false);
-        showToast("Pedido eliminado correctamente.");
       } catch (err) { alert(err.message); }
     }
     return;
