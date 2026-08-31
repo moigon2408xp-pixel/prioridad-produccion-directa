@@ -20,8 +20,8 @@ const normalizeClient = (c) => {
   }
   if (typeof c === "object") {
     return {
-      name: String(c.name || c.Nombre || c.nombre || c.cliente || c[0] || "").trim(),
-      phone: cleanPhoneNumber(c.phone || c.Telefono || c.telefono || c.celular || c[1] || "")
+      name: String(c.name || c.nombre || c.Nombre || c.cliente || c[0] || "").trim(),
+      phone: cleanPhoneNumber(c.phone || c.telefono || c.Telefono || c.celular || c.tel || c[1] || "")
     };
   }
   return { name: String(c).trim(), phone: "" };
@@ -31,7 +31,7 @@ const normalizeType = (t) => {
   if (!t) return "";
   if (Array.isArray(t)) return String(t[0] || "").trim();
   if (typeof t === "object") {
-    return String(t.type || t.Tipo || t.tipo || t.nombre || t.trabajo || t[0] || "").trim();
+    return String(t.type || t.tipo || t.Tipo || t.nombre || t.trabajo || t.name || t[0] || "").trim();
   }
   return String(t).trim();
 };
@@ -56,13 +56,15 @@ const normalizeOrder = (o) => ({
 });
 
 const normalizeUser = (u) => {
+  if (!u) return { name: "", role: "trabajador", active: true };
   if (Array.isArray(u)) {
     return { name: String(u[0] || "").trim(), role: String(u[1] || "trabajador").toLowerCase().trim(), active: String(u[3] || "Sí").toLowerCase() === "sí" };
   }
+  const isAct = typeof u.active === "boolean" ? u.active : (typeof u.activo === "boolean" ? u.activo : String(u.active || u.activo || u.Activo || "Sí").toLowerCase() === "sí" || u.active === "true");
   return {
-    name: String(u.name || u.Nombre || "").trim(),
-    role: String(u.role || u.Perfil || "trabajador").toLowerCase().trim(),
-    active: String(u.active || u.Activo || "Sí").toLowerCase() === "sí" || u.active === true || u.active === "true"
+    name: String(u.name || u.nombre || u.Nombre || "").trim(),
+    role: String(u.role || u.rol || u.Perfil || "trabajador").toLowerCase().trim(),
+    active: isAct
   };
 };
 
@@ -162,20 +164,20 @@ async function refresh(showMessage = true) {
   if (btnRefresh) btnRefresh.textContent = "…";
   try {
     const response = await api("profile_dashboard");
-    const rawData = response.data || {};
+    const rawData = response.data || response || {};
     
     state.data = {
       myOrders: (rawData.myOrders || []).map(normalizeOrder),
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
-      allOrders: (rawData.allOrders || []).map(normalizeOrder),
-      finishedOrders: (rawData.finishedOrders || []).map(normalizeOrder),
-      users: (rawData.users || []).map(normalizeUser)
+      allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder),
+      finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || rawData.completedOrders || []).map(normalizeOrder),
+      users: (rawData.allUsers || rawData.users || rawData.trabajadores || []).map(normalizeUser)
     };
 
-    const rawClients = rawData.frequentClients || rawData.clientes || rawData.clientesFrecuentes || [];
-    const rawTypes = rawData.frequentTypes || rawData.tipos || rawData.tiposTrabajo || [];
+    const rawClients = rawData.frequentClients || rawData.clients || rawData.clientes || rawData.telefonos || rawData.phones || [];
+    const rawTypes = rawData.frequentTypes || rawData.types || rawData.tipos || rawData.tiposTrabajo || rawData.typesObjects || [];
 
-    state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre");
+    state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre" && c.name.toLowerCase() !== "cliente");
     state.frequentTypes = rawTypes.map(normalizeType).filter(t => t && t.toLowerCase() !== "tipo");
     state.waTemplate = rawData.waTemplate || state.waTemplate;
     state.offline = false;
@@ -184,6 +186,7 @@ async function refresh(showMessage = true) {
     render();
     if (showMessage) showToast("Información sincronizada.");
   } catch (error) {
+    console.error("Error al sincronizar:", error);
     state.offline = true;
     render();
     const errMsg = (error && error.message) ? error.message : "Modo sin conexión.";
@@ -192,6 +195,8 @@ async function refresh(showMessage = true) {
     if (btnRefresh) btnRefresh.textContent = "↻";
   }
 }
+
+window.cargarDatos = refresh;
 
 function priorityPill(order) {
   const val = priority(order);
