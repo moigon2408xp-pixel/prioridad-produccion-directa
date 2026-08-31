@@ -93,31 +93,6 @@ function getDeliveryDateObj(entregaStr) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function safeParseDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-
-  let str = String(value).trim();
-  if (!str) return null;
-
-  if (str.includes(" - ")) str = str.split(" - ")[0];
-  if (str.includes(" a las ")) str = str.split(" a las ")[0];
-
-  if (str.includes("/")) {
-    const parts = str.split(" ")[0].split("/");
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const year = parseInt(parts[2], 10);
-      const parsed = new Date(year, month, day);
-      if (!isNaN(parsed.getTime())) return parsed;
-    }
-  }
-
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
-
 function formatDate(value) {
   if (!value) return "Sin fecha";
   let str = String(value).trim();
@@ -163,7 +138,6 @@ const priority = (order) => {
 };
 
 const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
-
 const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
@@ -188,9 +162,7 @@ async function api(action, extra = {}) {
     });
 
     const data = await response.json();
-    if (!data) throw new Error("El servidor devolvió una respuesta vacía.");
     if (data && (data.ok || data.exito)) return data;
-    
     throw new Error(data?.error || data?.mensaje || "Error al procesar solicitud.");
   } catch (err) {
     if (err.message && err.message.includes("Failed to fetch")) {
@@ -327,8 +299,7 @@ function teamView() {
 }
 
 function settingsView() {
-  const session = state.session;
-
+  const session = state.session || {};
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
@@ -353,8 +324,8 @@ function settingsView() {
   return `
     <div class="card settings-card" style="padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px;">
       <h3>Mi perfil</h3>
-      <div class="detail-row"><span>NOMBRE:</span> <strong>${escapeHtml(session ? session.name : "")}</strong></div>
-      <div class="detail-row"><span>ROL:</span> <strong>${escapeHtml(session ? session.role : "")}</strong></div>
+      <div class="detail-row"><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
+      <div class="detail-row"><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
       <button class="secondary-button" data-action="logout" style="margin-top:10px;">Cerrar sesión</button>
       <button class="secondary-button" data-action="clear-cache" style="margin-top:8px;">🧹 Limpiar Caché Local</button>
     </div>
@@ -377,12 +348,31 @@ function settingsView() {
 
 function render() {
   if (!state.session) return;
-  const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
-  $("#screen-title").textContent = screenNames[state.screen];
-  $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
-  $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
+  try {
+    const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
+    
+    const titleEl = $("#screen-title");
+    if (titleEl) titleEl.textContent = screenNames[state.screen] || "Ahora";
 
-  document.querySelectorAll(".nav-button").forEach((btn) => btn.classList.toggle("active", btn.dataset.screen === state.screen));
+    const roleLabelEl = $("#role-label");
+    if (roleLabelEl) {
+      const roleStr = String(state.session.role || "trabajador").toUpperCase();
+      const nameStr = String(state.session.name || "Usuario").toUpperCase();
+      roleLabelEl.textContent = `${roleStr} · ${nameStr}`;
+    }
+
+    const screenEl = $("#screen");
+    if (screenEl) {
+      const views = { now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView };
+      screenEl.innerHTML = (views[state.screen] || views.now)();
+    }
+
+    document.querySelectorAll(".nav-button").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.screen === state.screen);
+    });
+  } catch (err) {
+    console.error("Error durante el renderizado:", err);
+  }
 }
 
 function openModal(content) { const m = $("#modal"); if (m) { m.innerHTML = `<div class="modal-content">${content}</div>`; m.showModal(); } }
@@ -410,7 +400,7 @@ function detail(order) {
     ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
   `);
 
-  $("#status-change-select").addEventListener("change", async (e) => {
+  $("#status-change-select")?.addEventListener("change", async (e) => {
     const val = e.target.value;
     if (["Terminado", "Entregado"].includes(val)) {
       closeModal();
@@ -441,14 +431,14 @@ function openFinishModal(order, targetStatus) {
     </form>
   `);
 
-  $("#finish-form").addEventListener("submit", async (e) => {
+  $("#finish-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
     btn.textContent = "Guardando e subiendo evidencias...";
 
     const filesInput = $("#evidencia-files");
-    const files = Array.from(filesInput.files).slice(0, 3);
+    const files = filesInput ? Array.from(filesInput.files).slice(0, 3) : [];
     const imagesData = [];
 
     for (const f of files) {
@@ -522,8 +512,10 @@ function formOrder() {
   $("#fc-select")?.addEventListener("change", (e) => {
     if (e.target.value !== "") {
       const c = clients[e.target.value];
-      $("#input-cliente").value = c.name;
-      $("#input-telefono").value = c.phone || "";
+      if (c) {
+        $("#input-cliente").value = c.name || "";
+        $("#input-telefono").value = c.phone || "";
+      }
     }
   });
 
@@ -531,7 +523,7 @@ function formOrder() {
     if (e.target.value && e.target.value !== "__CUSTOM__") $("#input-tipo").value = e.target.value;
   });
 
-  $("#order-form").addEventListener("submit", async (e) => {
+  $("#order-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
@@ -567,7 +559,7 @@ function formNewUser() {
     </form>
   `);
 
-  $("#user-form").addEventListener("submit", async (e) => {
+  $("#user-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
@@ -595,7 +587,8 @@ if (loginForm) {
       $("#workspace")?.classList.remove("hidden");
       await refresh(false);
     } catch (err) {
-      $("#login-error").textContent = err.message;
+      const errEl = $("#login-error");
+      if (errEl) errEl.textContent = err.message;
     }
   });
 }
