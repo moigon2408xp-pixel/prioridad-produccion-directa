@@ -1,7 +1,8 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 7.5 - Frontend JavaScript (app-registrar-fix.js)
- * Incluye Cambio de Tema Reactivo, Reapertura de Pedidos y Fotos de Referencia.
+ * Versión 8.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * Incluye Temas Reactivos en Vivo, Buscador Global, Motivo/Temática,
+ * Pegado Mágico con Días de la Semana, Alertas de Complejidad y Rendimiento Diario.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -22,7 +23,7 @@ const store = {
   },
 };
 
-// ==== GESTIÓN Y GENERADOR DE TEMAS PERSONALIZADOS EN TIEMPO REAL ====
+// ==== 1. GESTIÓN Y INYECCIÓN REACTIVA DE TEMAS Y COLORES ====
 function applyTheme() {
   const currentTheme = store.get("pp_theme", "light");
   const currentAccent = store.get("pp_accent", "blue");
@@ -31,31 +32,32 @@ function applyTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
   document.documentElement.setAttribute("data-accent", currentAccent);
   
-  // Aplicar o remover colores personalizados dinámicamente
+  let styleEl = $("#dynamic-theme-style");
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = "dynamic-theme-style";
+    document.head.appendChild(styleEl);
+  }
+  
+  let cssRules = [];
   if (customColors.primary) {
-    document.documentElement.style.setProperty("--primary-color", customColors.primary);
-    document.documentElement.style.setProperty("--primary-hover", customColors.primary);
-  } else {
-    document.documentElement.style.removeProperty("--primary-color");
-    document.documentElement.style.removeProperty("--primary-hover");
+    cssRules.push(`--primary-color: ${customColors.primary} !important;`);
+    cssRules.push(`--primary-hover: ${customColors.primary} !important;`);
   }
-
   if (customColors.cardBg) {
-    document.documentElement.style.setProperty("--bg-card", customColors.cardBg);
-  } else {
-    document.documentElement.style.removeProperty("--bg-card");
+    cssRules.push(`--bg-card: ${customColors.cardBg} !important;`);
   }
-
   if (customColors.textMain) {
-    document.documentElement.style.setProperty("--text-main", customColors.textMain);
-  } else {
-    document.documentElement.style.removeProperty("--text-main");
+    cssRules.push(`--text-main: ${customColors.textMain} !important;`);
   }
-
   if (customColors.mainBg) {
-    document.documentElement.style.setProperty("--bg-main", customColors.mainBg);
+    cssRules.push(`--bg-main: ${customColors.mainBg} !important;`);
+  }
+  
+  if (cssRules.length > 0) {
+    styleEl.textContent = `:root, [data-theme="dark"], [data-theme="light"] { ${cssRules.join(" ")} }`;
   } else {
-    document.documentElement.style.removeProperty("--bg-main");
+    styleEl.textContent = "";
   }
 
   const icon = $("#theme-icon");
@@ -88,7 +90,7 @@ function resetCustomTheme() {
   store.set("pp_theme", "light");
   store.set("pp_accent", "blue");
   applyTheme();
-  showToast("Tema restablecido a los valores por defecto.");
+  showToast("Tema restablecido a valores por defecto.");
 }
 
 function cleanPhoneNumber(phone = "") {
@@ -99,6 +101,7 @@ function cleanPhoneNumber(phone = "") {
   return num;
 }
 
+// ==== 2. FORMATEO Y PARSEO DE FECHAS ESTANDARIZADO ====
 function safeParseDate(value) {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
@@ -140,7 +143,7 @@ function formatDate(value) {
   }
 }
 
-// Normalizadores universales de datos
+// Universal Normalizers
 const normalizeClient = (c) => {
   if (!c) return { name: "", phone: "" };
   if (Array.isArray(c)) {
@@ -168,6 +171,7 @@ const normalizeOrder = (o) => ({
   id: String(o.id || o['ID Pedido'] || o.ID || "").trim(),
   cliente: String(o.cliente || o.Cliente || "Sin cliente").trim(),
   tipo: String(o.tipo || o['Tipo de trabajo'] || o.Tipo || o.trabajo || "Sin tipo").trim(),
+  motivo: String(o.motivo || o.Motivo || o['Temática'] || o.tematica || "").trim(),
   descripcion: String(o.descripcion || o.Descripción || "").trim(),
   entrega: String(o.entrega || o['Fecha entrega'] || o.Entrega || "").trim(),
   responsable: String(o.responsable || o.Responsable || "Sin asignar").trim(),
@@ -205,23 +209,40 @@ const state = {
   frequentTypes: [],
   waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
+  searchQuery: "",
   offline: false,
-  data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [] },
+  data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} },
 };
 
 const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
 }[char]));
 
+// ==== 3. CÁLCULO DE PRIORIDAD Y COMPLEJIDAD (MAQUETAS VS TOPPERS) ====
+const getEstimatedPrepDays = (tipo = "") => {
+  const t = tipo.toLowerCase();
+  if (t.includes("maqueta") || t.includes("caja explosiva") || t.includes("estructura")) return 4;
+  if (t.includes("piñata") || t.includes("banderín")) return 2;
+  return 1; // Topper u otros
+};
+
 const priority = (order) => {
   const deliveryDate = safeParseDate(order.entrega);
   if (!deliveryDate) return "now";
+  
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const checkDate = new Date(deliveryDate);
   checkDate.setHours(0, 0, 0, 0);
+  
   if (checkDate < today) return "overdue";
-  if (checkDate.getTime() === today.getTime()) return "today";
+  
+  // Alerta temprana basada en días de preparación por complejidad
+  const prepDays = getEstimatedPrepDays(order.tipo);
+  const diffDays = Math.ceil((checkDate - today) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays <= prepDays) return "now"; // Requiere empezar ya
+  if (diffDays <= prepDays + 1) return "today";
   return "later";
 };
 
@@ -245,7 +266,7 @@ function showToast(message) {
   window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
-// ==== GENERADOR DE HORARIOS DE 7 AM A 9 PM ====
+// ==== GENERADOR DE HORARIOS ====
 function generateTimeOptions(selectedTime = "11:00 AM") {
   const hours = [
     "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
@@ -255,12 +276,13 @@ function generateTimeOptions(selectedTime = "11:00 AM") {
   return hours.map(h => `<option value="${h}" ${h === selectedTime ? "selected" : ""}>${h}</option>`).join("");
 }
 
-// ==== PARSER DE PEGADO MÁGICO ====
+// ==== 4. PEGADO MÁGICO CON DETECCIÓN DE DÍAS DE LA SEMANA ====
 function parseMagicPasteText(rawText) {
   const result = {
     cliente: "",
     telefono: "",
     tipo: "",
+    motivo: "",
     fechaEntrega: "",
     horaEntrega: "11:00 AM",
     descripcion: rawText.trim()
@@ -270,19 +292,28 @@ function parseMagicPasteText(rawText) {
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   
-  const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,]+)/i);
+  // Extraer Cliente
+  const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,*]+)/i);
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
   } else if (lines.length > 0 && !lines[0].includes(":")) {
     result.cliente = lines[0].replace(/^hola,?\s*/i, "").trim();
   }
   
+  // Extraer Teléfono
   const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
   if (phoneMatch) {
     result.telefono = cleanPhoneNumber(phoneMatch[0]);
   }
   
-  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,]+)/i);
+  // Extraer Motivo / Temática
+  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema)[:\s]+([^\n\r,*]+)/i);
+  if (motivoMatch) {
+    result.motivo = motivoMatch[1].trim();
+  }
+
+  // Extraer Tipo de Trabajo
+  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,*]+)/i);
   if (typeMatch) {
     result.tipo = typeMatch[1].trim();
   } else {
@@ -294,17 +325,45 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
-  if (dateMatch) {
-    const parsedDate = safeParseDate(dateMatch[0]);
-    if (parsedDate) {
-      const year = parsedDate.getFullYear();
-      const month = (parsedDate.getMonth() + 1).toString().padStart(2, '0');
-      const day = parsedDate.getDate().toString().padStart(2, '0');
+  // Extraer Fecha por Días de la Semana (Ej: "Entregar: Miércoles")
+  const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
+  const dayMatch = rawText.match(/(?:entregar|fecha|para)[:\s]*([a-záéíóúñ]+)/i);
+  
+  if (dayMatch) {
+    const matchedWord = dayMatch[1].toLowerCase();
+    const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
+    
+    if (dayIdx !== -1) {
+      const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx)); // Normalizar tildes
+      const today = new Date();
+      const currentDayOfWeek = today.getDay(); // 0: Dom, 1: Lun...
+      
+      let diff = targetDayOfWeek - currentDayOfWeek;
+      if (diff <= 0) diff += 7; // Si ya pasó esta semana, apuntar al de la próxima semana
+      
+      const targetDate = new Date(today.setDate(today.getDate() + diff));
+      const year = targetDate.getFullYear();
+      const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
+      const day = targetDate.getDate().toString().padStart(2, '0');
       result.fechaEntrega = `${year}-${month}-${day}`;
     }
   }
+
+  // Parseo de fechas numéricas estándar si no fue un día relativo
+  if (!result.fechaEntrega) {
+    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
+    if (dateMatch) {
+      const parsedDate = safeParseDate(dateMatch[0]);
+      if (parsedDate) {
+        const year = parsedDate.getFullYear();
+        const month = (parsedDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = parsedDate.getDate().toString().padStart(2, '0');
+        result.fechaEntrega = `${year}-${month}-${day}`;
+      }
+    }
+  }
   
+  // Extraer Hora
   const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (timeMatch) {
     let hourNum = parseInt(timeMatch[1], 10);
@@ -331,7 +390,7 @@ async function api(action, extra = {}) {
     throw new Error(data?.error || data?.mensaje || "Error al procesar la solicitud.");
   } catch (err) {
     if (err.message && err.message.includes("Failed to fetch")) {
-      throw new Error("Error de conexión con Google Sheets. Verifica tu conexión a internet.");
+      throw new Error("Error de conexión con Google Sheets. Verifica tu internet.");
     }
     throw err;
   }
@@ -349,7 +408,8 @@ async function refresh(showMessage = true) {
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
       allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder),
       finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || []).map(normalizeOrder),
-      users: (rawData.allUsers || rawData.users || []).map(normalizeUser)
+      users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
+      dailyPerformance: rawData.dailyPerformance || {}
     };
     
     const rawClients = rawData.frequentClients || rawData.clients || rawData.clientes || rawData.telefonos || [];
@@ -383,9 +443,14 @@ function priorityPill(order) {
 }
 
 function orderCard(order, position) {
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}">
+  const isCrit = priority(order) === "overdue" || priority(order) === "now";
+  return `<button class="order-card ${isCrit ? 'critical-alert' : ''}" data-action="detail" data-id="${escapeHtml(order.id)}">
     <div class="order-top">
-      <div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
+      <div>
+        <h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)}</h3>
+        <p>${escapeHtml(order.tipo)}</p>
+        ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
+      </div>
       ${priorityPill(order)}
     </div>
     <div class="meta">
@@ -394,6 +459,23 @@ function orderCard(order, position) {
       Teléfono: ${escapeHtml(order.telefono || "No registrado")}
     </div>
   </button>`;
+}
+
+function filterOrdersBySearch(orders = []) {
+  if (!state.searchQuery.trim()) return orders;
+  const q = state.searchQuery.toLowerCase().trim();
+  return orders.filter(o => {
+    return (
+      o.id.toLowerCase().includes(q) ||
+      o.cliente.toLowerCase().includes(q) ||
+      o.tipo.toLowerCase().includes(q) ||
+      o.motivo.toLowerCase().includes(q) ||
+      o.responsable.toLowerCase().includes(q) ||
+      o.descripcion.toLowerCase().includes(q) ||
+      o.telefono.includes(q) ||
+      formatDate(o.entrega).toLowerCase().includes(q)
+    );
+  });
 }
 
 function sortOrdersByUrgency(orders) {
@@ -422,7 +504,7 @@ function nowView() {
     (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
   );
   return `${state.offline ? '<p class="offline">Mostrando información guardada localmente.</p>' : ""}
-  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
+  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} ${next.motivo ? `(${escapeHtml(next.motivo)})` : ''} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
   <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">CRÍTICOS DEL EQUIPO</p>
   <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay pedidos críticos en el taller.</div>'}</div>`;
 }
@@ -432,45 +514,72 @@ function queueView() {
   return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes</strong></div>';
 }
 
+// ==== 5. VISTA HISTORIAL CON BÚSQUEDA Y REAPERTURA ====
 function historyView() {
-  const orders = state.data.finishedOrders || [];
-  if (!orders.length) return '<div class="empty"><strong>No hay proyectos terminados en el historial</strong></div>';
-  return `<div class="order-list">${orders.map((order) => {
-    const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
-    return `
-      <article class="order-card">
-        <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
-          <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
-          <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
-        </div>
-        <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
-          Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
-          Responsable: ${escapeHtml(order.responsable)}<br/>
-          ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
-          ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-          ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--primary-color); font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px; margin-top:6px;">📷 Foto / Referencia ${idx + 1}</a>`).join("") : ""}
-        </div>
-        ${isLead() ? `
-          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
-            ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
-          </div>
-        ` : ''}
-      </article>
-    `;
-  }).join('')}</div>`;
+  const rawOrders = state.data.finishedOrders || [];
+  const orders = filterOrdersBySearch(rawOrders);
+  
+  return `
+    <div class="search-bar-container" style="margin-bottom:16px;">
+      <span>🔍</span>
+      <input type="text" id="history-search-input" placeholder="Buscar por cliente, teléfono, motivo, ID (PED-0001) o trabajador..." value="${escapeHtml(state.searchQuery)}">
+    </div>
+    ${!orders.length ? '<div class="empty"><strong>No hay proyectos terminados que coincidan con la búsqueda.</strong></div>' : `
+      <div class="order-list">${orders.map((order) => {
+        const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+        return `
+          <article class="order-card">
+            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
+              <div>
+                <h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
+                <p>${escapeHtml(order.tipo)}</p>
+                ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
+              </div>
+              <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
+            </div>
+            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
+              Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
+              Responsable: ${escapeHtml(order.responsable)}<br/>
+              ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
+              ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
+              ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="ref-photo-badge">📷 Foto / Evidencia ${idx + 1}</a>`).join("") : ""}
+            </div>
+            ${isLead() ? `
+              <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
+                ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+              </div>
+            ` : ''}
+          </article>
+        `;
+      }).join('')}</div>
+    `}
+  `;
 }
 
+// ==== 6. VISTA EQUIPO CON BUSCADOR GLOBAL ====
 function teamView() {
-  const orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
-  return `<div class="actions" style="margin-bottom:16px;"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div>
-  <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
-  <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
+  const rawOrders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
+  const orders = filterOrdersBySearch(rawOrders);
+  
+  return `
+    <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+      <button class="primary-button" data-action="new-order">＋ Registrar pedido</button>
+    </div>
+    <div class="search-bar-container" style="margin-bottom:16px;">
+      <span>🔍</span>
+      <input type="text" id="team-search-input" placeholder="Buscar por cliente, teléfono, motivo, ID o trabajador..." value="${escapeHtml(state.searchQuery)}">
+    </div>
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
+    <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos que coincidan con la búsqueda.</div>'}</div>
+  `;
 }
 
+// ==== 7. AJUSTES Y PANEL DE RENDIMIENTO DIARIO PARA GERENCIA ====
 function settingsView() {
   const session = state.session || {};
   const customColors = store.get("pp_custom_colors", {});
+  const dailyPerf = state.data.dailyPerformance || {};
   
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
@@ -492,7 +601,15 @@ function settingsView() {
       <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
     </div>
   `).join("");
-  
+
+  // Construir Panel de Rendimiento Diario para Gerencia
+  const perfRows = Object.keys(dailyPerf).map(uName => `
+    <div style="display:flex; justify-content:space-between; padding:8px 12px; background:var(--bg-main); border-radius:6px; margin-bottom:6px;">
+      <span><strong>${escapeHtml(uName)}</strong></span>
+      <span>🏆 <strong>${dailyPerf[uName].completedToday}</strong> pedidos hoy (${dailyPerf[uName].totalMinToday} min)</span>
+    </div>
+  `).join("");
+
   return `
     <div class="card settings-card" style="padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-card); margin-bottom:20px;">
       <h3 style="margin-bottom:14px;">Mi Perfil y Personalización</h3>
@@ -547,6 +664,12 @@ function settingsView() {
     </div>
     
     ${isLead() ? `
+      <!-- PANEL DE RENDIMIENTO DIARIO -->
+      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📊 RENDIMIENTO Y PRODUCCIÓN DE HOY</p>
+      <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
+        ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos el día de hoy.</div>'}
+      </div>
+
       <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
       <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
@@ -592,6 +715,35 @@ function render() {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
 
+    // Eventos de búsqueda en tiempo real
+    $("#history-search-input")?.addEventListener("input", (e) => {
+      state.searchQuery = e.target.value;
+      const filtered = filterOrdersBySearch(state.data.finishedOrders || []);
+      const container = $(".order-list");
+      if (container) {
+        container.innerHTML = filtered.map(order => `
+          <article class="order-card">
+            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
+              <div><h3>${escapeHtml(order.cliente)} <small>(${escapeHtml(order.id)})</small></h3><p>${escapeHtml(order.tipo)}</p></div>
+              <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
+            </div>
+            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
+              Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
+              Responsable: ${escapeHtml(order.responsable)}<br/>
+              ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
+            </div>
+          </article>
+        `).join("");
+      }
+    });
+
+    $("#team-search-input")?.addEventListener("input", (e) => {
+      state.searchQuery = e.target.value;
+      const filtered = filterOrdersBySearch(sortOrdersByUrgency((state.data.allOrders || []).filter(active)));
+      const container = $(".order-list");
+      if (container) container.innerHTML = filtered.map(orderCard).join("");
+    });
+
     $("#save-wa-template-btn")?.addEventListener("click", () => {
       const val = $("#wa-template-input")?.value || "";
       state.waTemplate = val;
@@ -625,6 +777,7 @@ function detail(order) {
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="detail-grid">
       <div class="detail-row"><span>TIPO DE TRABAJO</span><strong>${escapeHtml(order.tipo)}</strong></div>
+      ${order.motivo ? `<div class="detail-row"><span>MOTIVO / TEMÁTICA</span><strong>${escapeHtml(order.motivo)}</strong></div>` : ''}
       <div class="detail-row"><span>CAMBIAR ESTADO</span>
         <select id="status-change-select" data-id="${escapeHtml(order.id)}">
           ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
@@ -633,7 +786,7 @@ function detail(order) {
       <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable)}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
-      <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
+      <div class="detail-row"><span>DESCRIPCIÓN / MEDIDAS</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
       ${links.length ? `
         <div class="detail-row" style="grid-column:1/-1;">
           <span>📷 FOTOS DE REFERENCIA / EVIDENCIA:</span>
@@ -678,7 +831,7 @@ function openFinishModal(order, targetStatus) {
       <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
         <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración o imprevistos..."></textarea>
       </label>
-      <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA (HASTA 3 FOTOS)</span>
+      <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA DE CIERRE (HASTA 3 FOTOS)</span>
         <input type="file" id="evidencia-files" accept="image/*" multiple>
       </label>
       <div id="file-preview-list" style="font-size:12px; color:var(--text-muted);"></div>
@@ -733,10 +886,10 @@ function formOrder() {
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
     
-    <!-- CONTENEDOR DE PEGADO MÁGICO -->
+    <!-- PEGADO MÁGICO -->
     <div class="magic-paste-box">
-      <div class="magic-paste-title">✨ Pegado Mágico (Desde WhatsApp / Instagram)</div>
-      <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Cliente: Ana Perez, Tel: 04141234567, Tipo: Topper Acrílico, Entrega: 05/09/2026 3:00 PM')"></textarea>
+      <div class="magic-paste-title">✨ Pegado Mágico (WhatsApp / Plantillas de Reposteras)</div>
+      <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Medida 1kl: 14x14cm, Nombre: Yolber, Entregar: Miércoles')"></textarea>
       <button type="button" id="magic-paste-btn" class="secondary-button" style="background:var(--primary-color); color:white; border:none;">🪄 Analizar y Llenar Campos</button>
     </div>
 
@@ -750,11 +903,15 @@ function formOrder() {
       
       <label class="field"><span class="field-label">TIPO DE TRABAJO</span>
         ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar existente --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro nuevo...</option></select>` : ''}
-        <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico">
+        <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico, Maqueta...">
+      </label>
+
+      <label class="field"><span class="field-label">🎨 MOTIVO / TEMÁTICA (EJ: Hello Kitty, Frozen...)</span>
+        <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
       </label>
 
       <!-- ADJUNTAR FOTOS DE REFERENCIA DEL CLIENTE -->
-      <label class="field"><span class="field-label">🖼️ ADJUNTAR FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
+      <label class="field"><span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
         <input type="file" id="reference-files-input" accept="image/*" multiple>
       </label>
 
@@ -769,7 +926,7 @@ function formOrder() {
       <label class="field"><span class="field-label">RESPONSABLE</span>
         <select name="responsable"><option value="">Sin asignar</option>${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")}</select>
       </label>
-      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea id="input-descripcion" name="descripcion" placeholder="Detalles del pedido..."></textarea></label>
+      <label class="field"><span class="field-label">DESCRIPCIÓN / MEDIDAS</span><textarea id="input-descripcion" name="descripcion" placeholder="Detalles, medidas, edad, posición..."></textarea></label>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
     </form>
   `);
@@ -786,6 +943,7 @@ function formOrder() {
     if (parsed.cliente) $("#input-cliente").value = parsed.cliente;
     if (parsed.telefono) $("#input-telefono").value = parsed.telefono;
     if (parsed.tipo) $("#input-tipo").value = parsed.tipo;
+    if (parsed.motivo) $("#input-motivo").value = parsed.motivo;
     if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
     if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
     if (parsed.descripcion) $("#input-descripcion").value = parsed.descripcion;
