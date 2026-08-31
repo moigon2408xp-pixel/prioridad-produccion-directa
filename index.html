@@ -12,6 +12,16 @@
   <title>Prioridad Producción</title>
 </head>
 <body>
+<div class="backup-container" style="margin: 20px 0; display: flex; gap: 12px; flex-wrap: wrap;">
+  <button type="button" onclick="exportarBackup()" style="padding: 10px 16px; background-color: #8b5cf6; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+    📥 Exportar Copia de Seguridad
+  </button>
+
+  <label style="padding: 10px 16px; background-color: #2563eb; color: white; border-radius: 8px; font-weight: bold; cursor: pointer; display: inline-block;">
+    📤 Importar Copia de Seguridad
+    <input type="file" id="importInput" accept=".json" onchange="importarBackup(event)" style="display: none;">
+  </label>
+</div>
   <div class="app-shell">
     <section id="login-view" class="unlock-screen">
       <img src="./icons/icon-192.png" alt="" class="unlock-logo"/>
