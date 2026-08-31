@@ -13,7 +13,6 @@ function cleanPhoneNumber(phone = "") {
   return num;
 }
 
-// Normalización universal (Soporta Arrays de Sheets y Objetos JSON)
 const normalizeClient = (c) => {
   if (!c) return { name: "", phone: "" };
   if (Array.isArray(c)) {
@@ -102,7 +101,6 @@ const priority = (order) => {
 
 const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
 
-// Un pedido solo está activo si no ha sido finalizado, entregado o cancelado
 const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
@@ -136,15 +134,22 @@ async function api(action, extra = {}) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
   const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
 
-  const response = await fetch(baseUrl, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const response = await fetch(baseUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
 
-  const data = await response.json();
-  if (data && (data.ok || data.exito)) return data;
-  throw new Error(data?.error || data?.mensaje || "Error al procesar la solicitud.");
+    const data = await response.json();
+    if (data && (data.ok || data.exito)) return data;
+    throw new Error(data?.error || data?.mensaje || "Error al procesar solicitud.");
+  } catch (err) {
+    if (err.message.includes("Failed to fetch")) {
+      throw new Error("Error de conexión con Google Sheets. Verifica tu conexión a internet.");
+    }
+    throw err;
+  }
 }
 
 async function refresh(showMessage = true) {
@@ -176,7 +181,7 @@ async function refresh(showMessage = true) {
   } catch (error) {
     state.offline = true;
     render();
-    if (showMessage) showToast("Modo sin conexión.");
+    if (showMessage) showToast(error.message || "Modo sin conexión.");
   } finally {
     if (btnRefresh) btnRefresh.textContent = "↻";
   }
@@ -215,7 +220,6 @@ function sortOrdersByUrgency(orders) {
   });
 }
 
-// Filtra órdenes asignadas estrictamente al usuario conectado
 function getMyOpenOrders() {
   const currentUser = String(state.session?.name || "").toLowerCase().trim();
   return sortOrdersByUrgency(
@@ -268,8 +272,15 @@ function teamView() {
 
 function settingsView() {
   const session = state.session;
-  const fcList = state.frequentClients.map((c, i) => `<div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;"><div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div></div>`).join("");
-  const ftList = state.frequentTypes.map((t) => `<div class="user-card" style="padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;"><strong>${escapeHtml(t)}</strong></div>`).join("");
+  const fcList = state.frequentClients.map((c) => `<div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;"><div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div></div>`).join("");
+  
+  const ftList = state.frequentTypes.map((t) => `
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
+      <strong>${escapeHtml(t)}</strong>
+      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️ Eliminar</button>` : ''}
+    </div>
+  `).join("");
+
   const usersList = (state.data.users || []).map((u) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(u.name)}</strong> <small>(${escapeHtml(u.role)})</small><br/><span style="color:${u.active ? 'green' : 'red'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
@@ -292,11 +303,12 @@ function settingsView() {
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
     ` : ''}
 
+    <p class="section-heading">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
+    ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:10px;">＋ Agregar Tipo de Trabajo</button>` : ''}
+    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
+
     <p class="section-heading">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
     <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
-
-    <p class="section-heading">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados en Google Sheets.</div>'}</div>
   `;
 }
 
@@ -318,7 +330,7 @@ function detail(order) {
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado))}`;
 
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p>2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
+    <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="detail-grid">
       <div class="detail-row"><span>TIPO DE TRABAJO</span><strong>${escapeHtml(order.tipo)}</strong></div>
       <div class="detail-row"><span>CAMBIAR ESTADO</span>
@@ -332,6 +344,7 @@ function detail(order) {
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
     </div>
     ${rawPhone ? `<div class="actions" style="margin-top:12px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block;">📲 Notificar por WhatsApp</a></div>` : ""}
+    ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
   `);
 
   $("#status-change-select").addEventListener("change", async (e) => {
@@ -355,14 +368,14 @@ function formOrder() {
     <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
     <form id="order-form" class="form-grid">
       ${clients.length ? `
-        <label class="field"><span class="field-label">CLIENTE FRECUENTE</span>
-          <select id="fc-select"><option value="">-- Seleccionar de Google Sheets --</option>${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone)})</option>`).join("")}</select>
+        <label class="field"><span class="field-label">SELECCIONAR CLIENTE GUARDADO</span>
+          <select id="fc-select"><option value="">-- Autocompletar datos --</option>${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone || "Sin tel.")})</option>`).join("")}</select>
         </label>` : ''}
-      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required></label>
-      <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" placeholder="Ej. 04121234567"></label>
+      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente"></label>
+      <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" type="tel" placeholder="Ingresa o cambia el número"></label>
       
       <label class="field"><span class="field-label">TIPO DE TRABAJO</span>
-        ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar de Google Sheets --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro...</option></select>` : ''}
+        ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar existente --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro nuevo...</option></select>` : ''}
         <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico">
       </label>
 
@@ -380,7 +393,7 @@ function formOrder() {
       <label class="field"><span class="field-label">RESPONSABLE</span>
         <select name="responsable"><option value="">Sin asignar</option>${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")}</select>
       </label>
-      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion"></textarea></label>
+      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion" placeholder="Detalles del pedido..."></textarea></label>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
     </form>
   `);
@@ -389,7 +402,7 @@ function formOrder() {
     if (e.target.value !== "") {
       const c = clients[e.target.value];
       $("#input-cliente").value = c.name;
-      $("#input-telefono").value = c.phone;
+      $("#input-telefono").value = c.phone || "";
     }
   });
 
@@ -405,7 +418,7 @@ function formOrder() {
       await api("profile_create_order", { form: Object.fromEntries(new FormData(e.target)) });
       closeModal();
       await refresh(false);
-      showToast("Pedido guardado.");
+      showToast("Pedido guardado exitosamente.");
     } catch (err) {
       btn.disabled = false;
       alert(`Error: ${err.message}`);
@@ -438,11 +451,10 @@ function formNewUser() {
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
     try {
-      const data = Object.fromEntries(new FormData(e.target));
-      await api("profile_create_user", data);
+      await api("profile_create_user", Object.fromEntries(new FormData(e.target)));
       closeModal();
       await refresh(false);
-      showToast("Perfil de usuario creado.");
+      showToast("Perfil creado.");
     } catch (err) {
       btn.disabled = false;
       alert(`Error: ${err.message}`);
@@ -478,6 +490,42 @@ document.addEventListener("click", async (e) => {
   if (act === "new-order") return formOrder();
   if (act === "new-user") return formNewUser();
   if (act === "clear-cache") { store.remove("pp_profile_data"); showToast("Caché borrada."); return refresh(); }
+  
+  if (act === "new-type") {
+    const typeName = prompt("Ingresa el nuevo tipo de trabajo:");
+    if (typeName && typeName.trim()) {
+      try {
+        await api("profile_create_type", { type: typeName.trim() });
+        await refresh(false);
+        showToast("Tipo de trabajo agregado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
+  if (act === "delete-type") {
+    if (confirm(`¿Eliminar el tipo de trabajo "${btn.dataset.type}" de Google Sheets?`)) {
+      try {
+        await api("profile_delete_type", { type: btn.dataset.type });
+        await refresh(false);
+        showToast("Tipo de trabajo eliminado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
+  if (act === "delete-order") {
+    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente del sistema y de Google Sheets?")) {
+      try {
+        await api("profile_delete_order", { id: btn.dataset.id });
+        closeModal();
+        await refresh(false);
+        showToast("Pedido eliminado correctamente.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
   if (act === "toggle-user") {
     if (confirm(`¿Cambiar estado de ${btn.dataset.name}?`)) {
       await api("profile_toggle_user", { name: btn.dataset.name, active: btn.dataset.active !== "true" });
