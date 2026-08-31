@@ -153,7 +153,7 @@
     }
   };
 
-  // 3. Manejar el inicio de sesión y almacenamiento del token
+  // 3. Manejar el inicio de sesión y captura real del token
   document.getElementById("login-form").addEventListener("submit", async function(e) {
     e.preventDefault();
     
@@ -182,18 +182,23 @@
       });
 
       const response = await respuesta.json();
+      console.log("Respuesta completa de login:", response); // Revisa esto en la consola F12
 
-      if (response && (response.exito || response.ok)) {
-        localStorage.setItem("pp_token", response.token || response.sesion || "activo");
+      // Buscamos todas las posibles variantes donde el backend pueda devolver el token
+      const tokenReal = response.token || response.sesion || response.key || (response.datos && response.datos.token);
+
+      if (response && (response.exito || response.ok) && tokenReal) {
+        localStorage.setItem("pp_token", tokenReal);
         document.getElementById("login-view").classList.add("hidden");
         document.getElementById("workspace").classList.remove("hidden");
+        
         if (typeof window.cargarDatos === "function") {
           window.cargarDatos();
         } else {
           refrescarModuloWeb();
         }
       } else {
-        errorEl.innerText = response.mensaje || response.error || "Credenciales incorrectas.";
+        errorEl.innerText = response.mensaje || response.error || "No se recibió un token válido del servidor.";
       }
     } catch (err) {
       errorEl.innerText = "Error de conexión con el servidor.";
