@@ -46,7 +46,12 @@ const normalizeOrder = (o) => ({
   estado: String(o.estado || o.Estado || "Pendiente").trim(),
   telefono: cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || ""),
   comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
-  fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.foto || "").trim(),
+  fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || "").trim(),
+  inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
+  finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
+  duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
+  ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
+  tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausado || 0),
   cerrado: String(o.cerrado || o.Cerrado || "No").trim()
 });
 
@@ -71,7 +76,7 @@ const state = {
   data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [] },
 };
 
-const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 function getDeliveryDateObj(entregaStr) {
   if (!entregaStr) return null;
@@ -124,7 +129,7 @@ const formatDate = (value) => {
 function showToast(message) {
   const toast = $("#toast");
   if (!toast) return;
-  toast.textContent = message;
+  toast.textContent = String(message || "Operación realizada");
   toast.classList.add("show");
   clearTimeout(window.ppToast);
   window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
@@ -145,8 +150,8 @@ async function api(action, extra = {}) {
     if (data && (data.ok || data.exito)) return data;
     throw new Error(data?.error || data?.mensaje || "Error al procesar solicitud.");
   } catch (err) {
-    if (err.message.includes("Failed to fetch")) {
-      throw new Error("Error de conexión con Google Sheets. Verifica tu conexión a internet.");
+    if (err.message && err.message.includes("Failed to fetch")) {
+      throw new Error("Error de conexión con Google Sheets. Verifica tu internet.");
     }
     throw err;
   }
@@ -181,7 +186,8 @@ async function refresh(showMessage = true) {
   } catch (error) {
     state.offline = true;
     render();
-    if (showMessage) showToast(error.message || "Modo sin conexión.");
+    const errMsg = (error && error.message) ? error.message : "Modo sin conexión.";
+    if (showMessage) showToast(errMsg);
   } finally {
     if (btnRefresh) btnRefresh.textContent = "↻";
   }
@@ -249,7 +255,9 @@ function historyView() {
   const orders = state.data.finishedOrders || [];
   if (!orders.length) return '<div class="empty"><strong>No hay proyectos terminados en el historial</strong></div>';
 
-  return `<div class="order-list">${orders.map((order) => `
+  return `<div class="order-list">${orders.map((order) => {
+    const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+    return `
     <article class="order-card">
       <div class="order-top">
         <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
@@ -258,11 +266,13 @@ function historyView() {
       <div class="meta">
         Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
         Responsable: ${escapeHtml(order.responsable)}<br/>
+        ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
         ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-        ${order.fotoEvidencia ? `<a href="${escapeHtml(order.fotoEvidencia)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline;">📷 Evidencia en Google Drive</a>` : ""}
+        ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px;">📷 Foto ${idx + 1}</a>`).join("") : ""}
       </div>
     </article>
-  `).join('')}</div>`;
+  `;
+  }).join('')}</div>`;
 }
 
 function teamView() {
@@ -272,12 +282,18 @@ function teamView() {
 
 function settingsView() {
   const session = state.session;
-  const fcList = state.frequentClients.map((c) => `<div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;"><div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div></div>`).join("");
+  
+  const fcList = state.frequentClients.map((c) => `
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
+      <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
+      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
+    </div>
+  `).join("");
   
   const ftList = state.frequentTypes.map((t) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <strong>${escapeHtml(t)}</strong>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️ Eliminar</button>` : ''}
+      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
     </div>
   `).join("");
 
@@ -303,12 +319,13 @@ function settingsView() {
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
     ` : ''}
 
+    <p class="section-heading">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
+    ${isLead() ? `<button class="primary-button" data-action="new-client" style="margin-bottom:10px;">＋ Agregar Cliente Frecuente</button>` : ''}
+    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
+
     <p class="section-heading">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
     ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:10px;">＋ Agregar Tipo de Trabajo</button>` : ''}
     <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
-
-    <p class="section-heading">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
   `;
 }
 
@@ -348,12 +365,70 @@ function detail(order) {
   `);
 
   $("#status-change-select").addEventListener("change", async (e) => {
+    const val = e.target.value;
+    if (["Terminado", "Entregado"].includes(val)) {
+      closeModal();
+      openFinishModal(order, val);
+    } else {
+      try {
+        await api("profile_update_order", { id: order.id, changes: { estado: val } });
+        closeModal();
+        await refresh(false);
+        showToast(`Estado cambiado a ${val}.`);
+      } catch (err) { alert(`Error: ${err.message}`); }
+    }
+  });
+}
+
+function openFinishModal(order, targetStatus) {
+  openModal(`
+    <div class="modal-head"><h2>Completar Trabajo (${targetStatus})</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="finish-form" class="form-grid">
+      <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
+        <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración o imprevistos..."></textarea>
+      </label>
+      <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA (HASTA 3 FOTOS)</span>
+        <input type="file" id="evidencia-files" accept="image/*" multiple>
+      </label>
+      <div id="file-preview-list" style="font-size:12px; color:#666;"></div>
+      <div class="modal-footer"><button type="submit" class="primary-button">Guardar y Finalizar Pedido</button></div>
+    </form>
+  `);
+
+  $("#finish-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Guardando e subiendo evidencias...";
+
+    const filesInput = $("#evidencia-files");
+    const files = Array.from(filesInput.files).slice(0, 3);
+    const imagesData = [];
+
+    for (const f of files) {
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+        reader.readAsDataURL(f);
+      });
+      imagesData.push({ data: base64, mimeType: f.type });
+    }
+
     try {
-      await api("profile_update_order", { id: order.id, changes: { estado: e.target.value } });
+      await api("profile_update_order", {
+        id: order.id,
+        changes: {
+          estado: targetStatus,
+          comentarioCierre: e.target.comentarioCierre.value.trim(),
+          images: imagesData
+        }
+      });
       closeModal();
       await refresh(false);
-      showToast("Estado actualizado.");
+      showToast("Pedido finalizado con éxito.");
     } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Guardar y Finalizar Pedido";
       alert(`Error: ${err.message}`);
     }
   });
@@ -490,7 +565,31 @@ document.addEventListener("click", async (e) => {
   if (act === "new-order") return formOrder();
   if (act === "new-user") return formNewUser();
   if (act === "clear-cache") { store.remove("pp_profile_data"); showToast("Caché borrada."); return refresh(); }
-  
+
+  if (act === "new-client") {
+    const clientName = prompt("Nombre del Cliente:");
+    if (clientName && clientName.trim()) {
+      const clientPhone = prompt("Teléfono del Cliente (opcional):");
+      try {
+        await api("profile_create_client", { name: clientName.trim(), phone: clientPhone ? clientPhone.trim() : "" });
+        await refresh(false);
+        showToast("Cliente agregado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
+  if (act === "delete-client") {
+    if (confirm(`¿Eliminar el cliente "${btn.dataset.name}" de Google Sheets?`)) {
+      try {
+        await api("profile_delete_client", { name: btn.dataset.name });
+        await refresh(false);
+        showToast("Cliente eliminado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
   if (act === "new-type") {
     const typeName = prompt("Ingresa el nuevo tipo de trabajo:");
     if (typeName && typeName.trim()) {
