@@ -79,36 +79,31 @@ const state = {
 const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 function applyTheme() {
-  const root = document.documentElement;
-  if (state.theme === "dark") {
-    root.style.setProperty("--bg-body", "#121212");
-    root.style.setProperty("--bg-card", "#1e1e1e");
-    root.style.setProperty("--text-main", "#ffffff");
-    root.style.setProperty("--text-sub", "#aaaaaa");
-    root.style.setProperty("--border-color", "#333333");
-    root.style.setProperty("--primary-color", state.customColor || "#bb86fc");
-  } else if (state.theme === "pink") {
-    root.style.setProperty("--bg-body", "#fce4ec");
-    root.style.setProperty("--bg-card", "#ffffff");
-    root.style.setProperty("--text-main", "#4a148c");
-    root.style.setProperty("--text-sub", "#880e4f");
-    root.style.setProperty("--border-color", "#f8bbd0");
-    root.style.setProperty("--primary-color", "#ec407a");
-  } else if (state.theme === "emerald") {
-    root.style.setProperty("--bg-body", "#e8f5e9");
-    root.style.setProperty("--bg-card", "#ffffff");
-    root.style.setProperty("--text-main", "#1b5e20");
-    root.style.setProperty("--text-sub", "#2e7d32");
-    root.style.setProperty("--border-color", "#c8e6c9");
-    root.style.setProperty("--primary-color", "#2e7d32");
-  } else {
-    root.style.setProperty("--bg-body", "#f4f6f8");
-    root.style.setProperty("--bg-card", "#ffffff");
-    root.style.setProperty("--text-main", "#333333");
-    root.style.setProperty("--text-sub", "#666666");
-    root.style.setProperty("--border-color", "#dddddd");
-    root.style.setProperty("--primary-color", state.customColor || "#1976d2");
+  let themeStyle = document.getElementById("pp-theme-styles");
+  if (!themeStyle) {
+    themeStyle = document.createElement("style");
+    themeStyle.id = "pp-theme-styles";
+    document.head.appendChild(themeStyle);
   }
+
+  let bgBody = "#f4f6f8", bgCard = "#ffffff", textMain = "#333333", textSub = "#666666", border = "#dddddd", primary = state.customColor || "#1976d2";
+
+  if (state.theme === "dark") {
+    bgBody = "#121212"; bgCard = "#1e1e1e"; textMain = "#ffffff"; textSub = "#aaaaaa"; border = "#333333"; primary = state.customColor !== "#1976d2" ? state.customColor : "#bb86fc";
+  } else if (state.theme === "pink") {
+    bgBody = "#fce4ec"; bgCard = "#ffffff"; textMain = "#4a148c"; textSub = "#880e4f"; border = "#f8bbd0"; primary = state.customColor !== "#1976d2" ? state.customColor : "#ec407a";
+  } else if (state.theme === "emerald") {
+    bgBody = "#e8f5e9"; bgCard = "#ffffff"; textMain = "#1b5e20"; textSub = "#2e7d32"; border = "#c8e6c9"; primary = state.customColor !== "#1976d2" ? state.customColor : "#2e7d32";
+  }
+
+  themeStyle.textContent = `
+    body, #workspace, .app-layout { background-color: ${bgBody} !important; color: ${textMain} !important; }
+    .order-card, .card, .hero-card, .modal-content, .user-card, .settings-card { background-color: ${bgCard} !important; color: ${textMain} !important; border-color: ${border} !important; }
+    p, span, label, h1, h2, h3, div, small, .meta { color: ${textMain}; }
+    .eyebrow, .field-label, .section-heading, small, .meta strong { color: ${textSub}; }
+    input, select, textarea { background-color: ${bgCard} !important; color: ${textMain} !important; border-color: ${border} !important; }
+    .primary-button { background-color: ${primary} !important; color: #ffffff !important; }
+  `;
 }
 
 function getDeliveryDateObj(entregaStr) {
@@ -235,7 +230,8 @@ function priorityPill(order) {
 }
 
 function orderCard(order, position) {
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}">
+  const searchHaystack = `${order.cliente} ${order.tipo} ${order.descripcion} ${order.id} ${order.responsable}`.toLowerCase();
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}" data-search="${escapeHtml(searchHaystack)}">
     <div class="order-top">
       <div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
       ${priorityPill(order)}
@@ -286,45 +282,28 @@ function queueView() {
 }
 
 function historyView() {
-  let orders = state.data.finishedOrders || [];
-  
-  // Filtrado dinámico
-  const search = state.filters.historySearch.toLowerCase().trim();
-  const respFilter = state.filters.historyResponsable.toLowerCase().trim();
-
-  if (search) {
-    orders = orders.filter(o => 
-      o.cliente.toLowerCase().includes(search) || 
-      o.tipo.toLowerCase().includes(search) || 
-      o.descripcion.toLowerCase().includes(search) ||
-      o.id.toLowerCase().includes(search)
-    );
-  }
-
-  if (respFilter) {
-    orders = orders.filter(o => o.responsable.toLowerCase().trim() === respFilter);
-  }
-
+  const orders = state.data.finishedOrders || [];
   const users = state.data.users || [];
 
   return `
     <div class="search-box" style="margin-bottom:12px; display:flex; gap:8px;">
-      <input type="text" id="history-search-input" value="${escapeHtml(state.filters.historySearch)}" placeholder="🔍 Buscar por cliente, motivo, tipo, ID..." style="flex:1; padding:8px; border-radius:6px; border:1px solid var(--border-color); bg:var(--bg-card); color:var(--text-main);">
-      <select id="history-resp-filter" style="padding:8px; border-radius:6px; border:1px solid var(--border-color);">
+      <input type="text" id="history-search-input" value="${escapeHtml(state.filters.historySearch)}" placeholder="🔍 Escribe para buscar en el historial..." style="flex:1; padding:10px; border-radius:6px; border:1px solid var(--border-color);">
+      <select id="history-resp-filter" style="padding:10px; border-radius:6px; border:1px solid var(--border-color);">
         <option value="">Todos los Responsables</option>
         ${users.map(u => `<option value="${escapeHtml(u.name)}" ${state.filters.historyResponsable.toLowerCase() === u.name.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("")}
       </select>
     </div>
 
-    ${!orders.length ? '<div class="empty"><strong>No se encontraron proyectos en el historial</strong></div>' : ''}
+    ${!orders.length ? '<div class="empty"><strong>No hay proyectos archivados</strong></div>' : ''}
 
-    <div class="order-list">${orders.map((order) => {
+    <div class="order-list" id="history-list">${orders.map((order) => {
       const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
       const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
       const isEntregado = order.estado === "Entregado";
+      const searchHaystack = `${order.cliente} ${order.tipo} ${order.descripcion} ${order.id} ${order.responsable}`.toLowerCase();
       
       return `
-      <article class="order-card" style="border-left: 5px solid ${isEntregado ? '#2e7d32' : '#f57c00'};">
+      <article class="order-card history-card-item" data-search="${escapeHtml(searchHaystack)}" data-responsable="${escapeHtml(order.responsable.toLowerCase())}" style="border-left: 5px solid ${isEntregado ? '#2e7d32' : '#f57c00'}; margin-bottom:10px;">
         <div class="order-top">
           <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)} (${escapeHtml(order.id)})</p></div>
           <span class="priority" style="background:${isEntregado ? '#2e7d32' : '#f57c00'}; color:white;">${escapeHtml(order.estado)}</span>
@@ -343,8 +322,8 @@ function historyView() {
 
           ${isLead() ? `
             <div class="actions" style="margin-top:10px; display:flex; gap:6px;">
-              ${!isEntregado ? `<button class="secondary-button" style="background:#2e7d32; color:white; padding:4px 8px; font-size:12px;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">🚚 Marcar Entregado</button>` : ''}
-              <button class="secondary-button" style="background:#1976d2; color:white; padding:4px 8px; font-size:12px;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">✏️ Editar / Reabrir</button>
+              ${!isEntregado ? `<button class="secondary-button" style="background:#2e7d32; color:white; padding:6px 10px; font-size:12px;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">🚚 Marcar Entregado</button>` : ''}
+              <button class="secondary-button" style="background:#1976d2; color:white; padding:6px 10px; font-size:12px;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir / Pasar a Activo</button>
             </div>
           ` : ''}
         </div>
@@ -355,25 +334,15 @@ function historyView() {
 }
 
 function teamView() {
-  let orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
-  const search = state.filters.teamSearch.toLowerCase().trim();
-
-  if (search) {
-    orders = orders.filter(o => 
-      o.cliente.toLowerCase().includes(search) || 
-      o.tipo.toLowerCase().includes(search) || 
-      o.descripcion.toLowerCase().includes(search) ||
-      o.responsable.toLowerCase().includes(search)
-    );
-  }
+  const orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
 
   return `
     <div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar nuevo pedido</button></div>
     <div style="margin:10px 0;">
-      <input type="text" id="team-search-input" value="${escapeHtml(state.filters.teamSearch)}" placeholder="🔍 Filtrar pedidos activos por cliente, motivo, trabajo..." style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border-color);">
+      <input type="text" id="team-search-input" value="${escapeHtml(state.filters.teamSearch)}" placeholder="🔍 Filtrar por cliente, motivo, responsable..." style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border-color);">
     </div>
     <p class="section-heading">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
-    <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>
+    <div class="order-list" id="team-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>
   `;
 }
 
@@ -413,22 +382,22 @@ function settingsView() {
     <div class="card settings-card" style="padding:12px; border:1px solid var(--border-color); border-radius:8px; margin-bottom:15px;">
       <h3>🎨 Personalización Estética</h3>
       <label class="field"><span class="field-label">TEMA DE LA INTERFAZ</span>
-        <select id="theme-selector">
+        <select id="theme-selector" style="padding:8px;">
           <option value="light" ${state.theme === "light" ? "selected" : ""}>☀️ Modo Claro (Estándar)</option>
           <option value="dark" ${state.theme === "dark" ? "selected" : ""}>🌙 Modo Oscuro</option>
           <option value="pink" ${state.theme === "pink" ? "selected" : ""}>🌸 Rosa Creativo</option>
           <option value="emerald" ${state.theme === "emerald" ? "selected" : ""}>🌲 Verde Esmeralda</option>
         </select>
       </label>
-      <label class="field" style="margin-top:8px;"><span class="field-label">COLOR PRINCIPAL PERSONALIZADO</span>
-        <input type="color" id="custom-color-picker" value="${state.customColor}">
+      <label class="field" style="margin-top:8px;"><span class="field-label">COLOR PRINCIPAL (BOTONES Y DESTACADOS)</span>
+        <input type="color" id="custom-color-picker" value="${state.customColor}" style="height:40px; cursor:pointer;">
       </label>
     </div>
 
     ${isLead() ? `
       <div class="card settings-card" style="padding:12px; border:1px solid var(--border-color); border-radius:8px; margin-bottom:15px;">
         <h3>📲 Plantilla de Notificación WhatsApp</h3>
-        <p style="font-size:12px; color:gray;">Variables disponibles: {cliente}, {tipo}, {estado}</p>
+        <p style="font-size:12px;">Variables disponibles: {cliente}, {tipo}, {estado}</p>
         <textarea id="wa-template-input" style="width:100%; height:80px; margin-top:6px; padding:6px; border-radius:6px; border:1px solid var(--border-color);">${escapeHtml(state.waTemplate)}</textarea>
         <button class="primary-button" id="btn-save-wa-template" style="margin-top:6px;">Guardar Plantilla</button>
       </div>
@@ -448,6 +417,30 @@ function settingsView() {
   `;
 }
 
+function filterHistoryDOM() {
+  const query = state.filters.historySearch.toLowerCase().trim();
+  const resp = state.filters.historyResponsable.toLowerCase().trim();
+  const cards = document.querySelectorAll(".history-card-item");
+
+  cards.forEach(card => {
+    const haystack = card.dataset.search || "";
+    const cardResp = card.dataset.responsable || "";
+    const matchesQuery = !query || haystack.includes(query);
+    const matchesResp = !resp || cardResp === resp;
+    card.style.display = matchesQuery && matchesResp ? "block" : "none";
+  });
+}
+
+function filterTeamDOM() {
+  const query = state.filters.teamSearch.toLowerCase().trim();
+  const cards = document.querySelectorAll("#team-list .order-card");
+
+  cards.forEach(card => {
+    const haystack = card.dataset.search || "";
+    card.style.display = !query || haystack.includes(query) ? "block" : "none";
+  });
+}
+
 function render() {
   if (!state.session) return;
   applyTheme();
@@ -458,10 +451,30 @@ function render() {
   
   document.querySelectorAll(".nav-button").forEach((btn) => btn.classList.toggle("active", btn.dataset.screen === state.screen));
 
-  // Listeners dinámicos de búsqueda
-  $("#history-search-input")?.addEventListener("input", (e) => { state.filters.historySearch = e.target.value; render(); });
-  $("#history-resp-filter")?.addEventListener("change", (e) => { state.filters.historyResponsable = e.target.value; render(); });
-  $("#team-search-input")?.addEventListener("input", (e) => { state.filters.teamSearch = e.target.value; render(); });
+  // Búsqueda fluida sin perder el foco
+  const histInput = $("#history-search-input");
+  if (histInput) {
+    histInput.addEventListener("input", (e) => {
+      state.filters.historySearch = e.target.value;
+      filterHistoryDOM();
+    });
+  }
+
+  const histResp = $("#history-resp-filter");
+  if (histResp) {
+    histResp.addEventListener("change", (e) => {
+      state.filters.historyResponsable = e.target.value;
+      filterHistoryDOM();
+    });
+  }
+
+  const teamInput = $("#team-search-input");
+  if (teamInput) {
+    teamInput.addEventListener("input", (e) => {
+      state.filters.teamSearch = e.target.value;
+      filterTeamDOM();
+    });
+  }
 
   // Theme Listeners
   $("#theme-selector")?.addEventListener("change", (e) => {
@@ -469,7 +482,7 @@ function render() {
     store.set("pp_theme", state.theme);
     applyTheme();
   });
-  $("#custom-color-picker")?.addEventListener("change", (e) => {
+  $("#custom-color-picker")?.addEventListener("input", (e) => {
     state.customColor = e.target.value;
     store.set("pp_custom_color", state.customColor);
     applyTheme();
@@ -639,7 +652,6 @@ function formOrder() {
     </form>
   `);
 
-  // Lógica del Pegado Mágico
   $("#btn-magic-parse")?.addEventListener("click", () => {
     const raw = $("#magic-paste-text").value;
     if (!raw) return alert("Pega primero un texto en el recuadro.");
@@ -667,7 +679,7 @@ function formOrder() {
     if (detalles.length) descParts.push(`Detalles: ${detalles.join(" | ")}`);
 
     if (descParts.length) $("#input-descripcion").value = descParts.join("\n");
-    showToast("Campos autocompletados con exito.");
+    showToast("Campos autocompletados con éxito.");
   });
 
   $("#fc-select")?.addEventListener("change", (e) => {
@@ -792,8 +804,13 @@ document.addEventListener("click", async (e) => {
   }
 
   if (act === "reopen-order") {
-    const o = state.data.finishedOrders.find(i => String(i.id) === String(btn.dataset.id));
-    if (o) detail(o);
+    if (confirm("¿Deseas reactivar este pedido y regresarlo a la bandeja de pendientes?")) {
+      try {
+        await api("profile_reopen_order", { id: btn.dataset.id });
+        await refresh(false);
+        showToast("Pedido reactivado y regresado a la bandeja activa.");
+      } catch (err) { alert(err.message); }
+    }
     return;
   }
 
