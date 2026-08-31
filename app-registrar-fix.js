@@ -89,30 +89,52 @@ function cleanPhoneNumber(phone = "") {
 
 function showToast(message) {
   const toast = $("#toast");
+  if (!toast) return;
   toast.textContent = message;
   toast.classList.add("show");
   clearTimeout(window.ppToast);
   window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
-function api(action, extra = {}) {
+function convertirArchivoBase64(file) {
   return new Promise((resolve, reject) => {
-    const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "";
-    if (!baseUrl.startsWith("https://")) return reject(new Error("Falta configurar la URL de Apps Script."));
-    const callback = `ppc_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const script = document.createElement("script");
-    const finish = () => { delete window[callback]; script.remove(); };
-    const timer = setTimeout(() => { finish(); reject(new Error("Google Sheets tardó demasiado en responder.")); }, 20000);
-    window[callback] = (response) => { clearTimeout(timer); finish(); (response && response.ok) ? resolve(response) : reject(new Error(response?.error || "No se pudo completar la acción.")); };
-    const payload = encodeURIComponent(JSON.stringify({ action, token: state.session?.token || "", ...extra }));
-    script.src = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}callback=${callback}&payload=${payload}`;
-    script.onerror = () => { clearTimeout(timer); finish(); reject(new Error("No se pudo comunicar con Google Sheets.")); };
-    document.head.append(script);
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
   });
 }
 
+// Petición HTTP usando fetch estándar (reemplaza JSONP para evitar redirección de sesión)
+async function api(action, extra = {}) {
+  const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
+  if (!baseUrl.startsWith("https://")) throw new Error("Falta configurar la URL de Apps Script.");
+
+  const payload = {
+    action,
+    token: state.session?.token || "",
+    ...extra
+  };
+
+  const response = await fetch(baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json();
+  if (data && (data.ok || data.exito)) {
+    return data;
+  } else {
+    throw new Error(data?.error || data?.mensaje || "No se pudo completar la acción.");
+  }
+}
+
 async function refresh(showMessage = true) {
-  $("#refresh").textContent = "…";
+  const btnRefresh = $("#refresh");
+  if (btnRefresh) btnRefresh.textContent = "…";
   try {
     const response = await api("profile_dashboard");
     state.data = response.data;
@@ -128,7 +150,7 @@ async function refresh(showMessage = true) {
     render();
     if (showMessage) showToast(error.message);
   } finally {
-    $("#refresh").textContent = "↻";
+    if (btnRefresh) btnRefresh.textContent = "↻";
   }
 }
 
@@ -222,7 +244,7 @@ function settingsView() {
   return `
     <div class="card settings-card">
       <h3>Mi espacio</h3>
-      <div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session.name)}</strong></div>
+      <div class="detail-row"><span>NOMBRE</span><strong>${escapeHtml(session ? session.name : "")}</strong></div>
       <button class="secondary-button" data-action="logout">Cerrar sesión</button>
     </div>
 
@@ -251,9 +273,14 @@ function settingsView() {
 function render() {
   if (!state.session) return;
   const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
-  $("#screen-title").textContent = screenNames[state.screen];
-  $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
-  $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
+  const titleElem = $("#screen-title");
+  const roleElem = $("#role-label");
+  const screenElem = $("#screen");
+
+  if (titleElem) titleElem.textContent = screenNames[state.screen];
+  if (roleElem) roleElem.textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
+  if (screenElem) screenElem.innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
+  
   document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.screen === state.screen));
 
   const saveWaBtn = $("#save-wa-template");
@@ -276,11 +303,10 @@ function render() {
   }
 }
 
-function openModal(content) { const modal = $("#modal"); modal.innerHTML = `<div class="modal-content">${content}</div>`; modal.showModal(); }
-function closeModal() { $("#modal").close(); }
+function openModal(content) { const modal = $("#modal"); if (modal) { modal.innerHTML = `<div class="modal-content">${content}</div>`; modal.showModal(); } }
+function closeModal() { const modal = $("#modal"); if (modal) modal.close(); }
 
 function promptFinishOrder(order) {
-  // 1. DIBUJAR EL MODAL (HTML)
   openModal(`
     <div class="modal-head"><h2>Finalizar Pedido</h2><button class="close-button" data-action="close">×</button></div>
     <form id="finish-order-form" class="form-grid">
@@ -298,41 +324,44 @@ function promptFinishOrder(order) {
         <button type="submit" class="primary-button">Marcar como Terminado</button>
       </div>
     </form>
-  `); // <-- AQUÍ CIERRA OPENMODAL. NO PEGAR CÓDIGO DENTRO DE LAS COMILLAS INVERTIDAS.
+  `);
 
-  // 2. LÓGICA DE ENVÍO (JAVASCRIPT) - VA AFUERA DE OPENMODAL
   const form = document.getElementById("finish-order-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
+      const btnSubmit = form.querySelector('button[type="submit"]');
+      if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.innerText = "Guardando...";
+      }
 
-    const btnSubmit = form.querySelector('button[type="submit"]');
-    if (btnSubmit) {
-      btnSubmit.disabled = true;
-      btnSubmit.innerText = "Guardando...";
-    }
+      const comentario = form.elements["comentarioCierre"] ? form.elements["comentarioCierre"].value : "";
+      const fileInput = document.getElementById("evidencia-file-input");
+      const fotosArray = [];
 
-    const comentario = form.elements["comentarioCierre"] ? form.elements["comentarioCierre"].value : "";
-    const fileInput = document.getElementById("evidencia-file-input");
-    const fotosArray = [];
-
-    if (fileInput && fileInput.files.length > 0) {
-      for (const file of fileInput.files) {
-        try {
-          const base64String = await convertirArchivoBase64(file);
-          fotosArray.push({
-            bytes: base64String.split(",")[1],
-            mimeType: file.type
-          });
-        } catch (err) {
-          console.error("Error al procesar la foto:", err);
+      if (fileInput && fileInput.files.length > 0) {
+        for (const file of fileInput.files) {
+          try {
+            const base64String = await convertirArchivoBase64(file);
+            fotosArray.push({
+              bytes: base64String.split(",")[1],
+              mimeType: file.type
+            });
+          } catch (err) {
+            console.error("Error al procesar la foto:", err);
+          }
         }
       }
-    }
 
-    // Ejecuta la función del index.html
-    window.enviarCierreOrden(order.id, comentario, fotosArray);
-  });
+      if (typeof window.enviarCierreOrden === "function") {
+        window.enviarCierreOrden(order.id, comentario, fotosArray);
+      } else {
+        alert("La función de cierre no está definida en la vista principal.");
+      }
+    });
+  }
 }
 
 function detail(order) {
@@ -498,32 +527,35 @@ function formOrder() {
     });
   }
 
-  $("#order-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector(".primary-button");
-    button.disabled = true;
-    button.textContent = "Registrando…";
-    try {
-      const values = Object.fromEntries(new FormData(form));
-      let finalTipo = inputTipo ? inputTipo.value.trim() : "";
-      if (!finalTipo && selectTipo && selectTipo.value && selectTipo.value !== "__CUSTOM__") {
-        finalTipo = selectTipo.value;
+  const orderForm = $("#order-form");
+  if (orderForm) {
+    orderForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = form.querySelector(".primary-button");
+      button.disabled = true;
+      button.textContent = "Registrando…";
+      try {
+        const values = Object.fromEntries(new FormData(form));
+        let finalTipo = inputTipo ? inputTipo.value.trim() : "";
+        if (!finalTipo && selectTipo && selectTipo.value && selectTipo.value !== "__CUSTOM__") {
+          finalTipo = selectTipo.value;
+        }
+
+        if (!finalTipo) throw new Error("Debes especificar el tipo de trabajo.");
+        values.tipo = finalTipo;
+
+        await api("profile_create_order", { form: values });
+        closeModal();
+        await refresh(false);
+        showToast("Pedido registrado correctamente.");
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Registrar";
+        window.alert(`Error: ${error.message}`);
       }
-
-      if (!finalTipo) throw new Error("Debes especificar el tipo de trabajo.");
-      values.tipo = finalTipo;
-
-      await api("profile_create_order", { form: values });
-      closeModal();
-      await refresh(false);
-      showToast("Pedido registrado correctamente.");
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = "Registrar";
-      window.alert(`Error: ${error.message}`);
-    }
-  });
+    });
+  }
 }
 
 function formFrequentClient() {
@@ -539,21 +571,24 @@ function formFrequentClient() {
     </form>
   `);
 
-  $("#fc-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.currentTarget.querySelector(".primary-button");
-    btn.disabled = true;
-    try {
-      const values = Object.fromEntries(new FormData(e.currentTarget));
-      await api("profile_save_client", { name: values.name.trim(), phone: values.phone.trim() });
-      closeModal();
-      await refresh(false);
-      showToast("Cliente frecuente respaldado en Google Sheets.");
-    } catch (err) {
-      btn.disabled = false;
-      window.alert(`Error: ${err.message}`);
-    }
-  });
+  const fcForm = $("#fc-form");
+  if (fcForm) {
+    fcForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = e.currentTarget.querySelector(".primary-button");
+      btn.disabled = true;
+      try {
+        const values = Object.fromEntries(new FormData(e.currentTarget));
+        await api("profile_save_client", { name: values.name.trim(), phone: values.phone.trim() });
+        closeModal();
+        await refresh(false);
+        showToast("Cliente frecuente respaldado en Google Sheets.");
+      } catch (err) {
+        btn.disabled = false;
+        window.alert(`Error: ${err.message}`);
+      }
+    });
+  }
 }
 
 function formFrequentType() {
@@ -568,28 +603,53 @@ function formFrequentType() {
     </form>
   `);
 
-  $("#ft-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.currentTarget.querySelector(".primary-button");
-    const val = new FormData(e.currentTarget).get("typeName").trim();
-    if (val) {
-      btn.disabled = true;
-      try {
-        await api("profile_save_type", { typeName: val });
-        closeModal();
-        await refresh(false);
-        showToast("Tipo de trabajo respaldado en Google Sheets.");
-      } catch (err) {
-        btn.disabled = false;
-        window.alert(`Error: ${err.message}`);
+  const ftForm = $("#ft-form");
+  if (ftForm) {
+    ftForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = e.currentTarget.querySelector(".primary-button");
+      const val = new FormData(e.currentTarget).get("typeName").trim();
+      if (val) {
+        btn.disabled = true;
+        try {
+          await api("profile_save_type", { typeName: val });
+          closeModal();
+          await refresh(false);
+          showToast("Tipo de trabajo respaldado en Google Sheets.");
+        } catch (err) {
+          btn.disabled = false;
+          window.alert(`Error: ${err.message}`);
+        }
       }
+    });
+  }
+}
+
+const loginForm = $("#login-form");
+if (loginForm) {
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const response = await api("profile_login", { name: $("#login-name").value.trim(), pin: $("#login-pin").value.trim() });
+      state.session = response.session;
+      store.set("pp_profile_session", state.session);
+      $("#login-view").classList.add("hidden");
+      $("#workspace").classList.remove("hidden");
+      await refresh(false);
+    } catch (error) {
+      const loginErr = $("#login-error");
+      if (loginErr) loginErr.textContent = error.message;
     }
   });
 }
 
-$("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); try { const response = await api("profile_login", { name: $("#login-name").value.trim(), pin: $("#login-pin").value.trim() }); state.session = response.session; store.set("pp_profile_session", state.session); $("#login-view").classList.add("hidden"); $("#workspace").classList.remove("hidden"); await refresh(false); } catch (error) { $("#login-error").textContent = error.message; } });
-$("#refresh").addEventListener("click", () => refresh());
+const refreshBtn = $("#refresh");
+if (refreshBtn) {
+  refreshBtn.addEventListener("click", () => refresh());
+}
+
 document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => { state.screen = button.dataset.screen; render(); }));
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-action]"); if (!button) return;
   const data = button.dataset;
@@ -622,4 +682,11 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-if (state.session) { $("#login-view").classList.add("hidden"); $("#workspace").classList.remove("hidden"); render(); refresh(false); }
+if (state.session) {
+  const loginView = $("#login-view");
+  const workspaceView = $("#workspace");
+  if (loginView) loginView.classList.add("hidden");
+  if (workspaceView) workspaceView.classList.remove("hidden");
+  render();
+  refresh(false);
+}
