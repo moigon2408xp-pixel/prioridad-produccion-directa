@@ -32,13 +32,13 @@
 }
 
 [data-theme="dark"] {
-  --bg-main: #0b0f19 !important;
-  --bg-card: #151c2c !important;
-  --bg-header: #151c2c !important;
-  --bg-nav: rgba(21, 28, 44, 0.88) !important;
-  --text-main: #f8fafc !important;
-  --text-muted: #94a3b8 !important;
-  --border-color: #26334d !important;
+  --bg-main: #0b0f19;
+  --bg-card: #151c2c;
+  --bg-header: #151c2c;
+  --bg-nav: rgba(21, 28, 44, 0.88);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-color: #26334d;
   
   --primary-color: #3b82f6;
   --primary-hover: #60a5fa;
@@ -53,24 +53,24 @@
 
 /* Paletas de acento predeterminadas */
 [data-accent="emerald"] {
-  --primary-color: #059669 !important;
-  --primary-hover: #10b981 !important;
-  --accent-color: #10b981 !important;
-  --accent-glow: rgba(16, 185, 129, 0.2) !important;
+  --primary-color: #059669;
+  --primary-hover: #10b981;
+  --accent-color: #10b981;
+  --accent-glow: rgba(16, 185, 129, 0.2);
 }
 
 [data-accent="purple"] {
-  --primary-color: #7c3aed !important;
-  --primary-hover: #8b5cf6 !important;
-  --accent-color: #8b5cf6 !important;
-  --accent-glow: rgba(139, 92, 246, 0.2) !important;
+  --primary-color: #7c3aed;
+  --primary-hover: #8b5cf6;
+  --accent-color: #8b5cf6;
+  --accent-glow: rgba(139, 92, 246, 0.2);
 }
 
 [data-accent="amber"] {
-  --primary-color: #d97706 !important;
-  --primary-hover: #f59e0b !important;
-  --accent-color: #f59e0b !important;
-  --accent-glow: rgba(245, 158, 11, 0.2) !important;
+  --primary-color: #d97706;
+  --primary-hover: #f59e0b;
+  --accent-color: #f59e0b;
+  --accent-glow: rgba(245, 158, 11, 0.2);
 }
 
 /* Reset Global */
