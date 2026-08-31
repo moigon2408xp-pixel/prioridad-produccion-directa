@@ -1,107 +1,182 @@
-<!doctype html>
-<html lang="es"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><meta name="theme-color" content="#143B5F"/><meta name="description" content="Gestión de producción por perfiles conectada a Google Sheets."/><link rel="manifest" href="./manifest.webmanifest"/><link rel="icon" href="./icons/icon-192.png"/><link rel="apple-touch-icon" href="./icons/icon-192.png"/><link rel="stylesheet" href="./styles.css"/><title>Prioridad Producción</title></head><body>
-<div class="app-shell"><section id="login-view" class="unlock-screen"><img src="./icons/icon-192.png" alt="" class="unlock-logo"/><p class="eyebrow">PAPELERÍA CREATIVA</p><h1>Prioridad<br/>Producción</h1><p class="unlock-copy">Ingresa a tu espacio personal de trabajo.</p><form id="login-form" class="unlock-form"><label for="login-name">Tu nombre</label><input id="login-name" autocomplete="username" placeholder="Ej. Valentina" required/><label for="login-pin">Tu PIN personal</label><input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Seis dígitos" required/><button class="primary-button">Iniciar sesión</button><p id="login-error" class="form-error"></p></form></section>
-<section id="workspace" class="workspace hidden"><header class="topbar"><div><p id="role-label" class="eyebrow">PRODUCCIÓN</p><h1 id="screen-title">Ahora</h1></div><button id="refresh" class="icon-button" aria-label="Actualizar">↻</button></header><main id="screen" class="screen" aria-live="polite"></main><nav class="bottom-nav"><button data-screen="now" class="nav-button active"><span>⌁</span>Ahora</button><button data-screen="queue" class="nav-button"><span>☷</span>Mi cola</button><button data-screen="team" class="nav-button"><span>⚠</span>Equipo</button><button data-screen="history" class="nav-button"><span>▣</span>Historial</button><button data-screen="settings" class="nav-button"><span>⚙</span>Ajustes</button></nav></section></div><dialog id="modal" class="modal"></dialog><div id="toast" class="toast" role="status"></div><script src="./config.js"></script><script src="./firebase-config.js"></script><script type="module" src="./app-registrar-fix.js?v=14"></script>
-<!doctype html>
-<html lang="es">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-  <meta name="theme-color" content="#143B5F"/>
-  <meta name="description" content="Gestión de producción por perfiles conectada a Google Sheets."/>
-  <link rel="manifest" href="./manifest.webmanifest"/>
-  <link rel="icon" href="./icons/icon-192.png"/>
-  <link rel="apple-touch-icon" href="./icons/icon-192.png"/>
-  <link rel="stylesheet" href="./styles.css"/>
-  <title>Prioridad Producción</title>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 14px; color: #263238; }
+    .title { font-size: 18px; font-weight: 700; color: #17324D; margin-bottom: 14px; }
+    label { display: block; font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
+    textarea { min-height: 64px; resize: vertical; }
+    .row { display: flex; gap: 8px; }
+    .row > div { flex: 1; }
+    .help { font-size: 11px; color: #64748b; margin-top: 3px; }
+    .buttons { margin-top: 16px; }
+    .btn { width: 100%; padding: 10px; border: 0; border-radius: 7px; background: #17324D; color: white; font-weight: 700; cursor: pointer; }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .msg { margin-top: 10px; font-size: 12px; }
+    .ok { color: #166534; font-weight: bold; }
+    .err { color: #b91c1c; font-weight: bold; }
+  </style>
 </head>
 <body>
-  <div class="app-shell">
-    <section id="login-view" class="unlock-screen">
-      <img src="./icons/icon-192.png" alt="" class="unlock-logo"/>
-      <p class="eyebrow">PAPELERÍA CREATIVA</p>
-      <h1>Prioridad<br/>Producción</h1>
-      <p class="unlock-copy">Ingresa a tu espacio personal de trabajo.</p>
-      <form id="login-form" class="unlock-form">
-        <label for="login-name">Tu nombre</label>
-        <input id="login-name" autocomplete="username" placeholder="Ej. Valentina" required/>
-        <label for="login-pin">Tu PIN personal</label>
-        <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Seis dígitos" required/>
-        <button class="primary-button">Iniciar sesión</button>
-        <p id="login-error" class="form-error"></p>
-      </form>
-    </section>
-
-    <section id="workspace" class="workspace hidden">
-      <header class="topbar">
-        <div>
-          <p id="role-label" class="eyebrow">PRODUCCIÓN</p>
-          <h1 id="screen-title">Ahora</h1>
-        </div>
-        <button id="refresh" class="icon-button" aria-label="Actualizar">↻</button>
-      </header>
-      <main id="screen" class="screen" aria-live="polite"></main>
-      <nav class="bottom-nav">
-        <button data-screen="now" class="nav-button active"><span>⌁</span>Ahora</button>
-        <button data-screen="queue" class="nav-button"><span>☷</span>Mi cola</button>
-        <button data-screen="team" class="nav-button"><span>⚠</span>Equipo</button>
-        <button data-screen="history" class="nav-button"><span>▣</span>Historial</button>
-        <button data-screen="settings" class="nav-button"><span>⚙</span>Ajustes</button>
-      </nav>
-    </section>
+  <div class="title">Registrar nuevo pedido</div>
+  <label>Cliente *</label>
+  <input id="cliente" placeholder="Nombre del cliente">
+  
+  <label>Tipo de trabajo *</label>
+  <select id="tipo"></select>
+  
+  <label>Descripción</label>
+  <textarea id="descripcion" placeholder="Ej.: Topper cumpleaños, 20 camisas, letras en vinil..."></textarea>
+  
+  <div class="row">
+    <div>
+      <label>Cantidad</label>
+      <input id="cantidad" type="number" min="1" value="1">
+    </div>
+    <div>
+      <label>Tiempo estimado *</label>
+      <input id="tiempoMinutos" type="number" min="1" placeholder="Minutos">
+      <div class="help">Ej.: 45 = 45 min</div>
+    </div>
   </div>
+  
+  <div class="row">
+    <div>
+      <label>Fecha de entrega *</label>
+      <input id="fechaEntrega" type="date">
+    </div>
+    <div>
+      <label>Hora de entrega *</label>
+      <input id="horaEntrega" type="time">
+    </div>
+  </div>
+  
+  <label>Responsable</label>
+  <select id="responsable"></select>
+  
+  <div class="row">
+    <div>
+      <label>¿Urgente?</label>
+      <select id="urgente">
+        <option>Sí</option>
+        <option selected>No</option>
+      </select>
+    </div>
+    <div>
+      <label>Diseño listo</label>
+      <select id="diseno">
+        <option selected>Sí</option>
+        <option>No</option>
+      </select>
+    </div>
+    <div>
+      <label>Material listo</label>
+      <select id="material">
+        <option selected>Sí</option>
+        <option>No</option>
+      </select>
+    </div>
+  </div>
+  
+  <label>Notas</label>
+  <textarea id="notas" placeholder="Detalles, medidas, colores, aprobación pendiente..."></textarea>
+  
+  <div class="buttons">
+    <button class="btn" id="btnGuardar" onclick="guardar()">Guardar pedido</button>
+  </div>
+  <div id="msg" class="msg"></div>
 
-  <dialog id="modal" class="modal"></dialog>
-  <div id="toast" class="toast" role="status"></div>
+<script>
+function $(id) { return document.getElementById(id); }
 
-  <script src="./config.js"></script>
-  <script src="./firebase-config.js"></script>
-  <script type="module" src="./app-registrar-fix.js?v=14"></script>
-
-  <!-- LÓGICA DE COMUNICACIÓN Y CIERRE CON GOOGLE SHEETS -->
-  <script>
-    window.enviarCierreOrden = function(idOrden, comentario, fotosArray) {
-      const btnCerrar = document.getElementById("btnConfirmarCierre");
-      if (btnCerrar) {
-        btnCerrar.disabled = true;
-        btnCerrar.innerText = "Guardando en Sheets...";
-      }
-
-      const payload = {
-        idOrden: idOrden || document.getElementById("inputOrdenId")?.value,
-        comentario: comentario || document.getElementById("inputComentarioCierre")?.value || "",
-        fotos: fotosArray || (window.fotosBase64Array ? window.fotosBase64Array : [])
-      };
-
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run
-          .withSuccessHandler(function(response) {
-            if (btnCerrar) {
-              btnCerrar.disabled = false;
-              btnCerrar.innerText = "Cerrar Orden";
-            }
-            if (response && response.success) {
-              alert("¡Orden cerrada correctamente!");
-              const modal = document.getElementById("modal");
-              if (modal) modal.close();
-              if (typeof window.cargarDatos === "function") window.cargarDatos();
-            } else {
-              alert("Error al guardar: " + (response ? response.message : "Sin respuesta del servidor."));
-            }
-          })
-          .withFailureHandler(function(err) {
-            if (btnCerrar) {
-              btnCerrar.disabled = false;
-              btnCerrar.innerText = "Reintentar Cierre";
-            }
-            alert("Error de comunicación con Google Sheets: " + err.message);
-          })
-          .cerrarOrdenConFotos(payload);
+// Detector de entorno y llamada unificada
+function ejecutarComando(accion, payload, onSuccess, onError) {
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    // Si estamos dentro de Google Apps Script nativo
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onError)
+      [accion](payload);
+  } else {
+    // Si estamos en entorno web local o puente API
+    const callbackName = 'cb_' + Math.round(Math.random() * 1000000);
+    window[callbackName] = function(data) {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      if (data && data.ok !== false) {
+        onSuccess(data.resultado || data);
       } else {
-        alert("Entorno local detectado: google.script.run no está disponible.");
-        if (btnCerrar) btnCerrar.disabled = false;
+        onError(new Error(data ? data.error : 'Error desconocido en el servidor'));
       }
     };
-  </script>
+
+    const requestData = encodeURIComponent(JSON.stringify({ accion: accion, datos: payload }));
+    const script = document.createElement('script');
+    // Mantiene la comunicación fluida con la URL del despliegue sin recargar la página
+    script.src = '?payload=' + requestData + '&callback=' + callbackName;
+    script.onerror = function() {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      onError(new Error('No se pudo conectar con el servidor Apps Script.'));
+    };
+    document.body.appendChild(script);
+  }
+}
+
+function init() {
+  const d = new Date();
+  $('fechaEntrega').value = d.toISOString().slice(0, 10);
+  $('horaEntrega').value = '17:00';
+
+  ejecutarComando('obtenerCatalogos', {}, function(c) {
+    if (c && c.tipos) {
+      $('tipo').innerHTML = c.tipos.map(x => `<option>${x}</option>`).join('');
+    }
+    if (c && c.responsables) {
+      $('responsable').innerHTML = c.responsables.map(x => `<option>${x}</option>`).join('');
+    }
+  }, function(e) {
+    $('msg').className = 'msg err';
+    $('msg').textContent = 'Error al cargar catálogos: ' + (e.message || e);
+  });
+}
+
+function guardar() {
+  $('msg').className = 'msg';
+  $('msg').textContent = 'Guardando...';
+  $('btnGuardar').disabled = true;
+
+  const form = {
+    cliente: $('cliente').value,
+    tipo: $('tipo').value,
+    descripcion: $('descripcion').value,
+    cantidad: $('cantidad').value,
+    tiempoMinutos: $('tiempoMinutos').value,
+    fechaEntrega: $('fechaEntrega').value,
+    horaEntrega: $('horaEntrega').value,
+    responsable: $('responsable').value,
+    urgente: $('urgente').value,
+    diseno: $('diseno').value,
+    material: $('material').value,
+    notas: $('notas').value
+  };
+
+  ejecutarComando('registrarPedido', form, function(r) {
+    $('btnGuardar').disabled = false;
+    $('msg').className = 'msg ok';
+    $('msg').textContent = 'Pedido ' + (r.id || '') + ' guardado correctamente.';
+    ['cliente', 'descripcion', 'tiempoMinutos', 'notas'].forEach(id => $(id).value = '');
+    $('cantidad').value = 1;
+  }, function(e) {
+    $('btnGuardar').disabled = false;
+    $('msg').className = 'msg err';
+    $('msg').textContent = 'Error al guardar: ' + (e.message || e);
+  });
+}
+
+init();
+</script>
 </body>
 </html>
