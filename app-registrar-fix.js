@@ -1,7 +1,8 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 6.5 - Frontend JavaScript (app-registrar-fix.js)
- * Incluye Pegado Mágico, Horarios de 7 AM a 9 PM y Personalización de Temas.
+ * Versión 7.0 - Frontend JavaScript (app-registrar-fix.js)
+ * Incluye Reapertura de Pedidos Terminados, Fotos de Referencia del Cliente,
+ * Plantilla de WhatsApp Editable y Generador de Temas Personalizados.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -22,13 +23,30 @@ const store = {
   },
 };
 
-// ==== GESTIÓN DE TEMAS Y MODO OSCURO ====
+// ==== GESTIÓN Y GENERADOR DE TEMAS PERSONALIZADOS ====
 function applyTheme() {
   const currentTheme = store.get("pp_theme", "light");
   const currentAccent = store.get("pp_accent", "blue");
+  const customColors = store.get("pp_custom_colors", {});
+  
   document.documentElement.setAttribute("data-theme", currentTheme);
   document.documentElement.setAttribute("data-accent", currentAccent);
   
+  // Aplicar colores personalizados si están definidos
+  if (customColors.primary) {
+    document.documentElement.style.setProperty("--primary-color", customColors.primary);
+    document.documentElement.style.setProperty("--primary-hover", customColors.primary);
+  }
+  if (customColors.cardBg) {
+    document.documentElement.style.setProperty("--bg-card", customColors.cardBg);
+  }
+  if (customColors.textMain) {
+    document.documentElement.style.setProperty("--text-main", customColors.textMain);
+  }
+  if (customColors.mainBg) {
+    document.documentElement.style.setProperty("--bg-main", customColors.mainBg);
+  }
+
   const icon = $("#theme-icon");
   if (icon) icon.textContent = currentTheme === "dark" ? "☀️" : "🌙";
 }
@@ -41,8 +59,35 @@ function toggleTheme() {
 }
 
 function setAccent(color) {
+  store.remove("pp_custom_colors");
   store.set("pp_accent", color);
+  document.documentElement.style.removeProperty("--primary-color");
+  document.documentElement.style.removeProperty("--primary-hover");
+  document.documentElement.style.removeProperty("--bg-card");
+  document.documentElement.style.removeProperty("--text-main");
+  document.documentElement.style.removeProperty("--bg-main");
   applyTheme();
+  showToast("Tema de color cambiado.");
+}
+
+function saveCustomColor(key, value) {
+  const customColors = store.get("pp_custom_colors", {});
+  customColors[key] = value;
+  store.set("pp_custom_colors", customColors);
+  applyTheme();
+}
+
+function resetCustomTheme() {
+  store.remove("pp_custom_colors");
+  store.set("pp_theme", "light");
+  store.set("pp_accent", "blue");
+  document.documentElement.style.removeProperty("--primary-color");
+  document.documentElement.style.removeProperty("--primary-hover");
+  document.documentElement.style.removeProperty("--bg-card");
+  document.documentElement.style.removeProperty("--text-main");
+  document.documentElement.style.removeProperty("--bg-main");
+  applyTheme();
+  showToast("Tema restablecido a los valores por defecto.");
 }
 
 function cleanPhoneNumber(phone = "") {
@@ -157,7 +202,7 @@ const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: [],
   frequentTypes: [],
-  waTemplate: "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega.",
+  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
   offline: false,
   data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [] },
@@ -224,7 +269,6 @@ function parseMagicPasteText(rawText) {
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   
-  // Extraer Cliente
   const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,]+)/i);
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
@@ -232,13 +276,11 @@ function parseMagicPasteText(rawText) {
     result.cliente = lines[0].replace(/^hola,?\s*/i, "").trim();
   }
   
-  // Extraer Teléfono
   const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
   if (phoneMatch) {
     result.telefono = cleanPhoneNumber(phoneMatch[0]);
   }
   
-  // Extraer Tipo de trabajo (coincidiendo con catálogo o palabras clave)
   const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,]+)/i);
   if (typeMatch) {
     result.tipo = typeMatch[1].trim();
@@ -251,7 +293,6 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // Extraer Fecha de entrega (Formatos DD/MM/YYYY, YYYY-MM-DD)
   const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
   if (dateMatch) {
     const parsedDate = safeParseDate(dateMatch[0]);
@@ -263,7 +304,6 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // Extraer Hora de entrega
   const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (timeMatch) {
     let hourNum = parseInt(timeMatch[1], 10);
@@ -397,7 +437,7 @@ function historyView() {
   return `<div class="order-list">${orders.map((order) => {
     const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
     return `
-      <article class="order-card">
+      <article class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}">
         <div class="order-top">
           <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
           <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
@@ -407,8 +447,14 @@ function historyView() {
           Responsable: ${escapeHtml(order.responsable)}<br/>
           ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
           ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-          ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--primary-color); font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px; margin-top:6px;">📷 Foto ${idx + 1}</a>`).join("") : ""}
+          ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--primary-color); font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px; margin-top:6px;">📷 Foto / Referencia ${idx + 1}</a>`).join("") : ""}
         </div>
+        ${isLead() ? `
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
+            ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+          </div>
+        ` : ''}
       </article>
     `;
   }).join('')}</div>`;
@@ -453,13 +499,42 @@ function settingsView() {
       </div>
       
       <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">SELECCIONAR TEMA DE COLOR:</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">TEMAS PREESTABLECIDOS:</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
           <button class="secondary-button" onclick="setAccent('blue')">💙 Azul Real</button>
           <button class="secondary-button" onclick="setAccent('emerald')">💚 Esmeralda</button>
           <button class="secondary-button" onclick="setAccent('purple')">💜 Púrpura</button>
           <button class="secondary-button" onclick="setAccent('amber')">🧡 Ámbar</button>
         </div>
+
+        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">🎨 GENERADOR DE TEMA PROPIO (PERSONALIZADO):</p>
+        <div class="custom-theme-picker">
+          <div class="color-input-group">
+            <label>Color Principal / Botones:</label>
+            <input type="color" id="color-primary" onchange="saveCustomColor('primary', this.value)" value="#1e3a8a">
+          </div>
+          <div class="color-input-group">
+            <label>Fondo de Tarjetas:</label>
+            <input type="color" id="color-card" onchange="saveCustomColor('cardBg', this.value)" value="#ffffff">
+          </div>
+          <div class="color-input-group">
+            <label>Color del Texto:</label>
+            <input type="color" id="color-text" onchange="saveCustomColor('textMain', this.value)" value="#0f172a">
+          </div>
+          <div class="color-input-group">
+            <label>Fondo de Pantalla:</label>
+            <input type="color" id="color-main" onchange="saveCustomColor('mainBg', this.value)" value="#f1f5f9">
+          </div>
+        </div>
+        <button class="secondary-button" onclick="resetCustomTheme()" style="margin-top:10px;">🔄 Restablecer Colores por Defecto</button>
+      </div>
+
+      <!-- EDICIÓN DE PLANTILLA DE WHATSAPP -->
+      <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color);">
+        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">📲 PLANTILLA DE MENSAJE WHATSAPP:</p>
+        <textarea id="wa-template-input" class="field" style="width:100%; min-height:80px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main);">${escapeHtml(state.waTemplate)}</textarea>
+        <small style="color:var(--text-muted); display:block; margin-top:4px;">Variables disponibles: {cliente}, {tipo}, {estado}, {id}</small>
+        <button class="primary-button" id="save-wa-template-btn" style="margin-top:8px;">💾 Guardar Plantilla de WhatsApp</button>
       </div>
 
       <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
@@ -513,6 +588,14 @@ function render() {
     document.querySelectorAll(".nav-button").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
+
+    // Registrar evento de guardar plantilla de WhatsApp
+    $("#save-wa-template-btn")?.addEventListener("click", () => {
+      const val = $("#wa-template-input")?.value || "";
+      state.waTemplate = val;
+      store.set("pp_wa_template", val);
+      showToast("Plantilla de WhatsApp guardada.");
+    });
   } catch (err) {
     console.error("Error durante el renderizado:", err);
   }
@@ -533,8 +616,9 @@ function closeModal() {
 
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
-  const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado))}`;
-  
+  const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
+  const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="detail-grid">
@@ -548,9 +632,23 @@ function detail(order) {
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable)}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
+      ${links.length ? `
+        <div class="detail-row" style="grid-column:1/-1;">
+          <span>📷 FOTOS DE REFERENCIA / EVIDENCIA:</span>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+            ${links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ver Foto ${idx + 1}</a>`).join("")}
+          </div>
+        </div>
+      ` : ''}
     </div>
     ${rawPhone ? `<div class="actions" style="margin-top:16px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%;">📲 Notificar por WhatsApp</a></div>` : ""}
-    ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%; border:none;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
+    ${isLead() ? `
+      <div class="actions" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        ${!active(order) ? `<button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>` : ''}
+        ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+        <button class="secondary-button" style="background:#d32f2f; color:white; width:100%; border:none;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button>
+      </div>
+    ` : ""}
   `);
   
   $("#status-change-select")?.addEventListener("change", async (e) => {
@@ -652,6 +750,12 @@ function formOrder() {
         ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar existente --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro nuevo...</option></select>` : ''}
         <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico">
       </label>
+
+      <!-- ADJUNTAR FOTOS DE REFERENCIA DEL CLIENTE -->
+      <label class="field"><span class="field-label">🖼️ ADJUNTAR FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
+        <input type="file" id="reference-files-input" accept="image/*" multiple>
+      </label>
+
       <div class="form-inline">
         <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" id="input-fecha-entrega" name="fechaEntrega" required></label>
         <label class="field"><span class="field-label">HORA DE ENTREGA (7 AM - 9 PM)</span>
@@ -668,7 +772,7 @@ function formOrder() {
     </form>
   `);
   
-  // EVENTO PEGADO MÁGICO
+  // PEGADO MÁGICO EVENTO
   $("#magic-paste-btn")?.addEventListener("click", () => {
     const raw = $("#magic-paste-input")?.value || "";
     if (!raw.trim()) {
@@ -707,13 +811,32 @@ function formOrder() {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
+    btn.textContent = "Guardando pedido y referencias...";
+
+    const refInput = $("#reference-files-input");
+    const refFiles = refInput ? Array.from(refInput.files).slice(0, 3) : [];
+    const referenceImages = [];
+
+    for (const f of refFiles) {
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+        reader.readAsDataURL(f);
+      });
+      referenceImages.push({ data: base64, mimeType: f.type });
+    }
+
     try {
-      await api("profile_create_order", { form: Object.fromEntries(new FormData(e.target)) });
+      await api("profile_create_order", {
+        form: Object.fromEntries(new FormData(e.target)),
+        referenceImages: referenceImages
+      });
       closeModal();
       await refresh(false);
       showToast("Pedido guardado exitosamente.");
     } catch (err) {
       btn.disabled = false;
+      btn.textContent = "Guardar Pedido";
       alert(`Error: ${err.message}`);
     }
   });
@@ -869,6 +992,26 @@ document.addEventListener("click", async (e) => {
         showToast("Pedido eliminado.");
       } catch (err) { alert(err.message); }
     }
+    return;
+  }
+  if (act === "reopen-order") {
+    if (confirm(`¿Deseas reabrir el proyecto "${btn.dataset.id}" y devolverlo a la lista de pedidos activos?`)) {
+      try {
+        await api("profile_reopen_order", { id: btn.dataset.id });
+        closeModal();
+        await refresh(false);
+        showToast("Proyecto reabierto con éxito.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+  if (act === "mark-delivered") {
+    try {
+      await api("profile_update_order", { id: btn.dataset.id, changes: { estado: "Entregado" } });
+      closeModal();
+      await refresh(false);
+      showToast("Proyecto marcado como Entregado.");
+    } catch (err) { alert(err.message); }
     return;
   }
 });
