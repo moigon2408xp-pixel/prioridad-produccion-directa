@@ -55,59 +55,36 @@
   <script src="./firebase-config.js"></script>
   <script type="module" src="./app-registrar-fix.js?v=14"></script>
 
-  <script>
+<script>
     const URL_WEB_APP = "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
 
     // 1. Refrescar módulos desde GitHub Pages hacia Apps Script
     async function refrescarModuloWeb() {
-      const btnRefresh = document.getElementById("refresh");
-      if (btnRefresh) btnRefresh.style.opacity = "0.5";
-
-      try {
-        const respuesta = await fetch(URL_WEB_APP, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8"
-          },
-          body: JSON.stringify({
-            accion: "refrescarModulo",
-            modulo: document.getElementById("screen-title")?.innerText || "now"
-          })
-        });
-
-        const datos = await respuesta.json();
-
-        if (datos.exito) {
-          console.log("Datos recibidos:", datos.datos);
-          if (typeof window.cargarDatos === "function") {
-            window.cargarDatos();
-          } else {
-            location.reload();
-          }
-        } else {
-          alert("Atención: " + datos.mensaje);
-        }
-      } catch (error) {
-        console.error("Error de conexión:", error);
-        alert("Error al conectar con Google Sheets.");
-      } finally {
-        if (btnRefresh) btnRefresh.style.opacity = "1";
-      }
+      // ... tu código existente de refrescar ...
     }
 
     // 2. Enviar cierre de orden usando fetch (sin google.script.run)
     window.enviarCierreOrden = async function(idOrden, comentario, fotosArray) {
-      const btnCerrar = document.getElementById("btnConfirmarCierre");
-      if (btnCerrar) {
-        btnCerrar.disabled = true;
-        btnCerrar.innerText = "Guardando en Sheets...";
+      // ... tu código existente de cierre ...
+    };
+
+    // 3. Manejar el inicio de sesión de forma nativa por fetch (¡Agrégalo aquí!)
+    document.getElementById("login-form").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      
+      const btnSubmit = this.querySelector("button");
+      const errorEl = document.getElementById("login-error");
+      errorEl.innerText = "";
+      
+      if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.innerText = "Verificando...";
       }
 
       const payload = {
-        accion: "cerrarOrdenConFotos",
-        idOrden: idOrden || document.getElementById("inputOrdenId")?.value,
-        comentario: comentario || document.getElementById("inputComentarioCierre")?.value || "",
-        fotos: fotosArray || (window.fotosBase64Array ? window.fotosBase64Array : [])
+        accion: "profile_login",
+        name: document.getElementById("login-name").value.trim(),
+        pin: document.getElementById("login-pin").value.trim()
       };
 
       try {
@@ -121,27 +98,26 @@
 
         const response = await respuesta.json();
 
-        if (btnCerrar) {
-          btnCerrar.disabled = false;
-          btnCerrar.innerText = "Cerrar Orden";
-        }
-
-        if (response && response.exito) {
-          alert("¡Orden cerrada correctamente!");
-          const modal = document.getElementById("modal");
-          if (modal) modal.close();
-          refrescarModuloWeb();
+        if (response && (response.exito || response.ok)) {
+          localStorage.setItem("pp_token", response.token || "activo");
+          document.getElementById("login-view").classList.add("hidden");
+          document.getElementById("workspace").classList.remove("hidden");
+          if (typeof window.cargarDatos === "function") {
+            window.cargarDatos();
+          }
         } else {
-          alert("Error al guardar: " + (response ? response.mensaje : "Sin respuesta del servidor."));
+          errorEl.innerText = response.mensaje || response.error || "Credenciales incorrectas.";
         }
       } catch (err) {
-        if (btnCerrar) {
-          btnCerrar.disabled = false;
-          btnCerrar.innerText = "Reintentar Cierre";
+        errorEl.innerText = "Error de conexión con el servidor.";
+        console.error(err);
+      } finally {
+        if (btnSubmit) {
+          btnSubmit.disabled = false;
+          btnSubmit.innerText = "Iniciar sesión";
         }
-        alert("Error de comunicación con Google Sheets: " + err.message);
       }
-    };
+    });
   </script>
 </body>
 </html>
