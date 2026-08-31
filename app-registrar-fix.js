@@ -1,8 +1,8 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 9.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
- * Formateo limpio universal de fechas, separación de fotos de referencia/evidencia,
- * modal interactivo de rendimiento por trabajador y filtrado estricto de pedidos activos.
+ * Versión 10.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * Exportación explícita de funciones de temas al objeto global (window),
+ * alineación visual limpia del modal de detalles y gestión de eventos sin errores.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -93,6 +93,12 @@ function resetCustomTheme() {
   showToast("Tema restablecido a valores por defecto.");
 }
 
+// EXPORTACIÓN A SCOPE GLOBAL WINDOW PARA EVITAR REFERENCIA PERDIDA EN SCRIPT MODULE
+window.toggleTheme = toggleTheme;
+window.setAccent = setAccent;
+window.saveCustomColor = saveCustomColor;
+window.resetCustomTheme = resetCustomTheme;
+
 function cleanPhoneNumber(phone = "") {
   let num = String(phone || "").replace(/\D/g, "");
   if (!num) return "";
@@ -101,7 +107,7 @@ function cleanPhoneNumber(phone = "") {
   return num;
 }
 
-// ==== 2. FORMATEO Y PARSEO DE FECHAS IMPECABLE Y A PRUEBA DE FALLOS ====
+// ==== 2. FORMATEO Y PARSEO DE FECHAS ESTANDARIZADO ====
 function safeParseDate(value) {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
@@ -111,7 +117,6 @@ function safeParseDate(value) {
   if (str.includes(" - ")) str = str.split(" - ")[0];
   if (str.includes(" a las ")) str = str.split(" a las ")[0];
   
-  // Limpiar formatos con textos mixtos como "2026-09-02T11:00 AM:00"
   var isoMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   var timeMatch = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
   
@@ -242,7 +247,7 @@ const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
 }[char]));
 
-// ==== 3. CÁLCULO DE PRIORIDAD Y COMPLEJIDAD (MAQUETAS VS TOPPERS) ====
+// ==== 3. CÁLCULO DE PRIORIDAD Y COMPLEJIDAD ====
 const getEstimatedPrepDays = (tipo = "") => {
   const t = tipo.toLowerCase();
   if (t.includes("maqueta") || t.includes("caja explosiva") || t.includes("estructura")) return 4;
@@ -276,7 +281,6 @@ const priorityLabel = {
   later: "Programar"
 };
 
-// Filtrado estricto: Un pedido sólo está activo si su estado NO es Terminado/Entregado/Cancelado Y Cerrado !== Sí
 const active = (order) => {
   const est = String(order.estado || "").toLowerCase().trim();
   const cer = String(order.cerrado || "").toLowerCase().trim();
@@ -295,7 +299,6 @@ function showToast(message) {
   window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
-// ==== GENERADOR DE HORARIOS ====
 function generateTimeOptions(selectedTime = "11:00 AM") {
   const hours = [
     "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
@@ -350,7 +353,6 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // Extraer Fecha por Días de la Semana
   const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
   const dayMatch = rawText.match(/(?:entregar|fecha|para)[:\s]*([a-záéíóúñ]+)/i);
   
@@ -537,7 +539,6 @@ function queueView() {
   return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes</strong></div>';
 }
 
-// ==== 5. VISTA HISTORIAL CON FOTOS DE REFERENCIA VS EVIDENCIA SEPARADAS ====
 function historyView() {
   const rawOrders = state.data.finishedOrders || [];
   const orders = filterOrdersBySearch(rawOrders);
@@ -595,7 +596,6 @@ function historyView() {
   `;
 }
 
-// ==== 6. VISTA EQUIPO CON BUSCADOR ====
 function teamView() {
   const rawOrders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
   const orders = filterOrdersBySearch(rawOrders);
@@ -613,7 +613,6 @@ function teamView() {
   `;
 }
 
-// ==== 7. AJUSTES Y RENDIMIENTO DIARIO INTERACTIVO POR TRABAJADOR ====
 function openWorkerPerfModal(workerName) {
   const dailyPerf = state.data.dailyPerformance || {};
   const workerData = dailyPerf[workerName] || { completedToday: 0, totalMinToday: 0, orders: [] };
@@ -643,6 +642,7 @@ function openWorkerPerfModal(workerName) {
     </div>
   `);
 }
+window.openWorkerPerfModal = openWorkerPerfModal;
 
 function settingsView() {
   const session = state.session || {};
@@ -716,7 +716,6 @@ function settingsView() {
         <button class="secondary-button" onclick="resetCustomTheme()" style="margin-top:10px;">🔄 Restablecer Colores por Defecto</button>
       </div>
 
-      <!-- EDICIÓN DE PLANTILLA DE WHATSAPP -->
       <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color);">
         <p style="font-weight:700; font-size:13px; margin-bottom:8px;">📲 PLANTILLA DE MENSAJE WHATSAPP:</p>
         <textarea id="wa-template-input" class="field" style="width:100%; min-height:80px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main);">${escapeHtml(state.waTemplate)}</textarea>
@@ -731,7 +730,6 @@ function settingsView() {
     </div>
     
     ${isLead() ? `
-      <!-- PANEL DE RENDIMIENTO DIARIO CON MODAL INTERACTIVO -->
       <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📊 RENDIMIENTO Y PRODUCCIÓN DE HOY (HAZ CLIC PARA VER PEDIDOS)</p>
       <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
         ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos el día de hoy.</div>'}
@@ -782,7 +780,6 @@ function render() {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
 
-    // Eventos de búsqueda en tiempo real
     $("#history-search-input")?.addEventListener("input", (e) => {
       state.searchQuery = e.target.value;
       const filtered = filterOrdersBySearch(state.data.finishedOrders || []);
@@ -835,6 +832,7 @@ function closeModal() {
   if (m) m.close();
 }
 
+// DETALLE FORMATEADO CON ESPACIADO LIMPIO (PUNTOS Y DOS PUNTOS)
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
@@ -843,22 +841,43 @@ function detail(order) {
 
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
-    <div class="detail-grid">
-      <div class="detail-row"><span>TIPO DE TRABAJO</span><strong>${escapeHtml(order.tipo)}</strong></div>
-      ${order.motivo ? `<div class="detail-row"><span>MOTIVO / TEMÁTICA</span><strong>${escapeHtml(order.motivo)}</strong></div>` : ''}
-      <div class="detail-row"><span>CAMBIAR ESTADO</span>
-        <select id="status-change-select" data-id="${escapeHtml(order.id)}">
+    <div class="form-grid" style="gap:12px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TIPO DE TRABAJO:</span>
+        <strong>${escapeHtml(order.tipo)}</strong>
+      </div>
+      ${order.motivo ? `
+        <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">MOTIVO / TEMÁTICA:</span>
+          <strong>${escapeHtml(order.motivo)}</strong>
+        </div>
+      ` : ''}
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO:</span>
+        <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
           ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
         </select>
       </div>
-      <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
-      <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable)}</strong></div>
-      <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
-      <div class="detail-row"><span>DESCRIPCIÓN / MEDIDAS</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
+      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA:</span>
+        <strong>${escapeHtml(formatDate(order.entrega))}</strong>
+      </div>
+      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">RESPONSABLE:</span>
+        <strong>${escapeHtml(order.responsable)}</strong>
+      </div>
+      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO:</span>
+        <strong>${escapeHtml(order.telefono || "No registrado")}</strong>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">DESCRIPCIÓN / MEDIDAS:</span>
+        <p style="font-size:14px; background:var(--bg-main); padding:8px; border-radius:6px;">${escapeHtml(order.descripcion || "Sin descripción")}</p>
+      </div>
       
       ${refLinks.length ? `
-        <div class="detail-row" style="grid-column:1/-1;">
-          <span>🖼️ FOTOS DE REFERENCIA DEL CLIENTE:</span>
+        <div style="margin-top:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">🖼️ FOTOS DE REFERENCIA DEL CLIENTE:</span>
           <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
             ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ref ${idx + 1}</a>`).join("")}
           </div>
@@ -866,8 +885,8 @@ function detail(order) {
       ` : ''}
 
       ${eviLinks.length ? `
-        <div class="detail-row" style="grid-column:1/-1;">
-          <span>📷 FOTOS DE EVIDENCIA DE CIERRE:</span>
+        <div style="margin-top:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">📷 FOTOS DE EVIDENCIA DE CIERRE:</span>
           <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
             ${eviLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--success-color);">📷 Evidencia ${idx + 1}</a>`).join("")}
           </div>
@@ -964,7 +983,6 @@ function formOrder() {
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
     
-    <!-- PEGADO MÁGICO -->
     <div class="magic-paste-box">
       <div class="magic-paste-title">✨ Pegado Mágico (WhatsApp / Plantillas de Reposteras)</div>
       <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Medida 1kl: 14x14cm, Nombre: Yolber, Entregar: Miércoles')"></textarea>
@@ -988,7 +1006,6 @@ function formOrder() {
         <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
       </label>
 
-      <!-- ADJUNTAR FOTOS DE REFERENCIA DEL CLIENTE -->
       <label class="field"><span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
         <input type="file" id="reference-files-input" accept="image/*" multiple>
       </label>
@@ -1009,7 +1026,6 @@ function formOrder() {
     </form>
   `);
   
-  // PEGADO MÁGICO EVENTO
   $("#magic-paste-btn")?.addEventListener("click", () => {
     const raw = $("#magic-paste-input")?.value || "";
     if (!raw.trim()) {
