@@ -1,8 +1,7 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 7.0 - Frontend JavaScript (app-registrar-fix.js)
- * Incluye Reapertura de Pedidos Terminados, Fotos de Referencia del Cliente,
- * Plantilla de WhatsApp Editable y Generador de Temas Personalizados.
+ * Versión 7.5 - Frontend JavaScript (app-registrar-fix.js)
+ * Incluye Cambio de Tema Reactivo, Reapertura de Pedidos y Fotos de Referencia.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -23,7 +22,7 @@ const store = {
   },
 };
 
-// ==== GESTIÓN Y GENERADOR DE TEMAS PERSONALIZADOS ====
+// ==== GESTIÓN Y GENERADOR DE TEMAS PERSONALIZADOS EN TIEMPO REAL ====
 function applyTheme() {
   const currentTheme = store.get("pp_theme", "light");
   const currentAccent = store.get("pp_accent", "blue");
@@ -32,19 +31,31 @@ function applyTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
   document.documentElement.setAttribute("data-accent", currentAccent);
   
-  // Aplicar colores personalizados si están definidos
+  // Aplicar o remover colores personalizados dinámicamente
   if (customColors.primary) {
     document.documentElement.style.setProperty("--primary-color", customColors.primary);
     document.documentElement.style.setProperty("--primary-hover", customColors.primary);
+  } else {
+    document.documentElement.style.removeProperty("--primary-color");
+    document.documentElement.style.removeProperty("--primary-hover");
   }
+
   if (customColors.cardBg) {
     document.documentElement.style.setProperty("--bg-card", customColors.cardBg);
+  } else {
+    document.documentElement.style.removeProperty("--bg-card");
   }
+
   if (customColors.textMain) {
     document.documentElement.style.setProperty("--text-main", customColors.textMain);
+  } else {
+    document.documentElement.style.removeProperty("--text-main");
   }
+
   if (customColors.mainBg) {
     document.documentElement.style.setProperty("--bg-main", customColors.mainBg);
+  } else {
+    document.documentElement.style.removeProperty("--bg-main");
   }
 
   const icon = $("#theme-icon");
@@ -61,11 +72,6 @@ function toggleTheme() {
 function setAccent(color) {
   store.remove("pp_custom_colors");
   store.set("pp_accent", color);
-  document.documentElement.style.removeProperty("--primary-color");
-  document.documentElement.style.removeProperty("--primary-hover");
-  document.documentElement.style.removeProperty("--bg-card");
-  document.documentElement.style.removeProperty("--text-main");
-  document.documentElement.style.removeProperty("--bg-main");
   applyTheme();
   showToast("Tema de color cambiado.");
 }
@@ -81,11 +87,6 @@ function resetCustomTheme() {
   store.remove("pp_custom_colors");
   store.set("pp_theme", "light");
   store.set("pp_accent", "blue");
-  document.documentElement.style.removeProperty("--primary-color");
-  document.documentElement.style.removeProperty("--primary-hover");
-  document.documentElement.style.removeProperty("--bg-card");
-  document.documentElement.style.removeProperty("--text-main");
-  document.documentElement.style.removeProperty("--bg-main");
   applyTheme();
   showToast("Tema restablecido a los valores por defecto.");
 }
@@ -437,12 +438,12 @@ function historyView() {
   return `<div class="order-list">${orders.map((order) => {
     const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
     return `
-      <article class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}">
-        <div class="order-top">
+      <article class="order-card">
+        <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
           <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
           <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
         </div>
-        <div class="meta">
+        <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
           Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
           Responsable: ${escapeHtml(order.responsable)}<br/>
           ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
@@ -450,7 +451,7 @@ function historyView() {
           ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--primary-color); font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px; margin-top:6px;">📷 Foto / Referencia ${idx + 1}</a>`).join("") : ""}
         </div>
         ${isLead() ? `
-          <div style="display:flex; gap:8px; margin-top:8px;">
+          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
             <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
             ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
           </div>
@@ -469,6 +470,8 @@ function teamView() {
 
 function settingsView() {
   const session = state.session || {};
+  const customColors = store.get("pp_custom_colors", {});
+  
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
       <div><strong>${escapeHtml(c.name)}</strong><br/><small style="color:var(--text-muted);">${escapeHtml(c.phone || "Sin teléfono")}</small></div>
@@ -507,23 +510,23 @@ function settingsView() {
           <button class="secondary-button" onclick="setAccent('amber')">🧡 Ámbar</button>
         </div>
 
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">🎨 GENERADOR DE TEMA PROPIO (PERSONALIZADO):</p>
+        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">🎨 GENERADOR DE TEMA PROPIO (PERSONALIZADO EN VIVO):</p>
         <div class="custom-theme-picker">
           <div class="color-input-group">
             <label>Color Principal / Botones:</label>
-            <input type="color" id="color-primary" onchange="saveCustomColor('primary', this.value)" value="#1e3a8a">
+            <input type="color" id="color-primary" onchange="saveCustomColor('primary', this.value)" value="${customColors.primary || '#1e3a8a'}">
           </div>
           <div class="color-input-group">
             <label>Fondo de Tarjetas:</label>
-            <input type="color" id="color-card" onchange="saveCustomColor('cardBg', this.value)" value="#ffffff">
+            <input type="color" id="color-card" onchange="saveCustomColor('cardBg', this.value)" value="${customColors.cardBg || '#ffffff'}">
           </div>
           <div class="color-input-group">
             <label>Color del Texto:</label>
-            <input type="color" id="color-text" onchange="saveCustomColor('textMain', this.value)" value="#0f172a">
+            <input type="color" id="color-text" onchange="saveCustomColor('textMain', this.value)" value="${customColors.textMain || '#0f172a'}">
           </div>
           <div class="color-input-group">
             <label>Fondo de Pantalla:</label>
-            <input type="color" id="color-main" onchange="saveCustomColor('mainBg', this.value)" value="#f1f5f9">
+            <input type="color" id="color-main" onchange="saveCustomColor('mainBg', this.value)" value="${customColors.mainBg || '#f1f5f9'}">
           </div>
         </div>
         <button class="secondary-button" onclick="resetCustomTheme()" style="margin-top:10px;">🔄 Restablecer Colores por Defecto</button>
@@ -589,7 +592,6 @@ function render() {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
 
-    // Registrar evento de guardar plantilla de WhatsApp
     $("#save-wa-template-btn")?.addEventListener("click", () => {
       const val = $("#wa-template-input")?.value || "";
       state.waTemplate = val;
@@ -1000,7 +1002,7 @@ document.addEventListener("click", async (e) => {
         await api("profile_reopen_order", { id: btn.dataset.id });
         closeModal();
         await refresh(false);
-        showToast("Proyecto reabierto con éxito.");
+        showToast("Proyecto reabierto y devuelto a la lista activa.");
       } catch (err) { alert(err.message); }
     }
     return;
