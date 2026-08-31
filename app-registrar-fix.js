@@ -188,7 +188,9 @@ async function api(action, extra = {}) {
     });
 
     const data = await response.json();
+    if (!data) throw new Error("El servidor devolvió una respuesta vacía.");
     if (data && (data.ok || data.exito)) return data;
+    
     throw new Error(data?.error || data?.mensaje || "Error al procesar solicitud.");
   } catch (err) {
     if (err.message && err.message.includes("Failed to fetch")) {
