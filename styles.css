@@ -1,5 +1,6 @@
 /* ==========================================================================
-   SISTEMA DE DISEÑO - PAPELERÍA CREATIVA (MODO OSCURO / CLARO / PERSONALIZADO)
+   SISTEMA DE DISEÑO - PAPELERÍA CREATIVA V8.0
+   (MODO OSCURO / CLARO / GENERADOR DE TEMAS EN VIVO / ALERTAS DE COMPLEJIDAD)
    ========================================================================== */
 
 :root {
@@ -239,6 +240,30 @@ body {
   transform: rotate(90deg);
 }
 
+/* Barra de Búsqueda Global */
+.search-bar-container {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 16px;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.search-bar-container input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.search-bar-container input:focus {
+  outline: none;
+}
+
 /* Navegación Inferior Fluida */
 .bottom-nav {
   position: fixed;
@@ -317,6 +342,13 @@ body {
   border-color: var(--primary-color);
 }
 
+/* Resaltado de Tarjeta de Alerta Crítica (Complejidad/Maquetas o Vencidos) */
+.order-card.critical-alert {
+  border: 2px solid var(--danger-color) !important;
+  background: linear-gradient(135deg, var(--bg-card) 85%, rgba(239, 68, 68, 0.12)) !important;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.25) !important;
+}
+
 .order-top {
   display: flex;
   justify-content: space-between;
@@ -343,6 +375,36 @@ body {
 
 .meta strong {
   color: var(--text-main);
+}
+
+.badge-motivo {
+  display: inline-block;
+  background: var(--accent-glow);
+  color: var(--primary-color);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+/* Badges Diferenciados para Fotos */
+.ref-photo-badge {
+  color: var(--primary-color);
+  font-weight: 700;
+  text-decoration: underline;
+  display: inline-block;
+  margin-right: 8px;
+  margin-top: 6px;
+}
+
+.evi-photo-badge {
+  color: var(--success-color);
+  font-weight: 700;
+  text-decoration: underline;
+  display: inline-block;
+  margin-right: 8px;
+  margin-top: 6px;
 }
 
 /* Botones e Inputs */
