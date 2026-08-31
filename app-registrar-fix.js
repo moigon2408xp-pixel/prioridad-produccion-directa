@@ -1,8 +1,8 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 8.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
- * Incluye Temas Reactivos en Vivo, Buscador Global, Motivo/Temática,
- * Pegado Mágico con Días de la Semana, Alertas de Complejidad y Rendimiento Diario.
+ * Versión 9.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * Formateo limpio universal de fechas, separación de fotos de referencia/evidencia,
+ * modal interactivo de rendimiento por trabajador y filtrado estricto de pedidos activos.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -101,7 +101,7 @@ function cleanPhoneNumber(phone = "") {
   return num;
 }
 
-// ==== 2. FORMATEO Y PARSEO DE FECHAS ESTANDARIZADO ====
+// ==== 2. FORMATEO Y PARSEO DE FECHAS IMPECABLE Y A PRUEBA DE FALLOS ====
 function safeParseDate(value) {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
@@ -110,6 +110,29 @@ function safeParseDate(value) {
   
   if (str.includes(" - ")) str = str.split(" - ")[0];
   if (str.includes(" a las ")) str = str.split(" a las ")[0];
+  
+  // Limpiar formatos con textos mixtos como "2026-09-02T11:00 AM:00"
+  var isoMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  var timeMatch = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  
+  if (isoMatch) {
+    var year = parseInt(isoMatch[1], 10);
+    var month = parseInt(isoMatch[2], 10) - 1;
+    var day = parseInt(isoMatch[3], 10);
+    var hours = 18;
+    var minutes = 0;
+    
+    if (timeMatch) {
+      hours = parseInt(timeMatch[1], 10);
+      minutes = parseInt(timeMatch[2], 10);
+      var ap = timeMatch[3] ? timeMatch[3].toUpperCase() : "";
+      if (ap === "PM" && hours < 12) hours += 12;
+      if (ap === "AM" && hours === 12) hours = 0;
+    }
+    
+    const parsedISO = new Date(year, month, day, hours, minutes);
+    if (!isNaN(parsedISO.getTime())) return parsedISO;
+  }
   
   if (str.includes("/")) {
     const parts = str.split(" ")[0].split("/");
@@ -180,6 +203,7 @@ const normalizeOrder = (o) => ({
   material: String(o.material || o.Material || "No").trim(),
   telefono: cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || ""),
   comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
+  fotoReferencia: String(o.fotoReferencia || o.Fotos_Referencia || o.referencias || "").trim(),
   fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || o.foto || "").trim(),
   inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
   finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
@@ -223,7 +247,7 @@ const getEstimatedPrepDays = (tipo = "") => {
   const t = tipo.toLowerCase();
   if (t.includes("maqueta") || t.includes("caja explosiva") || t.includes("estructura")) return 4;
   if (t.includes("piñata") || t.includes("banderín")) return 2;
-  return 1; // Topper u otros
+  return 1;
 };
 
 const priority = (order) => {
@@ -237,11 +261,10 @@ const priority = (order) => {
   
   if (checkDate < today) return "overdue";
   
-  // Alerta temprana basada en días de preparación por complejidad
   const prepDays = getEstimatedPrepDays(order.tipo);
   const diffDays = Math.ceil((checkDate - today) / (1000 * 60 * 60 * 24));
   
-  if (diffDays <= prepDays) return "now"; // Requiere empezar ya
+  if (diffDays <= prepDays) return "now";
   if (diffDays <= prepDays + 1) return "today";
   return "later";
 };
@@ -253,7 +276,13 @@ const priorityLabel = {
   later: "Programar"
 };
 
-const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && String(order.cerrado).toLowerCase() !== "sí" && String(order.cerrado).toLowerCase() !== "si";
+// Filtrado estricto: Un pedido sólo está activo si su estado NO es Terminado/Entregado/Cancelado Y Cerrado !== Sí
+const active = (order) => {
+  const est = String(order.estado || "").toLowerCase().trim();
+  const cer = String(order.cerrado || "").toLowerCase().trim();
+  return cer !== "sí" && cer !== "si" && est !== "terminado" && est !== "entregado" && est !== "cancelado";
+};
+
 const operable = (order) => active(order);
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
@@ -276,7 +305,7 @@ function generateTimeOptions(selectedTime = "11:00 AM") {
   return hours.map(h => `<option value="${h}" ${h === selectedTime ? "selected" : ""}>${h}</option>`).join("");
 }
 
-// ==== 4. PEGADO MÁGICO CON DETECCIÓN DE DÍAS DE LA SEMANA ====
+// ==== 4. PEGADO MÁGICO CON DETECCIÓN DE DÍAS DE LA SEMANA Y PLANTILLAS ====
 function parseMagicPasteText(rawText) {
   const result = {
     cliente: "",
@@ -292,7 +321,6 @@ function parseMagicPasteText(rawText) {
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   
-  // Extraer Cliente
   const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,*]+)/i);
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
@@ -300,19 +328,16 @@ function parseMagicPasteText(rawText) {
     result.cliente = lines[0].replace(/^hola,?\s*/i, "").trim();
   }
   
-  // Extraer Teléfono
   const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
   if (phoneMatch) {
     result.telefono = cleanPhoneNumber(phoneMatch[0]);
   }
   
-  // Extraer Motivo / Temática
   const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema)[:\s]+([^\n\r,*]+)/i);
   if (motivoMatch) {
     result.motivo = motivoMatch[1].trim();
   }
 
-  // Extraer Tipo de Trabajo
   const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,*]+)/i);
   if (typeMatch) {
     result.tipo = typeMatch[1].trim();
@@ -325,7 +350,7 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // Extraer Fecha por Días de la Semana (Ej: "Entregar: Miércoles")
+  // Extraer Fecha por Días de la Semana
   const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
   const dayMatch = rawText.match(/(?:entregar|fecha|para)[:\s]*([a-záéíóúñ]+)/i);
   
@@ -334,12 +359,12 @@ function parseMagicPasteText(rawText) {
     const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
     
     if (dayIdx !== -1) {
-      const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx)); // Normalizar tildes
+      const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx));
       const today = new Date();
-      const currentDayOfWeek = today.getDay(); // 0: Dom, 1: Lun...
+      const currentDayOfWeek = today.getDay();
       
       let diff = targetDayOfWeek - currentDayOfWeek;
-      if (diff <= 0) diff += 7; // Si ya pasó esta semana, apuntar al de la próxima semana
+      if (diff <= 0) diff += 7;
       
       const targetDate = new Date(today.setDate(today.getDate() + diff));
       const year = targetDate.getFullYear();
@@ -349,7 +374,6 @@ function parseMagicPasteText(rawText) {
     }
   }
 
-  // Parseo de fechas numéricas estándar si no fue un día relativo
   if (!result.fechaEntrega) {
     const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
     if (dateMatch) {
@@ -363,7 +387,6 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // Extraer Hora
   const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (timeMatch) {
     let hourNum = parseInt(timeMatch[1], 10);
@@ -447,7 +470,7 @@ function orderCard(order, position) {
   return `<button class="order-card ${isCrit ? 'critical-alert' : ''}" data-action="detail" data-id="${escapeHtml(order.id)}">
     <div class="order-top">
       <div>
-        <h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)}</h3>
+        <h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
         <p>${escapeHtml(order.tipo)}</p>
         ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
       </div>
@@ -504,7 +527,7 @@ function nowView() {
     (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
   );
   return `${state.offline ? '<p class="offline">Mostrando información guardada localmente.</p>' : ""}
-  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} ${next.motivo ? `(${escapeHtml(next.motivo)})` : ''} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
+  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO (${escapeHtml(next.id)})</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} ${next.motivo ? `(${escapeHtml(next.motivo)})` : ''} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
   <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">CRÍTICOS DEL EQUIPO</p>
   <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay pedidos críticos en el taller.</div>'}</div>`;
 }
@@ -514,7 +537,7 @@ function queueView() {
   return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes</strong></div>';
 }
 
-// ==== 5. VISTA HISTORIAL CON BÚSQUEDA Y REAPERTURA ====
+// ==== 5. VISTA HISTORIAL CON FOTOS DE REFERENCIA VS EVIDENCIA SEPARADAS ====
 function historyView() {
   const rawOrders = state.data.finishedOrders || [];
   const orders = filterOrdersBySearch(rawOrders);
@@ -526,7 +549,9 @@ function historyView() {
     </div>
     ${!orders.length ? '<div class="empty"><strong>No hay proyectos terminados que coincidan con la búsqueda.</strong></div>' : `
       <div class="order-list">${orders.map((order) => {
-        const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+        const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
+        const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+        
         return `
           <article class="order-card">
             <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
@@ -542,7 +567,20 @@ function historyView() {
               Responsable: ${escapeHtml(order.responsable)}<br/>
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
               ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-              ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="ref-photo-badge">📷 Foto / Evidencia ${idx + 1}</a>`).join("") : ""}
+              
+              ${refLinks.length ? `
+                <div style="margin-top:6px;">
+                  <strong style="font-size:12px;">🖼️ Fotos de Referencia del Cliente:</strong><br/>
+                  ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="ref-photo-badge">🖼️ Ref ${idx + 1}</a>`).join("")}
+                </div>
+              ` : ''}
+              
+              ${eviLinks.length ? `
+                <div style="margin-top:6px;">
+                  <strong style="font-size:12px;">📷 Fotos de Evidencia de Cierre:</strong><br/>
+                  ${eviLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="evi-photo-badge">📷 Evidencia ${idx + 1}</a>`).join("")}
+                </div>
+              ` : ''}
             </div>
             ${isLead() ? `
               <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
@@ -557,7 +595,7 @@ function historyView() {
   `;
 }
 
-// ==== 6. VISTA EQUIPO CON BUSCADOR GLOBAL ====
+// ==== 6. VISTA EQUIPO CON BUSCADOR ====
 function teamView() {
   const rawOrders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
   const orders = filterOrdersBySearch(rawOrders);
@@ -575,7 +613,37 @@ function teamView() {
   `;
 }
 
-// ==== 7. AJUSTES Y PANEL DE RENDIMIENTO DIARIO PARA GERENCIA ====
+// ==== 7. AJUSTES Y RENDIMIENTO DIARIO INTERACTIVO POR TRABAJADOR ====
+function openWorkerPerfModal(workerName) {
+  const dailyPerf = state.data.dailyPerformance || {};
+  const workerData = dailyPerf[workerName] || { completedToday: 0, totalMinToday: 0, orders: [] };
+  const workerOrders = workerData.orders || [];
+
+  openModal(`
+    <div class="modal-head">
+      <h2>🏆 Rendimiento de ${escapeHtml(workerName)} Hoy</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="margin-bottom:16px; padding:12px; background:var(--bg-main); border-radius:var(--radius-md);">
+      <p style="font-size:14px; font-weight:700;">Pedidos Completados Hoy: <span style="color:var(--primary-color);">${workerData.completedToday}</span></p>
+      <p style="font-size:14px; font-weight:700;">Tiempo Total Invertido: <span style="color:var(--primary-color);">${workerData.totalMinToday} min</span></p>
+    </div>
+    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS TERMINADOS HOY:</p>
+    <div style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto;">
+      ${workerOrders.length ? workerOrders.map(o => `
+        <div style="padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card);">
+          <div style="display:flex; justify-content:space-between; font-weight:700;">
+            <span>${escapeHtml(o.cliente)} (${escapeHtml(o.id)})</span>
+            <span style="color:var(--success-color);">${escapeHtml(o.estado)}</span>
+          </div>
+          <p style="font-size:13px; color:var(--text-muted);">${escapeHtml(o.tipo)} ${o.motivo ? `· Motivo: ${escapeHtml(o.motivo)}` : ''}</p>
+          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo: <strong>${o.duracionRealMin} min</strong> | 📝 Observación: ${escapeHtml(o.comentarioCierre || "Sin observación")}</p>
+        </div>
+      `).join("") : '<div class="team-note">No hay detalles de pedidos terminados hoy.</div>'}
+    </div>
+  `);
+}
+
 function settingsView() {
   const session = state.session || {};
   const customColors = store.get("pp_custom_colors", {});
@@ -602,11 +670,10 @@ function settingsView() {
     </div>
   `).join("");
 
-  // Construir Panel de Rendimiento Diario para Gerencia
   const perfRows = Object.keys(dailyPerf).map(uName => `
-    <div style="display:flex; justify-content:space-between; padding:8px 12px; background:var(--bg-main); border-radius:6px; margin-bottom:6px;">
-      <span><strong>${escapeHtml(uName)}</strong></span>
-      <span>🏆 <strong>${dailyPerf[uName].completedToday}</strong> pedidos hoy (${dailyPerf[uName].totalMinToday} min)</span>
+    <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}')">
+      <span><strong>👤 ${escapeHtml(uName)}</strong></span>
+      <span>🏆 <strong>${dailyPerf[uName].completedToday}</strong> pedidos hoy (${dailyPerf[uName].totalMinToday} min) 🔍</span>
     </div>
   `).join("");
 
@@ -664,8 +731,8 @@ function settingsView() {
     </div>
     
     ${isLead() ? `
-      <!-- PANEL DE RENDIMIENTO DIARIO -->
-      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📊 RENDIMIENTO Y PRODUCCIÓN DE HOY</p>
+      <!-- PANEL DE RENDIMIENTO DIARIO CON MODAL INTERACTIVO -->
+      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📊 RENDIMIENTO Y PRODUCCIÓN DE HOY (HAZ CLIC PARA VER PEDIDOS)</p>
       <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
         ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos el día de hoy.</div>'}
       </div>
@@ -724,7 +791,7 @@ function render() {
         container.innerHTML = filtered.map(order => `
           <article class="order-card">
             <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
-              <div><h3>${escapeHtml(order.cliente)} <small>(${escapeHtml(order.id)})</small></h3><p>${escapeHtml(order.tipo)}</p></div>
+              <div><h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3><p>${escapeHtml(order.tipo)}</p></div>
               <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
             </div>
             <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
@@ -771,7 +838,8 @@ function closeModal() {
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
-  const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+  const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
+  const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
 
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
@@ -787,11 +855,21 @@ function detail(order) {
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable)}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN / MEDIDAS</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
-      ${links.length ? `
+      
+      ${refLinks.length ? `
         <div class="detail-row" style="grid-column:1/-1;">
-          <span>📷 FOTOS DE REFERENCIA / EVIDENCIA:</span>
+          <span>🖼️ FOTOS DE REFERENCIA DEL CLIENTE:</span>
           <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
-            ${links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ver Foto ${idx + 1}</a>`).join("")}
+            ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ref ${idx + 1}</a>`).join("")}
+          </div>
+        </div>
+      ` : ''}
+
+      ${eviLinks.length ? `
+        <div class="detail-row" style="grid-column:1/-1;">
+          <span>📷 FOTOS DE EVIDENCIA DE CIERRE:</span>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+            ${eviLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--success-color);">📷 Evidencia ${idx + 1}</a>`).join("")}
           </div>
         </div>
       ` : ''}
