@@ -1,6 +1,7 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 6.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * Versión 6.5 - Frontend JavaScript (app-registrar-fix.js)
+ * Incluye Pegado Mágico, Horarios de 7 AM a 9 PM y Personalización de Temas.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -21,6 +22,29 @@ const store = {
   },
 };
 
+// ==== GESTIÓN DE TEMAS Y MODO OSCURO ====
+function applyTheme() {
+  const currentTheme = store.get("pp_theme", "light");
+  const currentAccent = store.get("pp_accent", "blue");
+  document.documentElement.setAttribute("data-theme", currentTheme);
+  document.documentElement.setAttribute("data-accent", currentAccent);
+  
+  const icon = $("#theme-icon");
+  if (icon) icon.textContent = currentTheme === "dark" ? "☀️" : "🌙";
+}
+
+function toggleTheme() {
+  const currentTheme = store.get("pp_theme", "light");
+  const nextTheme = currentTheme === "dark" ? "light" : "dark";
+  store.set("pp_theme", nextTheme);
+  applyTheme();
+}
+
+function setAccent(color) {
+  store.set("pp_accent", color);
+  applyTheme();
+}
+
 function cleanPhoneNumber(phone = "") {
   let num = String(phone || "").replace(/\D/g, "");
   if (!num) return "";
@@ -29,7 +53,6 @@ function cleanPhoneNumber(phone = "") {
   return num;
 }
 
-// Convertidor seguro de fechas a prueba de fallos
 function safeParseDate(value) {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
@@ -71,7 +94,7 @@ function formatDate(value) {
   }
 }
 
-// Normalizadores universales de datos provenientes de Google Sheets / API
+// Normalizadores universales de datos
 const normalizeClient = (c) => {
   if (!c) return { name: "", phone: "" };
   if (Array.isArray(c)) {
@@ -176,7 +199,83 @@ function showToast(message) {
   window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
-// Peticiones API HTTP hacia Google Apps Script Backend
+// ==== GENERADOR DE HORARIOS DE 7 AM A 9 PM ====
+function generateTimeOptions(selectedTime = "11:00 AM") {
+  const hours = [
+    "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
+    "07:00 PM", "08:00 PM", "09:00 PM"
+  ];
+  return hours.map(h => `<option value="${h}" ${h === selectedTime ? "selected" : ""}>${h}</option>`).join("");
+}
+
+// ==== PARSER DE PEGADO MÁGICO ====
+function parseMagicPasteText(rawText) {
+  const result = {
+    cliente: "",
+    telefono: "",
+    tipo: "",
+    fechaEntrega: "",
+    horaEntrega: "11:00 AM",
+    descripcion: rawText.trim()
+  };
+  
+  if (!rawText) return result;
+  
+  const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+  
+  // Extraer Cliente
+  const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,]+)/i);
+  if (clienteMatch) {
+    result.cliente = clienteMatch[1].trim();
+  } else if (lines.length > 0 && !lines[0].includes(":")) {
+    result.cliente = lines[0].replace(/^hola,?\s*/i, "").trim();
+  }
+  
+  // Extraer Teléfono
+  const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
+  if (phoneMatch) {
+    result.telefono = cleanPhoneNumber(phoneMatch[0]);
+  }
+  
+  // Extraer Tipo de trabajo (coincidiendo con catálogo o palabras clave)
+  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,]+)/i);
+  if (typeMatch) {
+    result.tipo = typeMatch[1].trim();
+  } else {
+    for (const t of state.frequentTypes) {
+      if (t && rawText.toLowerCase().includes(t.toLowerCase())) {
+        result.tipo = t;
+        break;
+      }
+    }
+  }
+  
+  // Extraer Fecha de entrega (Formatos DD/MM/YYYY, YYYY-MM-DD)
+  const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
+  if (dateMatch) {
+    const parsedDate = safeParseDate(dateMatch[0]);
+    if (parsedDate) {
+      const year = parsedDate.getFullYear();
+      const month = (parsedDate.getMonth() + 1).toString().padStart(2, '0');
+      const day = parsedDate.getDate().toString().padStart(2, '0');
+      result.fechaEntrega = `${year}-${month}-${day}`;
+    }
+  }
+  
+  // Extraer Hora de entrega
+  const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (timeMatch) {
+    let hourNum = parseInt(timeMatch[1], 10);
+    const ampm = timeMatch[3].toUpperCase();
+    if (hourNum < 10) hourNum = "0" + hourNum;
+    result.horaEntrega = `${hourNum}:00 ${ampm}`;
+  }
+
+  return result;
+}
+
+// HTTP API Fetch Handler
 async function api(action, extra = {}) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
   const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
@@ -282,8 +381,8 @@ function nowView() {
     (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
   );
   return `${state.offline ? '<p class="offline">Mostrando información guardada localmente.</p>' : ""}
-  ${next ? `<article class="hero-card"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2>${escapeHtml(next.cliente)}</h2><p>${escapeHtml(next.tipo)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="action-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
-  <p class="section-heading">CRÍTICOS DEL EQUIPO</p>
+  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
+  <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">CRÍTICOS DEL EQUIPO</p>
   <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay pedidos críticos en el taller.</div>'}</div>`;
 }
 
@@ -301,14 +400,14 @@ function historyView() {
       <article class="order-card">
         <div class="order-top">
           <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
-          <span class="priority" style="background:#2e7d32; color:white;">${escapeHtml(order.estado)}</span>
+          <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
         </div>
         <div class="meta">
           Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
           Responsable: ${escapeHtml(order.responsable)}<br/>
           ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
           ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-          ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px;">📷 Foto ${idx + 1}</a>`).join("") : ""}
+          ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--primary-color); font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px; margin-top:6px;">📷 Foto ${idx + 1}</a>`).join("") : ""}
         </div>
       </article>
     `;
@@ -317,52 +416,70 @@ function historyView() {
 
 function teamView() {
   const orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
-  return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div>
-  <p class="section-heading">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
+  return `<div class="actions" style="margin-bottom:16px;"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div>
+  <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
   <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
 }
 
 function settingsView() {
   const session = state.session || {};
   const fcList = state.frequentClients.map((c) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
-      <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
+      <div><strong>${escapeHtml(c.name)}</strong><br/><small style="color:var(--text-muted);">${escapeHtml(c.phone || "Sin teléfono")}</small></div>
+      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
     </div>
   `).join("");
   
   const ftList = state.frequentTypes.map((t) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
       <strong>${escapeHtml(t)}</strong>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
+      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
     </div>
   `).join("");
   
   const usersList = (state.data.users || []).map((u) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
-      <div><strong>${escapeHtml(u.name)}</strong> <small>(${escapeHtml(u.role)})</small><br/><span style="color:${u.active ? 'green' : 'red'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
+      <div><strong>${escapeHtml(u.name)}</strong> <small style="color:var(--text-muted);">(${escapeHtml(u.role)})</small><br/><span style="color:${u.active ? 'var(--success-color)' : 'var(--danger-color)'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
       <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
     </div>
   `).join("");
   
   return `
-    <div class="card settings-card" style="padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px;">
-      <h3>Mi perfil</h3>
-      <div class="detail-row"><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
-      <div class="detail-row"><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
-      <button class="secondary-button" data-action="logout" style="margin-top:10px;">Cerrar sesión</button>
-      <button class="secondary-button" data-action="clear-cache" style="margin-top:8px;">🧹 Limpiar Caché Local</button>
+    <div class="card settings-card" style="padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-card); margin-bottom:20px;">
+      <h3 style="margin-bottom:14px;">Mi Perfil y Personalización</h3>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        <div><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
+        <div><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
+      </div>
+      
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
+        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">SELECCIONAR TEMA DE COLOR:</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="secondary-button" onclick="setAccent('blue')">💙 Azul Real</button>
+          <button class="secondary-button" onclick="setAccent('emerald')">💚 Esmeralda</button>
+          <button class="secondary-button" onclick="setAccent('purple')">💜 Púrpura</button>
+          <button class="secondary-button" onclick="setAccent('amber')">🧡 Ámbar</button>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
+        <button class="secondary-button" data-action="logout">Cerrar sesión</button>
+        <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
+      </div>
     </div>
+    
     ${isLead() ? `
-      <p class="section-heading">GESTIÓN DE PERFILES / USUARIOS</p>
-      <button class="primary-button" data-action="new-user" style="margin-bottom:10px;">＋ Crear Nuevo Perfil</button>
+      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
+      <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
     ` : ''}
-    <p class="section-heading">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    ${isLead() ? `<button class="primary-button" data-action="new-client" style="margin-bottom:10px;">＋ Agregar Cliente Frecuente</button>` : ''}
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
+    ${isLead() ? `<button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>` : ''}
     <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
-    <p class="section-heading">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:10px;">＋ Agregar Tipo de Trabajo</button>` : ''}
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
+    ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>` : ''}
     <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
   `;
 }
@@ -374,6 +491,7 @@ function render() {
   if (!state.session) return;
   
   try {
+    applyTheme();
     const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
     
     const titleEl = $("#screen-title");
@@ -431,8 +549,8 @@ function detail(order) {
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
       <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
     </div>
-    ${rawPhone ? `<div class="actions" style="margin-top:12px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block;">📲 Notificar por WhatsApp</a></div>` : ""}
-    ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
+    ${rawPhone ? `<div class="actions" style="margin-top:16px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%;">📲 Notificar por WhatsApp</a></div>` : ""}
+    ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%; border:none;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
   `);
   
   $("#status-change-select")?.addEventListener("change", async (e) => {
@@ -463,7 +581,7 @@ function openFinishModal(order, targetStatus) {
       <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA (HASTA 3 FOTOS)</span>
         <input type="file" id="evidencia-files" accept="image/*" multiple>
       </label>
-      <div id="file-preview-list" style="font-size:12px; color:#666;"></div>
+      <div id="file-preview-list" style="font-size:12px; color:var(--text-muted);"></div>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar y Finalizar Pedido</button></div>
     </form>
   `);
@@ -514,6 +632,14 @@ function formOrder() {
   
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
+    
+    <!-- CONTENEDOR DE PEGADO MÁGICO -->
+    <div class="magic-paste-box">
+      <div class="magic-paste-title">✨ Pegado Mágico (Desde WhatsApp / Instagram)</div>
+      <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Cliente: Ana Perez, Tel: 04141234567, Tipo: Topper Acrílico, Entrega: 05/09/2026 3:00 PM')"></textarea>
+      <button type="button" id="magic-paste-btn" class="secondary-button" style="background:var(--primary-color); color:white; border:none;">🪄 Analizar y Llenar Campos</button>
+    </div>
+
     <form id="order-form" class="form-grid">
       ${clients.length ? `
         <label class="field"><span class="field-label">SELECCIONAR CLIENTE GUARDADO</span>
@@ -527,23 +653,40 @@ function formOrder() {
         <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico">
       </label>
       <div class="form-inline">
-        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label>
-        <label class="field"><span class="field-label">HORA DE ENTREGA</span>
-          <select name="horaEntrega" required>
-            <option value="11:00 AM" selected>11:00 AM</option>
-            <option value="02:00 PM">02:00 PM</option>
-            <option value="05:00 PM">05:00 PM</option>
+        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" id="input-fecha-entrega" name="fechaEntrega" required></label>
+        <label class="field"><span class="field-label">HORA DE ENTREGA (7 AM - 9 PM)</span>
+          <select id="select-hora-entrega" name="horaEntrega" required>
+            ${generateTimeOptions("11:00 AM")}
           </select>
         </label>
       </div>
       <label class="field"><span class="field-label">RESPONSABLE</span>
         <select name="responsable"><option value="">Sin asignar</option>${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")}</select>
       </label>
-      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion" placeholder="Detalles del pedido..."></textarea></label>
+      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea id="input-descripcion" name="descripcion" placeholder="Detalles del pedido..."></textarea></label>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
     </form>
   `);
   
+  // EVENTO PEGADO MÁGICO
+  $("#magic-paste-btn")?.addEventListener("click", () => {
+    const raw = $("#magic-paste-input")?.value || "";
+    if (!raw.trim()) {
+      alert("Pega un texto en la caja antes de presionar Pegado Mágico.");
+      return;
+    }
+    const parsed = parseMagicPasteText(raw);
+    
+    if (parsed.cliente) $("#input-cliente").value = parsed.cliente;
+    if (parsed.telefono) $("#input-telefono").value = parsed.telefono;
+    if (parsed.tipo) $("#input-tipo").value = parsed.tipo;
+    if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
+    if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
+    if (parsed.descripcion) $("#input-descripcion").value = parsed.descripcion;
+    
+    showToast("✨ Campos llenados con Pegado Mágico.");
+  });
+
   $("#fc-select")?.addEventListener("change", (e) => {
     if (e.target.value !== "") {
       const c = clients[e.target.value];
@@ -730,7 +873,8 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-// Inicialización
+// Inicialización de temas e interfaz
+applyTheme();
 if (state.session) {
   $("#login-view")?.classList.add("hidden");
   $("#workspace")?.classList.remove("hidden");
