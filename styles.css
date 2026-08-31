@@ -1,5 +1,5 @@
 /* ==========================================================================
-   SISTEMA DE DISEÑO - PAPELERÍA CREATIVA V8.0
+   SISTEMA DE DISEÑO - PAPELERÍA CREATIVA V9.0
    (MODO OSCURO / CLARO / GENERADOR DE TEMAS EN VIVO / ALERTAS DE COMPLEJIDAD)
    ========================================================================== */
 
@@ -8,7 +8,7 @@
   --bg-main: #f1f5f9;
   --bg-card: #ffffff;
   --bg-header: #ffffff;
-  --bg-nav: rgba(255, 255, 255, 0.88);
+  --bg-nav: rgba(255, 255, 255, 0.92);
   --text-main: #0f172a;
   --text-muted: #64748b;
   --border-color: #e2e8f0;
@@ -36,7 +36,7 @@
   --bg-main: #0b0f19;
   --bg-card: #151c2c;
   --bg-header: #151c2c;
-  --bg-nav: rgba(21, 28, 44, 0.88);
+  --bg-nav: rgba(21, 28, 44, 0.92);
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --border-color: #26334d;
@@ -83,14 +83,17 @@
   transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 
-body {
-  background-color: var(--bg-main);
-  color: var(--text-main);
+html, body {
+  background-color: var(--bg-main) !important;
+  color: var(--text-main) !important;
   min-height: 100vh;
+  padding-bottom: 90px;
+}
+
+body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-bottom: 90px;
 }
 
 /* Shell Contenedor Fluido */
@@ -99,6 +102,8 @@ body {
   max-width: 1280px;
   margin: 0 auto;
   padding: 16px;
+  background-color: var(--bg-main);
+  color: var(--text-main);
 }
 
 .hidden {
@@ -109,7 +114,8 @@ body {
 .unlock-screen {
   max-width: 440px;
   margin: 60px auto;
-  background: var(--bg-card);
+  background-color: var(--bg-card);
+  color: var(--text-main);
   padding: 36px 28px;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -190,7 +196,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--bg-card);
+  background-color: var(--bg-card);
+  color: var(--text-main);
   padding: 16px 24px;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
@@ -244,7 +251,8 @@ body {
 .search-bar-container {
   display: flex;
   align-items: center;
-  background: var(--bg-card);
+  background-color: var(--bg-card);
+  color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 16px;
@@ -272,7 +280,7 @@ body {
   transform: translateX(-50%);
   width: calc(100% - 32px);
   max-width: 900px;
-  background: var(--bg-nav);
+  background-color: var(--bg-nav);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-radius: var(--radius-lg);
@@ -323,7 +331,8 @@ body {
 }
 
 .order-card {
-  background: var(--bg-card);
+  background-color: var(--bg-card);
+  color: var(--text-main);
   border-radius: var(--radius-md);
   padding: 18px;
   border: 1px solid var(--border-color);
@@ -449,7 +458,7 @@ dialog.modal {
   margin: auto;
   border: none;
   border-radius: var(--radius-lg);
-  background: var(--bg-card);
+  background-color: var(--bg-card);
   color: var(--text-main);
   max-width: 650px;
   width: 92%;
