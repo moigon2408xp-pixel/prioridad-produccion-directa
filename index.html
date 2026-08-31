@@ -66,6 +66,60 @@
   <script type="module" src="./app-registrar-fix.js?v=14"></script>
 
 <script>
+  // Función para descargar un archivo .json con toda la información guardada
+function exportarBackup() {
+  const datos = {};
+  
+  // Extrae todas las claves guardadas en LocalStorage
+  for (let i = 0; i < localStorage.length; i++) {
+    const clave = localStorage.key(i);
+    datos[clave] = localStorage.getItem(clave);
+  }
+
+  if (Object.keys(datos).length === 0) {
+    alert("No hay ningún dato guardado en la aplicación para exportar.");
+    return;
+  }
+
+  // Crear y descargar el archivo JSON
+  const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  
+  const fecha = new Date().toISOString().split("T")[0];
+  enlace.href = url;
+  enlace.download = `respaldo_produccion_${fecha}.json`;
+  
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  URL.revokeObjectURL(url);
+}
+
+// Función para leer el archivo .json subido y restaurarlo en LocalStorage
+function importarBackup(event) {
+  const archivo = event.target.files[0];
+  if (!archivo) return;
+
+  const lector = new FileReader();
+  lector.onload = function (e) {
+    try {
+      const datos = JSON.parse(e.target.result);
+      
+      // Escribe cada clave guardada en el LocalStorage actual
+      for (const clave in datos) {
+        localStorage.setItem(clave, datos[clave]);
+      }
+      
+      alert("¡Copia de seguridad restaurada con éxito! La página se actualizará.");
+      window.location.reload();
+    } catch (error) {
+      alert("Error: El archivo seleccionado no tiene un formato JSON válido.");
+    }
+  };
+  
+  lector.readAsText(archivo);
+}
   const URL_WEB_APP = "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
 
   // 1. Refrescar módulos enviando el token de sesión guardado
