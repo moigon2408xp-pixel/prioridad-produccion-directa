@@ -93,7 +93,6 @@ function getDeliveryDateObj(entregaStr) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// 1. Convertidor seguro de fechas (evita que JavaScript colapse con "Invalid time value")
 function safeParseDate(value) {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
@@ -101,11 +100,9 @@ function safeParseDate(value) {
   let str = String(value).trim();
   if (!str) return null;
 
-  // Limpiar textos adicionales comunes
   if (str.includes(" - ")) str = str.split(" - ")[0];
   if (str.includes(" a las ")) str = str.split(" a las ")[0];
 
-  // Procesar formato latino DD/MM/YYYY o DD/MM/YYYY HH:MM
   if (str.includes("/")) {
     const parts = str.split(" ")[0].split("/");
     if (parts.length === 3) {
@@ -117,19 +114,15 @@ function safeParseDate(value) {
     }
   }
 
-  // Intento de conversión estándar
   const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }
 
-// 2. Formateador de fechas a prueba de errores
-// Reemplaza cualquier declaración previa de formatDate por este único bloque:
 function formatDate(value) {
   if (!value) return "Sin fecha";
   let str = String(value).trim();
   if (str.includes("AM") || str.includes("PM")) return str;
 
-  // Limpiar texto adicional
   if (str.includes(" - ")) str = str.split(" - ")[0];
   if (str.includes(" a las ")) str = str.split(" a las ")[0];
 
@@ -174,22 +167,6 @@ const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today:
 const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
-  if (!value) return "Sin fecha";
-  let str = String(value).trim();
-  if (str.includes("AM") || str.includes("PM")) return str;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-
-  const day = date.getDate().toString().padStart(2, '0');
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const year = date.getFullYear();
-  let hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12 || 12;
-  return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-};
-
 function showToast(message) {
   const toast = $("#toast");
   if (!toast) return;
@@ -227,7 +204,7 @@ async function refresh(showMessage = true) {
   try {
     const response = await api("profile_dashboard");
     const rawData = response.data || response || {};
-    
+
     state.data = {
       myOrders: (rawData.myOrders || []).map(normalizeOrder),
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
@@ -349,14 +326,14 @@ function teamView() {
 
 function settingsView() {
   const session = state.session;
-  
+
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
       ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
     </div>
   `).join("");
-  
+
   const ftList = state.frequentTypes.map((t) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <strong>${escapeHtml(t)}</strong>
@@ -402,7 +379,7 @@ function render() {
   $("#screen-title").textContent = screenNames[state.screen];
   $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
   $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
-  
+
   document.querySelectorAll(".nav-button").forEach((btn) => btn.classList.toggle("active", btn.dataset.screen === state.screen));
 }
 
@@ -515,7 +492,7 @@ function formOrder() {
         </label>` : ''}
       <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente"></label>
       <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" type="tel" placeholder="Ingresa o cambia el número"></label>
-      
+
       <label class="field"><span class="field-label">TIPO DE TRABAJO</span>
         ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar existente --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro nuevo...</option></select>` : ''}
         <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico">
@@ -612,8 +589,8 @@ if (loginForm) {
       const res = await api("profile_login", { name: $("#login-name").value.trim(), pin: $("#login-pin").value.trim() });
       state.session = res.session;
       store.set("pp_profile_session", state.session);
-      $("#login-view").classList.add("hidden");
-      $("#workspace").classList.remove("hidden");
+      $("#login-view")?.classList.add("hidden");
+      $("#workspace")?.classList.remove("hidden");
       await refresh(false);
     } catch (err) {
       $("#login-error").textContent = err.message;
@@ -632,6 +609,25 @@ document.addEventListener("click", async (e) => {
   if (act === "new-order") return formOrder();
   if (act === "new-user") return formNewUser();
   if (act === "clear-cache") { store.remove("pp_profile_data"); showToast("Caché borrada."); return refresh(); }
+
+  if (act === "logout") {
+    store.remove("pp_profile_session");
+    state.session = null;
+    $("#workspace")?.classList.add("hidden");
+    $("#login-view")?.classList.remove("hidden");
+    return;
+  }
+
+  if (act === "toggle-user") {
+    const userName = btn.dataset.name;
+    const currentActive = btn.dataset.active === "true";
+    try {
+      await api("profile_toggle_user", { name: userName, active: !currentActive });
+      await refresh(false);
+      showToast(`Usuario ${!currentActive ? 'activado' : 'desactivado'}.`);
+    } catch (err) { alert(err.message); }
+    return;
+  }
 
   if (act === "new-client") {
     const clientName = prompt("Nombre del Cliente:");
@@ -681,30 +677,20 @@ document.addEventListener("click", async (e) => {
   }
 
   if (act === "delete-order") {
-    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente del sistema y de Google Sheets?")) {
+    if (confirm(`¿Eliminar el pedido "${btn.dataset.id}" del sistema?`)) {
       try {
         await api("profile_delete_order", { id: btn.dataset.id });
         closeModal();
         await refresh(false);
-        showToast("Pedido eliminado correctamente.");
+        showToast("Pedido eliminado.");
       } catch (err) { alert(err.message); }
     }
     return;
   }
-
-  if (act === "toggle-user") {
-    if (confirm(`¿Cambiar estado de ${btn.dataset.name}?`)) {
-      await api("profile_toggle_user", { name: btn.dataset.name, active: btn.dataset.active !== "true" });
-      await refresh(false);
-    }
-    return;
-  }
-  if (act === "logout") { store.remove("pp_profile_session"); state.session = null; location.reload(); return; }
 });
 
 if (state.session) {
   $("#login-view")?.classList.add("hidden");
   $("#workspace")?.classList.remove("hidden");
-  render();
   refresh(false);
 }
