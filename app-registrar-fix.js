@@ -15,7 +15,9 @@ function cleanPhoneNumber(phone = "") {
 
 const normalizeClient = (c) => {
   if (!c) return { name: "", phone: "" };
-  if (Array.isArray(c)) return { name: String(c[0] || "").trim(), phone: cleanPhoneNumber(c[1] || "") };
+  if (Array.isArray(c)) {
+    return { name: String(c[0] || "").trim(), phone: cleanPhoneNumber(c[1] || "") };
+  }
   if (typeof c === "object") {
     return {
       name: String(c.name || c.Nombre || c.nombre || c.cliente || c[0] || "").trim(),
@@ -28,7 +30,9 @@ const normalizeClient = (c) => {
 const normalizeType = (t) => {
   if (!t) return "";
   if (Array.isArray(t)) return String(t[0] || "").trim();
-  if (typeof t === "object") return String(t.type || t.Tipo || t.tipo || t.nombre || t.trabajo || t[0] || "").trim();
+  if (typeof t === "object") {
+    return String(t.type || t.Tipo || t.tipo || t.nombre || t.trabajo || t[0] || "").trim();
+  }
   return String(t).trim();
 };
 
@@ -43,7 +47,11 @@ const normalizeOrder = (o) => ({
   telefono: cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || ""),
   comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
   fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || "").trim(),
-  fotoReferencia: String(o.fotoReferencia || o.Referencia_Drive || o.referenciaDrive || "").trim(),
+  inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
+  finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
+  duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
+  ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
+  tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausado || 0),
   cerrado: String(o.cerrado || o.Cerrado || "No").trim()
 });
 
@@ -62,81 +70,13 @@ const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: [],
   frequentTypes: [],
-  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega. Puedes pasar a retirarlo. ¡Feliz día!"),
-  theme: store.get("pp_theme", "light"),
-  customColor: store.get("pp_custom_color", "#1976d2"),
+  waTemplate: "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega.",
   screen: "now",
   offline: false,
-  filters: { historySearch: "", historyResponsable: "", teamSearch: "" },
   data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [] },
 };
 
 const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-
-function applyTheme() {
-  let themeStyle = document.getElementById("pp-theme-styles");
-  if (!themeStyle) {
-    themeStyle = document.createElement("style");
-    themeStyle.id = "pp-theme-styles";
-    document.head.appendChild(themeStyle);
-  }
-
-  let bgBody = "#f4f6f8", bgCard = "#ffffff", textMain = "#333333", textSub = "#666666", border = "#dddddd", primary = state.customColor || "#1976d2";
-
-  if (state.theme === "dark") {
-    bgBody = "#121212"; bgCard = "#1e1e1e"; textMain = "#ffffff"; textSub = "#aaaaaa"; border = "#333333"; primary = state.customColor !== "#1976d2" ? state.customColor : "#bb86fc";
-  } else if (state.theme === "pink") {
-    bgBody = "#fce4ec"; bgCard = "#ffffff"; textMain = "#4a148c"; textSub = "#880e4f"; border = "#f8bbd0"; primary = state.customColor !== "#1976d2" ? state.customColor : "#ec407a";
-  } else if (state.theme === "emerald") {
-    bgBody = "#e8f5e9"; bgCard = "#ffffff"; textMain = "#1b5e20"; textSub = "#2e7d32"; border = "#c8e6c9"; primary = state.customColor !== "#1976d2" ? state.customColor : "#2e7d32";
-  }
-
-  themeStyle.textContent = `
-    body, #workspace, .app-layout { background-color: ${bgBody} !important; color: ${textMain} !important; }
-    .order-card, .card, .hero-card, .modal-content, .user-card, .settings-card { background-color: ${bgCard} !important; color: ${textMain} !important; border-color: ${border} !important; }
-    p, span, label, h1, h2, h3, div, small, .meta { color: ${textMain}; }
-    .eyebrow, .field-label, .section-heading, small, .meta strong { color: ${textSub}; }
-    input, select, textarea { background-color: ${bgCard} !important; color: ${textMain} !important; border-color: ${border} !important; }
-    .primary-button { background-color: ${primary} !important; color: #ffffff !important; }
-
-    /* INTEGRACIÓN Y CORRECCIÓN DE LA BARRA NAVEGADORA INFERIOR */
-    .bottom-nav, nav, .nav-bar, .navigation-bar {
-      background-color: ${bgCard} !important;
-      border-top: 1px solid ${border} !important;
-      display: flex !important;
-      justify-content: space-around !important;
-      align-items: center !important;
-      width: 100% !important;
-      max-width: 100% !important;
-      box-sizing: border-box !important;
-      margin: 0 !important;
-      padding: 6px 0 !important;
-      overflow: hidden !important;
-      border-radius: 0 !important;
-    }
-    .nav-button {
-      flex: 1 1 0 !important;
-      min-width: 0 !important;
-      background: transparent !important;
-      border: none !important;
-      color: ${textSub} !important;
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      justify-content: center !important;
-      font-size: 11px !important;
-      padding: 4px 2px !important;
-    }
-    .nav-button.active {
-      color: ${primary} !important;
-      font-weight: bold !important;
-    }
-    .nav-button svg, .nav-button i, .nav-button span {
-      color: inherit !important;
-      fill: currentColor !important;
-    }
-  `;
-}
 
 function getDeliveryDateObj(entregaStr) {
   if (!entregaStr) return null;
@@ -165,7 +105,8 @@ const priority = (order) => {
 };
 
 const priorityLabel = { overdue: "🚨 ¡RETRASADO!", now: "Hacer ahora", today: "Hacer hoy", later: "Programar" };
-const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && String(order.cerrado).toLowerCase() !== "sí";
+
+const active = (order) => !["Terminado", "Entregado", "Cancelado"].includes(order.estado) && order.cerrado !== "Sí";
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
 const formatDate = (value) => {
@@ -210,7 +151,7 @@ async function api(action, extra = {}) {
     throw new Error(data?.error || data?.mensaje || "Error al procesar solicitud.");
   } catch (err) {
     if (err.message && err.message.includes("Failed to fetch")) {
-      throw new Error("Error de conexión con Google Sheets.");
+      throw new Error("Error de conexión con Google Sheets. Verifica tu internet.");
     }
     throw err;
   }
@@ -222,7 +163,7 @@ async function refresh(showMessage = true) {
   try {
     const response = await api("profile_dashboard");
     const rawData = response.data || {};
-
+    
     state.data = {
       myOrders: (rawData.myOrders || []).map(normalizeOrder),
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
@@ -231,15 +172,12 @@ async function refresh(showMessage = true) {
       users: (rawData.users || []).map(normalizeUser)
     };
 
-    const rawClients = rawData.frequentClients || rawData.clientes || [];
-    const rawTypes = rawData.frequentTypes || rawData.tipos || [];
+    const rawClients = rawData.frequentClients || rawData.clientes || rawData.clientesFrecuentes || [];
+    const rawTypes = rawData.frequentTypes || rawData.tipos || rawData.tiposTrabajo || [];
 
     state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre");
     state.frequentTypes = rawTypes.map(normalizeType).filter(t => t && t.toLowerCase() !== "tipo");
-    if (rawData.waTemplate) {
-      state.waTemplate = rawData.waTemplate;
-      store.set("pp_wa_template", state.waTemplate);
-    }
+    state.waTemplate = rawData.waTemplate || state.waTemplate;
     state.offline = false;
 
     store.set("pp_profile_data", state.data);
@@ -248,7 +186,8 @@ async function refresh(showMessage = true) {
   } catch (error) {
     state.offline = true;
     render();
-    if (showMessage) showToast(error?.message || "Modo sin conexión.");
+    const errMsg = (error && error.message) ? error.message : "Modo sin conexión.";
+    if (showMessage) showToast(errMsg);
   } finally {
     if (btnRefresh) btnRefresh.textContent = "↻";
   }
@@ -262,8 +201,7 @@ function priorityPill(order) {
 }
 
 function orderCard(order, position) {
-  const searchHaystack = `${order.cliente} ${order.tipo} ${order.descripcion} ${order.id} ${order.responsable}`.toLowerCase();
-  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}" data-search="${escapeHtml(searchHaystack)}">
+  return `<button class="order-card" data-action="detail" data-id="${escapeHtml(order.id)}">
     <div class="order-top">
       <div><h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
       ${priorityPill(order)}
@@ -315,94 +253,59 @@ function queueView() {
 
 function historyView() {
   const orders = state.data.finishedOrders || [];
-  const users = state.data.users || [];
+  if (!orders.length) return '<div class="empty"><strong>No hay proyectos terminados en el historial</strong></div>';
 
-  return `
-    <div class="search-box" style="margin-bottom:12px; display:flex; gap:8px;">
-      <input type="text" id="history-search-input" value="${escapeHtml(state.filters.historySearch)}" placeholder="🔍 Escribe para buscar en el historial..." style="flex:1; padding:10px; border-radius:6px; border:1px solid var(--border-color);">
-      <select id="history-resp-filter" style="padding:10px; border-radius:6px; border:1px solid var(--border-color);">
-        <option value="">Todos los Responsables</option>
-        ${users.map(u => `<option value="${escapeHtml(u.name)}" ${state.filters.historyResponsable.toLowerCase() === u.name.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("")}
-      </select>
-    </div>
-
-    ${!orders.length ? '<div class="empty"><strong>No hay proyectos archivados</strong></div>' : ''}
-
-    <div class="order-list" id="history-list">${orders.map((order) => {
-      const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
-      const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
-      const isEntregado = order.estado === "Entregado";
-      const searchHaystack = `${order.cliente} ${order.tipo} ${order.descripcion} ${order.id} ${order.responsable}`.toLowerCase();
-
-      return `
-      <article class="order-card history-card-item" data-search="${escapeHtml(searchHaystack)}" data-responsable="${escapeHtml(order.responsable.toLowerCase())}" style="border-left: 5px solid ${isEntregado ? '#2e7d32' : '#f57c00'}; margin-bottom:10px;">
-        <div class="order-top">
-          <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)} (${escapeHtml(order.id)})</p></div>
-          <span class="priority" style="background:${isEntregado ? '#2e7d32' : '#f57c00'}; color:white;">${escapeHtml(order.estado)}</span>
-        </div>
-        <div class="meta">
-          Entrega pactada: ${escapeHtml(formatDate(order.entrega))}<br/>
-          Responsable: <strong>${escapeHtml(order.responsable)}</strong><br/>
-          ${order.descripcion ? `<strong>Motivo/Detalles:</strong> ${escapeHtml(order.descripcion)}<br/>` : ""}
-          ${order.comentarioCierre ? `<strong>Observación Cierre:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-
-          <div style="margin-top:6px;">
-            ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#00838f; font-weight:bold; text-decoration:underline; margin-right:8px;">📌 Ref ${idx + 1}</a>`).join("")}
-            ${links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline; margin-right:8px;">📷 Evidencia ${idx + 1}</a>`).join("")}
-          </div>
-
-          ${isLead() ? `
-            <div class="actions" style="margin-top:10px; display:flex; gap:6px;">
-              ${!isEntregado ? `<button class="secondary-button" style="background:#2e7d32; color:white; padding:6px 10px; font-size:12px;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">🚚 Marcar Entregado</button>` : ''}
-              <button class="secondary-button" style="background:#1976d2; color:white; padding:6px 10px; font-size:12px;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir / Pasar a Activo</button>
-            </div>
-          ` : ''}
-        </div>
-      </article>
-    `;
-    }).join('')}</div>
+  return `<div class="order-list">${orders.map((order) => {
+    const links = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+    return `
+    <article class="order-card">
+      <div class="order-top">
+        <div><h3>${escapeHtml(order.cliente)}</h3><p>${escapeHtml(order.tipo)}</p></div>
+        <span class="priority" style="background:#2e7d32; color:white;">${escapeHtml(order.estado)}</span>
+      </div>
+      <div class="meta">
+        Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
+        Responsable: ${escapeHtml(order.responsable)}<br/>
+        ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
+        ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
+        ${links.length ? links.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:#1976d2; font-weight:bold; text-decoration:underline; display:inline-block; margin-right:8px;">📷 Foto ${idx + 1}</a>`).join("") : ""}
+      </div>
+    </article>
   `;
+  }).join('')}</div>`;
 }
 
 function teamView() {
   const orders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
-
-  return `
-    <div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar nuevo pedido</button></div>
-    <div style="margin:10px 0;">
-      <input type="text" id="team-search-input" value="${escapeHtml(state.filters.teamSearch)}" placeholder="🔍 Filtrar por cliente, motivo, responsable..." style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border-color);">
-    </div>
-    <p class="section-heading">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
-    <div class="order-list" id="team-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>
-  `;
+  return `<div class="actions"><button class="primary-button" data-action="new-order">＋ Registrar pedido</button></div><p class="section-heading">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p><div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos.</div>'}</div>`;
 }
 
 function settingsView() {
   const session = state.session;
-
+  
   const fcList = state.frequentClients.map((c) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:6px;">
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(c.name)}</strong><br/><small>${escapeHtml(c.phone || "Sin teléfono")}</small></div>
       ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
     </div>
   `).join("");
-
+  
   const ftList = state.frequentTypes.map((t) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:6px;">
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <strong>${escapeHtml(t)}</strong>
       ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
     </div>
   `).join("");
 
   const usersList = (state.data.users || []).map((u) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:6px;">
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid #ddd; margin-bottom:6px; border-radius:6px;">
       <div><strong>${escapeHtml(u.name)}</strong> <small>(${escapeHtml(u.role)})</small><br/><span style="color:${u.active ? 'green' : 'red'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
       <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
     </div>
   `).join("");
 
   return `
-    <div class="card settings-card" style="padding:12px; border:1px solid var(--border-color); border-radius:8px; margin-bottom:15px;">
+    <div class="card settings-card" style="padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px;">
       <h3>Mi perfil</h3>
       <div class="detail-row"><span>NOMBRE:</span> <strong>${escapeHtml(session ? session.name : "")}</strong></div>
       <div class="detail-row"><span>ROL:</span> <strong>${escapeHtml(session ? session.role : "")}</strong></div>
@@ -410,29 +313,7 @@ function settingsView() {
       <button class="secondary-button" data-action="clear-cache" style="margin-top:8px;">🧹 Limpiar Caché Local</button>
     </div>
 
-    <div class="card settings-card" style="padding:12px; border:1px solid var(--border-color); border-radius:8px; margin-bottom:15px;">
-      <h3>🎨 Personalización Estética</h3>
-      <label class="field"><span class="field-label">TEMA DE LA INTERFAZ</span>
-        <select id="theme-selector" style="padding:8px;">
-          <option value="light" ${state.theme === "light" ? "selected" : ""}>☀️ Modo Claro (Estándar)</option>
-          <option value="dark" ${state.theme === "dark" ? "selected" : ""}>🌙 Modo Oscuro</option>
-          <option value="pink" ${state.theme === "pink" ? "selected" : ""}>🌸 Rosa Creativo</option>
-          <option value="emerald" ${state.theme === "emerald" ? "selected" : ""}>🌲 Verde Esmeralda</option>
-        </select>
-      </label>
-      <label class="field" style="margin-top:8px;"><span class="field-label">COLOR PRINCIPAL (BOTONES Y DESTACADOS)</span>
-        <input type="color" id="custom-color-picker" value="${state.customColor}" style="height:40px; cursor:pointer;">
-      </label>
-    </div>
-
     ${isLead() ? `
-      <div class="card settings-card" style="padding:12px; border:1px solid var(--border-color); border-radius:8px; margin-bottom:15px;">
-        <h3>📲 Plantilla de Notificación WhatsApp</h3>
-        <p style="font-size:12px;">Variables disponibles: {cliente}, {tipo}, {estado}</p>
-        <textarea id="wa-template-input" style="width:100%; height:80px; margin-top:6px; padding:6px; border-radius:6px; border:1px solid var(--border-color);">${escapeHtml(state.waTemplate)}</textarea>
-        <button class="primary-button" id="btn-save-wa-template" style="margin-top:6px;">Guardar Plantilla</button>
-      </div>
-
       <p class="section-heading">GESTIÓN DE PERFILES / USUARIOS</p>
       <button class="primary-button" data-action="new-user" style="margin-bottom:10px;">＋ Crear Nuevo Perfil</button>
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
@@ -440,7 +321,7 @@ function settingsView() {
 
     <p class="section-heading">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
     ${isLead() ? `<button class="primary-button" data-action="new-client" style="margin-bottom:10px;">＋ Agregar Cliente Frecuente</button>` : ''}
-    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados.</div>'}</div>
+    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
 
     <p class="section-heading">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
     ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:10px;">＋ Agregar Tipo de Trabajo</button>` : ''}
@@ -448,72 +329,14 @@ function settingsView() {
   `;
 }
 
-function filterHistoryDOM() {
-  const query = state.filters.historySearch.toLowerCase().trim();
-  const resp = state.filters.historyResponsable.toLowerCase().trim();
-  const cards = document.querySelectorAll(".history-card-item");
-
-  cards.forEach(card => {
-    const haystack = card.dataset.search || "";
-    const cardResp = card.dataset.responsable || "";
-    const matchesQuery = !query || haystack.includes(query);
-    const matchesResp = !resp || cardResp === resp;
-    card.style.display = matchesQuery && matchesResp ? "block" : "none";
-  });
-}
-
-function filterTeamDOM() {
-  const query = state.filters.teamSearch.toLowerCase().trim();
-  const cards = document.querySelectorAll("#team-list .order-card");
-
-  cards.forEach(card => {
-    const haystack = card.dataset.search || "";
-    card.style.display = !query || haystack.includes(query) ? "block" : "none";
-  });
-}
-
 function render() {
   if (!state.session) return;
-  applyTheme();
   const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
-  if ($("#screen-title")) $("#screen-title").textContent = screenNames[state.screen];
-  if ($("#role-label")) $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
+  $("#screen-title").textContent = screenNames[state.screen];
+  $("#role-label").textContent = `${state.session.role.toUpperCase()} · ${state.session.name.toUpperCase()}`;
   $("#screen").innerHTML = ({ now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView })[state.screen]();
-
+  
   document.querySelectorAll(".nav-button").forEach((btn) => btn.classList.toggle("active", btn.dataset.screen === state.screen));
-
-  // Búsqueda en tiempo real
-  const histInput = $("#history-search-input");
-  if (histInput) histInput.addEventListener("input", (e) => { state.filters.historySearch = e.target.value; filterHistoryDOM(); });
-
-  const histResp = $("#history-resp-filter");
-  if (histResp) histResp.addEventListener("change", (e) => { state.filters.historyResponsable = e.target.value; filterHistoryDOM(); });
-
-  const teamInput = $("#team-search-input");
-  if (teamInput) teamInput.addEventListener("input", (e) => { state.filters.teamSearch = e.target.value; filterTeamDOM(); });
-
-  // Eventos de selección de temas
-  $("#theme-selector")?.addEventListener("change", (e) => {
-    state.theme = e.target.value;
-    store.set("pp_theme", state.theme);
-    applyTheme();
-  });
-  $("#custom-color-picker")?.addEventListener("input", (e) => {
-    state.customColor = e.target.value;
-    store.set("pp_custom_color", state.customColor);
-    applyTheme();
-  });
-
-  $("#btn-save-wa-template")?.addEventListener("click", async () => {
-    const val = $("#wa-template-input").value.trim();
-    if (!val) return alert("La plantilla no puede estar vacía");
-    state.waTemplate = val;
-    store.set("pp_wa_template", val);
-    try {
-      await api("profile_save_wa_template", { template: val });
-      showToast("Plantilla guardada.");
-    } catch (err) { showToast("Guardada localmente."); }
-  });
 }
 
 function openModal(content) { const m = $("#modal"); if (m) { m.innerHTML = `<div class="modal-content">${content}</div>`; m.showModal(); } }
@@ -521,8 +344,7 @@ function closeModal() { const m = $("#modal"); if (m) m.close(); }
 
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
-  const waMsg = state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado);
-  const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(waMsg)}`;
+  const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado))}`;
 
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
@@ -536,7 +358,7 @@ function detail(order) {
       <div class="detail-row"><span>ENTREGA</span><strong>${escapeHtml(formatDate(order.entrega))}</strong></div>
       <div class="detail-row"><span>RESPONSABLE</span><strong>${escapeHtml(order.responsable)}</strong></div>
       <div class="detail-row"><span>TELÉFONO</span><strong>${escapeHtml(order.telefono || "No registrado")}</strong></div>
-      <div class="detail-row"><span>MOTIVO / DETALLES</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
+      <div class="detail-row"><span>DESCRIPCIÓN</span><strong>${escapeHtml(order.descripcion || "Sin descripción")}</strong></div>
     </div>
     ${rawPhone ? `<div class="actions" style="margin-top:12px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block;">📲 Notificar por WhatsApp</a></div>` : ""}
     ${isLead() ? `<div class="actions" style="margin-top:12px;"><button class="secondary-button" style="background:#d32f2f; color:white; width:100%;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button></div>` : ""}
@@ -560,14 +382,15 @@ function detail(order) {
 
 function openFinishModal(order, targetStatus) {
   openModal(`
-    <div class="modal-head"><h2>Completar Pedido (${targetStatus})</h2><button class="close-button" data-action="close">×</button></div>
+    <div class="modal-head"><h2>Completar Trabajo (${targetStatus})</h2><button class="close-button" data-action="close">×</button></div>
     <form id="finish-form" class="form-grid">
       <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
-        <textarea name="comentarioCierre" required placeholder="Escribe un comentario final o imprevisto..."></textarea>
+        <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración o imprevistos..."></textarea>
       </label>
       <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA (HASTA 3 FOTOS)</span>
         <input type="file" id="evidencia-files" accept="image/*" multiple>
       </label>
+      <div id="file-preview-list" style="font-size:12px; color:#666;"></div>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar y Finalizar Pedido</button></div>
     </form>
   `);
@@ -576,7 +399,7 @@ function openFinishModal(order, targetStatus) {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
-    btn.textContent = "Procesando...";
+    btn.textContent = "Guardando e subiendo evidencias...";
 
     const filesInput = $("#evidencia-files");
     const files = Array.from(filesInput.files).slice(0, 3);
@@ -602,9 +425,10 @@ function openFinishModal(order, targetStatus) {
       });
       closeModal();
       await refresh(false);
-      showToast("Pedido finalizado.");
+      showToast("Pedido finalizado con éxito.");
     } catch (err) {
       btn.disabled = false;
+      btn.textContent = "Guardar y Finalizar Pedido";
       alert(`Error: ${err.message}`);
     }
   });
@@ -617,13 +441,6 @@ function formOrder() {
 
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
-    
-    <div style="background:var(--bg-body); padding:10px; border-radius:6px; margin-bottom:12px; border:1px dashed var(--border-color);">
-      <strong>🧙‍♂️ Pegado Mágico (WhatsApp)</strong>
-      <textarea id="magic-paste-text" placeholder="Pega aquí la plantilla que envió el cliente por WhatsApp..." style="width:100%; height:60px; margin-top:4px; font-size:12px;"></textarea>
-      <button type="button" class="secondary-button" id="btn-magic-parse" style="margin-top:4px; width:100%;">✨ Autocompletar Campos</button>
-    </div>
-
     <form id="order-form" class="form-grid">
       ${clients.length ? `
         <label class="field"><span class="field-label">SELECCIONAR CLIENTE GUARDADO</span>
@@ -638,24 +455,12 @@ function formOrder() {
       </label>
 
       <div class="form-inline">
-        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" id="input-fecha" name="fechaEntrega" required></label>
+        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" name="fechaEntrega" required></label>
         <label class="field"><span class="field-label">HORA DE ENTREGA</span>
           <select name="horaEntrega" required>
-            <option value="07:00">07:00 AM</option>
-            <option value="08:00">08:00 AM</option>
-            <option value="09:00">09:00 AM</option>
-            <option value="10:00">10:00 AM</option>
-            <option value="11:00" selected>11:00 AM</option>
-            <option value="12:00">12:00 PM</option>
-            <option value="13:00">01:00 PM</option>
-            <option value="14:00">02:00 PM</option>
-            <option value="15:00">03:00 PM</option>
-            <option value="16:00">04:00 PM</option>
-            <option value="17:00">05:00 PM</option>
-            <option value="18:00">06:00 PM</option>
-            <option value="19:00">07:00 PM</option>
-            <option value="20:00">08:00 PM</option>
-            <option value="21:00">09:00 PM</option>
+            <option value="11:00 AM" selected>11:00 AM</option>
+            <option value="02:00 PM">02:00 PM</option>
+            <option value="05:00 PM">05:00 PM</option>
           </select>
         </label>
       </div>
@@ -663,45 +468,10 @@ function formOrder() {
       <label class="field"><span class="field-label">RESPONSABLE</span>
         <select name="responsable"><option value="">Sin asignar</option>${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")}</select>
       </label>
-      <label class="field"><span class="field-label">MOTIVO / MEDIDAS / DETALLES</span><textarea id="input-descripcion" name="descripcion" placeholder="Detalles del pedido, medidas de la torta, temática..."></textarea></label>
-      
-      <label class="field"><span class="field-label">FOTO DE REFERENCIA DEL CLIENTE (OPCIONAL)</span>
-        <input type="file" id="input-ref-file" accept="image/*">
-      </label>
-
+      <label class="field"><span class="field-label">DESCRIPCIÓN</span><textarea name="descripcion" placeholder="Detalles del pedido..."></textarea></label>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
     </form>
   `);
-
-  $("#btn-magic-parse")?.addEventListener("click", () => {
-    const raw = $("#magic-paste-text").value;
-    if (!raw) return alert("Pega primero un texto en el recuadro.");
-
-    const lines = raw.split('\n');
-    let cliente = "", telefono = "", tipo = "", motivo = "", medidas = "", detalles = [];
-
-    lines.forEach(line => {
-      const lower = line.toLowerCase();
-      if (lower.includes("cliente:") || lower.includes("nombre:")) cliente = line.split(":")[1]?.trim() || cliente;
-      else if (lower.includes("tel:") || lower.includes("teléfono:") || lower.includes("telefono:") || lower.includes("ws:") || lower.includes("whatsapp:")) telefono = line.split(":")[1]?.trim() || telefono;
-      else if (lower.includes("tipo:") || lower.includes("trabajo:") || lower.includes("producto:")) tipo = line.split(":")[1]?.trim() || tipo;
-      else if (lower.includes("motivo:") || lower.includes("temática:") || lower.includes("tematica:")) motivo = line.split(":")[1]?.trim();
-      else if (lower.includes("medida:") || lower.includes("medidas:") || lower.includes("torta:")) medidas = line.split(":")[1]?.trim();
-      else if (line.trim()) detalles.push(line.trim());
-    });
-
-    if (cliente) $("#input-cliente").value = cliente;
-    if (telefono) $("#input-telefono").value = cleanPhoneNumber(telefono);
-    if (tipo) $("#input-tipo").value = tipo;
-
-    let descParts = [];
-    if (motivo) descParts.push(`Motivo: ${motivo}`);
-    if (medidas) descParts.push(`Medidas: ${medidas}`);
-    if (detalles.length) descParts.push(`Detalles: ${detalles.join(" | ")}`);
-
-    if (descParts.length) $("#input-descripcion").value = descParts.join("\n");
-    showToast("Campos autocompletados.");
-  });
 
   $("#fc-select")?.addEventListener("change", (e) => {
     if (e.target.value !== "") {
@@ -719,28 +489,11 @@ function formOrder() {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
-    btn.textContent = "Guardando...";
-
-    const refInput = $("#input-ref-file");
-    let refImageData = null;
-    if (refInput && refInput.files.length > 0) {
-      const f = refInput.files[0];
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(f);
-      });
-      refImageData = { data: base64, mimeType: f.type };
-    }
-
     try {
-      await api("profile_create_order", { 
-        form: Object.fromEntries(new FormData(e.target)),
-        refImage: refImageData
-      });
+      await api("profile_create_order", { form: Object.fromEntries(new FormData(e.target)) });
       closeModal();
       await refresh(false);
-      showToast("Pedido guardado.");
+      showToast("Pedido guardado exitosamente.");
     } catch (err) {
       btn.disabled = false;
       alert(`Error: ${err.message}`);
@@ -813,40 +566,6 @@ document.addEventListener("click", async (e) => {
   if (act === "new-user") return formNewUser();
   if (act === "clear-cache") { store.remove("pp_profile_data"); showToast("Caché borrada."); return refresh(); }
 
-  if (act === "mark-delivered") {
-    if (confirm("¿Confirmar que el cliente ya retiró su pedido?")) {
-      try {
-        await api("profile_update_order", { id: btn.dataset.id, changes: { estado: "Entregado" } });
-        await refresh(false);
-        showToast("Pedido marcado como Entregado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-
-  if (act === "reopen-order") {
-    if (confirm("¿Deseas reactivar este pedido y regresarlo a la bandeja de pendientes?")) {
-      try {
-        await api("profile_reopen_order", { id: btn.dataset.id });
-        await refresh(false);
-        showToast("Pedido reactivado y devuelto a pendientes.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-
-  if (act === "delete-order") {
-    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente?")) {
-      try {
-        await api("profile_delete_order", { id: btn.dataset.id });
-        closeModal();
-        await refresh(false);
-        showToast("Pedido eliminado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-
   if (act === "new-client") {
     const clientName = prompt("Nombre del Cliente:");
     if (clientName && clientName.trim()) {
@@ -861,7 +580,7 @@ document.addEventListener("click", async (e) => {
   }
 
   if (act === "delete-client") {
-    if (confirm(`¿Eliminar el cliente "${btn.dataset.name}"?`)) {
+    if (confirm(`¿Eliminar el cliente "${btn.dataset.name}" de Google Sheets?`)) {
       try {
         await api("profile_delete_client", { name: btn.dataset.name });
         await refresh(false);
@@ -884,11 +603,23 @@ document.addEventListener("click", async (e) => {
   }
 
   if (act === "delete-type") {
-    if (confirm(`¿Eliminar el tipo de trabajo "${btn.dataset.type}"?`)) {
+    if (confirm(`¿Eliminar el tipo de trabajo "${btn.dataset.type}" de Google Sheets?`)) {
       try {
         await api("profile_delete_type", { type: btn.dataset.type });
         await refresh(false);
         showToast("Tipo de trabajo eliminado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+
+  if (act === "delete-order") {
+    if (confirm("¿Seguro que deseas eliminar este pedido permanentemente del sistema y de Google Sheets?")) {
+      try {
+        await api("profile_delete_order", { id: btn.dataset.id });
+        closeModal();
+        await refresh(false);
+        showToast("Pedido eliminado correctamente.");
       } catch (err) { alert(err.message); }
     }
     return;
