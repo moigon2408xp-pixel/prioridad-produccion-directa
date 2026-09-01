@@ -479,6 +479,7 @@ async function refresh(showMessage = true) {
     
     store.set("pp_profile_data", state.data);
     render();
+    checkAndSendPushNotifications();
     if (showMessage) showToast("Información sincronizada.");
   } catch (error) {
     console.error("Error al sincronizar:", error);
@@ -491,6 +492,41 @@ async function refresh(showMessage = true) {
   }
 }
 window.cargarDatos = refresh;
+
+function checkAndSendPushNotifications() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  
+  const currentUser = state.session ? String(state.session.name || "").toLowerCase().trim() : "";
+  const all = state.data.allOrders || [];
+  
+  // 1. Notificar pedidos retrasados
+  const overdue = all.filter(o => active(o) && priority(o) === "overdue");
+  if (overdue.length > 0) {
+    const key = `push_overdue_${new Date().toISOString().split('T')[0]}_${overdue.length}`;
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, "1");
+      new Notification("🚨 Alerta Creaciones JJ: Pedidos Retrasados", {
+        body: `¡Atención! Hay ${overdue.length} pedido(s) retrasado(s) que pasaron la hora límite en el taller.`,
+        icon: "./icons/icon-192.png"
+      });
+    }
+  }
+  
+  // 2. Notificar al trabajador sus tareas pendientes
+  if (currentUser) {
+    const myPending = all.filter(o => active(o) && String(o.responsable || "").toLowerCase().trim() === currentUser);
+    if (myPending.length > 0) {
+      const key2 = `push_mypending_${new Date().toISOString().split('T')[0]}_${myPending.length}`;
+      if (!sessionStorage.getItem(key2)) {
+        sessionStorage.setItem(key2, "1");
+        new Notification(`📋 Creaciones JJ: Hola ${state.session.name}`, {
+          body: `Tienes ${myPending.length} pedido(s) activo(s) asignado(s) en tu cola de trabajo.`,
+          icon: "./icons/icon-192.png"
+        });
+      }
+    }
+  }
+}
 
 function priorityPill(order) {
   const val = priority(order);
@@ -814,6 +850,7 @@ function settingsView() {
       </div>
 
       <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
+        <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
         <button class="secondary-button" data-action="logout">Cerrar sesión</button>
         <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
       </div>
@@ -1125,8 +1162,17 @@ function formOrder() {
         <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico, Maqueta...">
       </label>
 
-      <label class="field"><span class="field-label">🎨 MOTIVO / TEMÁTICA (EJ: Hello Kitty, Frozen...)</span>
+      <label class="field"><span class="field-label">🎨 MOTIVO / TEMÁTICA</span>
+        ${motivos.length ? `<select id="motivo-select" style="margin-bottom:6px;"><option value="">-- Seleccionar motivo guardado --</option>${motivos.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}<option value="__CUSTOM__">Escribir nuevo motivo...</option></select>` : ''}
         <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
+      </label>
+
+      <label class="field"><span class="field-label">🎨 ESTADO DEL DISEÑO</span>
+        <select name="diseno">
+          <option value="No">No ❌ (Pendiente por diseñar)</option>
+          <option value="En proceso">En proceso ✏️</option>
+          <option value="Sí" selected>Sí ✅ (Listo para cortar/armar)</option>
+        </select>
       </label>
 
       <label class="field"><span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
@@ -1148,7 +1194,7 @@ function formOrder() {
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
     </form>
   `);
-  
+
   $("#magic-paste-btn")?.addEventListener("click", () => {
     const raw = $("#magic-paste-input")?.value || "";
     if (!raw.trim()) {
@@ -1174,7 +1220,22 @@ function formOrder() {
       if (c) {
         $("#input-cliente").value = c.name || "";
         $("#input-telefono").value = c.phone || "";
+        const deliveryWarn = document.getElementById("delivery-warning");
+        if (deliveryWarn) {
+          if (c.delivery === "Sí") {
+            deliveryWarn.style.display = "block";
+            deliveryWarn.innerHTML = `🚚 <strong>Cliente con DELIVERY A DOMICILIO</strong><br>📍 <strong>Sector / Zona:</strong> ${escapeHtml(c.zona || 'No especificada')}<br>🏠 <strong>Dirección:</strong> ${escapeHtml(c.direccion || 'No especificada')}<br>⚠️ <em>El pedido DEBE quedar listo el día anterior al fin de jornada.</em>`;
+          } else {
+            deliveryWarn.style.display = "none";
+          }
+        }
       }
+    }
+  });
+
+  $("#motivo-select")?.addEventListener("change", (e) => {
+    if (e.target.value && e.target.value !== "__CUSTOM__") {
+      $("#input-motivo").value = e.target.value;
     }
   });
   
@@ -1292,15 +1353,39 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "new-client") {
-    const clientName = prompt("Nombre del Cliente:");
-    if (clientName && clientName.trim()) {
-      const clientPhone = prompt("Teléfono del Cliente (opcional):");
+    openModal(`
+      <div class="modal-head"><h2>➕ Registrar Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
+      <form id="new-client-form" class="form-grid">
+        <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input name="name" required placeholder="Ej. María González"></label>
+        <label class="field"><span class="field-label">TELÉFONO / WHATSAPP</span><input name="phone" type="tel" placeholder="04XXXXXXXXX"></label>
+        <label class="field"><span class="field-label">¿REQUIERE DELIVERY?</span>
+          <select name="delivery">
+            <option value="No">No – Retira en tienda / local</option>
+            <option value="Sí">Sí – Se le envía a domicilio</option>
+          </select>
+        </label>
+        <label class="field"><span class="field-label">ZONA / SECTOR (Ej: Norte, Los Palos Grandes)</span><input name="zona" placeholder="Ej. Norte, Sur, Este..."></label>
+        <label class="field"><span class="field-label">DIRECCIÓN EXACTA DE ENTREGA</span><input name="direccion" placeholder="Ej. Calle 5 con Av. Principal, Res. Las Flores, Apto 2B"></label>
+        <div class="modal-footer">
+          <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+          <button type="submit" class="primary-button">Guardar Cliente</button>
+        </div>
+      </form>
+    `);
+    document.getElementById("new-client-form")?.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const b = ev.target.querySelector(".primary-button");
+      b.disabled = true;
       try {
-        await api("profile_create_client", { name: clientName.trim(), phone: clientPhone ? clientPhone.trim() : "" });
+        await api("profile_create_client", Object.fromEntries(new FormData(ev.target)));
+        closeModal();
         await refresh(false);
-        showToast("Cliente agregado.");
-      } catch (err) { alert(err.message); }
-    }
+        showToast("Cliente guardado con éxito.");
+      } catch (err) {
+        b.disabled = false;
+        alert(`Error: ${err.message}`);
+      }
+    });
     return;
   }
   if (act === "delete-client") {
@@ -1331,6 +1416,61 @@ document.addEventListener("click", async (e) => {
         await refresh(false);
         showToast("Tipo de trabajo eliminado.");
       } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+  if (act === "new-motivo") {
+    openModal(`
+      <div class="modal-head"><h2>🎨 Registrar Motivo / Temática</h2><button class="close-button" data-action="close">×</button></div>
+      <form id="new-motivo-form" class="form-grid">
+        <label class="field"><span class="field-label">NOMBRE DEL MOTIVO / TEMÁTICA</span>
+          <input name="motivo" required placeholder="Ej. Hello Kitty, Tarzán, Spider-Man, Cumpleaños 15...">
+        </label>
+        <div class="modal-footer">
+          <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+          <button type="submit" class="primary-button">Guardar Motivo</button>
+        </div>
+      </form>
+    `);
+    document.getElementById("new-motivo-form")?.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const bm = ev.target.querySelector(".primary-button");
+      bm.disabled = true;
+      try {
+        const val = ev.target.motivo.value.trim();
+        await api("profile_create_motivo", { motivo: val });
+        closeModal();
+        await refresh(false);
+        showToast("Motivo guardado en el catálogo.");
+      } catch (err) {
+        bm.disabled = false;
+        alert(`Error: ${err.message}`);
+      }
+    });
+    return;
+  }
+  if (act === "delete-motivo") {
+    const targetM = btn.dataset.motivo;
+    if (confirm(`¿Eliminar el motivo "${targetM}" del catálogo?`)) {
+      try {
+        await api("profile_delete_motivo", { motivo: targetM });
+        await refresh(false);
+        showToast("Motivo eliminado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+  if (act === "request-push-perm") {
+    if (!("Notification" in window)) {
+      alert("Este navegador no soporta notificaciones.");
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      showToast("🔔 ¡Notificaciones activadas con éxito!");
+      checkAndSendPushNotifications();
+    } else {
+      alert("Permiso de notificaciones no concedido. Habilítalo en la configuración del navegador.");
     }
     return;
   }
