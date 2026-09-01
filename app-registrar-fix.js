@@ -288,7 +288,9 @@ const priority = (order) => {
   
   let targetDeadline = new Date(deliveryDate);
   if (hasDelivery) {
+    // Para pedidos con delivery, el límite de producción es el día anterior a las 8:00 PM (fin de jornada)
     targetDeadline.setDate(targetDeadline.getDate() - 1);
+    targetDeadline.setHours(20, 0, 0, 0);
   }
 
   if (targetDeadline < now) return "overdue";
@@ -520,7 +522,7 @@ function checkAndSendPushNotifications() {
       sessionStorage.setItem(key, "1");
       new Notification("🚨 Alerta Creaciones JJ: Pedidos Retrasados", {
         body: `¡Atención! Hay ${overdue.length} pedido(s) retrasado(s) que pasaron la hora límite en el taller.`,
-        icon: "./icons/icon-192.png"
+        icon: "./logo_creaciones_jj.png"
       });
     }
   }
@@ -534,7 +536,7 @@ function checkAndSendPushNotifications() {
         sessionStorage.setItem(key2, "1");
         new Notification(`📋 Creaciones JJ: Hola ${state.session.name}`, {
           body: `Tienes ${myPending.length} pedido(s) activo(s) asignado(s) en tu cola de trabajo.`,
-          icon: "./icons/icon-192.png"
+          icon: "./logo_creaciones_jj.png"
         });
       }
     }
