@@ -795,6 +795,7 @@ function historyView() {
               Responsable: ${escapeHtml(order.responsable)}<br/>
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
               ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
+              ${order.notas ? `<div style="font-size:12px; color:#d97706; margin-top:4px; font-weight:600;">📝 <strong>Bitácora:</strong> ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ""}
               
               ${refLinks.length ? `
                 <div style="margin-top:6px;">
