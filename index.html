@@ -3,65 +3,116 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-  <meta name="theme-color" content="#1e3a8a"/>
-  <meta name="description" content="Gestión de producción por perfiles conectada a Google Sheets."/>
+  <meta name="theme-color" content="#1a1a2e"/>
+  <meta name="description" content="Sistema de gestión de producción para Creaciones JJ – Ochoa & Risquez."/>
   <link rel="manifest" href="./manifest.webmanifest"/>
   <link rel="icon" href="./icons/icon-192.png"/>
   <link rel="apple-touch-icon" href="./icons/icon-192.png"/>
-  <link rel="stylesheet" href="./styles.css"/>
-  <title>Prioridad Producción - Papelería Creativa</title>
+  <link rel="stylesheet" href="./styles.css?v=11"/>
+  <title>Creaciones JJ – Prioridad Producción</title>
 </head>
 <body>
   <div class="app-shell">
-    <!-- VISTA DE DESBLOQUEO / INICIO DE SESIÓN -->
+
+    <!-- ========== PANTALLA DE LOGIN ========== -->
     <section id="login-view" class="unlock-screen">
-      <img src="./icons/icon-192.png" alt="Logo" class="unlock-logo"/>
-      <p class="eyebrow">PAPELERÍA CREATIVA</p>
-      <h1>Prioridad<br/>Producción</h1>
-      <p class="unlock-copy">Ingresa a tu espacio personal de trabajo.</p>
+
+      <!-- Fondo decorativo con gradiente de la marca -->
+      <div class="login-bg-decor" aria-hidden="true">
+        <div class="login-bg-circle login-bg-circle--1"></div>
+        <div class="login-bg-circle login-bg-circle--2"></div>
+      </div>
+
+      <!-- Logo de la empresa -->
+      <div class="login-logo-wrapper">
+        <img
+          src="./logo_creaciones_jj.png"
+          alt="Creaciones JJ"
+          class="login-logo"
+          onerror="this.src='./icons/icon-192.png'"
+        />
+      </div>
+
+      <!-- Nombre de la empresa -->
+      <div class="login-brand">
+        <p class="login-brand-sub">Sistema de Producción</p>
+        <h1 class="login-brand-name">Creaciones JJ</h1>
+        <p class="login-brand-tag">Ochoa &amp; Risquez</p>
+      </div>
+
+      <!-- Formulario de inicio de sesión -->
       <form id="login-form" class="unlock-form">
         <label for="login-name">Tu nombre</label>
-        <input id="login-name" autocomplete="username" placeholder="Ej. Valentina" required/>
+        <input
+          id="login-name"
+          autocomplete="username"
+          placeholder="Ej. Valentina"
+          required
+        />
         <label for="login-pin">Tu PIN personal</label>
-        <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Seis dígitos" required/>
-        <button class="primary-button">Iniciar sesión</button>
+        <input
+          id="login-pin"
+          type="password"
+          inputmode="numeric"
+          autocomplete="current-password"
+          placeholder="Seis dígitos"
+          required
+        />
+        <button class="primary-button login-submit-btn" type="submit">
+          Iniciar sesión
+        </button>
         <p id="login-error" class="form-error"></p>
       </form>
+
+      <p class="login-footer-copy">
+        © Creaciones JJ – Ochoa &amp; Risquez · Gestión de Producción
+      </p>
     </section>
 
-    <!-- VISTA DE ÁREA DE TRABAJO -->
+    <!-- ========== ÁREA DE TRABAJO ========== -->
     <section id="workspace" class="workspace hidden">
       <header class="topbar">
         <div>
-          <p id="role-label" class="eyebrow">PRODUCCIÓN</p>
+          <p id="role-label" class="eyebrow">CREACIONES JJ · PRODUCCIÓN</p>
           <h1 id="screen-title">Ahora</h1>
         </div>
         <div class="topbar-controls">
-          <button type="button" class="theme-toggle-btn" onclick="toggleTheme()" aria-label="Cambiar Tema Modo Oscuro/Claro">
+          <button
+            type="button"
+            class="theme-toggle-btn"
+            onclick="toggleTheme()"
+            aria-label="Cambiar modo oscuro / claro"
+          >
             <span id="theme-icon">🌙</span> Modo
           </button>
           <button id="refresh" class="icon-button" aria-label="Actualizar">↻</button>
         </div>
       </header>
 
-      <!-- CONTROL DE COPIAS DE SEGURIDAD INTEGRADO EN WORKSPACE -->
-      <div class="backup-container" style="padding: 12px 16px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-        <button type="button" onclick="exportarBackup()" style="padding: 8px 14px; background-color: var(--primary-color); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+      <!-- Copia de Seguridad -->
+      <div class="backup-container">
+        <button type="button" onclick="exportarBackup()">
           📦 Exportar Copia de Seguridad
         </button>
-        <label style="padding: 8px 14px; background-color: var(--bg-main); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 8px; font-weight: bold; cursor: pointer; display: inline-block;">
+        <label>
           📥 Importar Copia de Seguridad
-          <input type="file" id="importInput" accept=".json" onchange="importarBackup(event)" style="display: none;">
+          <input
+            type="file"
+            id="importInput"
+            accept=".json"
+            onchange="importarBackup(event)"
+            style="display:none;"
+          />
         </label>
       </div>
 
       <main id="screen" class="screen" aria-live="polite"></main>
 
       <nav class="bottom-nav">
-        <button data-screen="now" class="nav-button active"><span>⌁</span>Ahora</button>
-        <button data-screen="queue" class="nav-button"><span>☷</span>Mi cola</button>
-        <button data-screen="team" class="nav-button"><span>⚠</span>Equipo</button>
-        <button data-screen="history" class="nav-button"><span>▣</span>Historial</button>
+        <button data-screen="now"      class="nav-button active"><span>⌁</span>Ahora</button>
+        <button data-screen="queue"    class="nav-button"><span>☷</span>Mi cola</button>
+        <button data-screen="team"     class="nav-button"><span>⚠</span>Equipo</button>
+        <button data-screen="history"  class="nav-button"><span>▣</span>Historial</button>
         <button data-screen="settings" class="nav-button"><span>⚙</span>Ajustes</button>
       </nav>
     </section>
@@ -72,46 +123,43 @@
 
   <script src="./config.js"></script>
   <script src="./firebase-config.js"></script>
-  <script type="module" src="./app-registrar-fix.js?v=23"></script>
+  <script type="module" src="./app-registrar-fix.js?v=24"></script>
 
   <script>
-    // FUNCIONES GLOBALES DE RESPALDO Y RESTAURACIÓN DE LOCALSTORAGE
-    window.exportarBackup = function() {
+    /* ---- Backup / Restore desde localStorage ---- */
+    window.exportarBackup = function () {
       const datos = {};
       for (let i = 0; i < localStorage.length; i++) {
         const clave = localStorage.key(i);
         datos[clave] = localStorage.getItem(clave);
       }
-      if (Object.keys(datos).length === 0) {
-        alert("No hay ningún dato guardado en la aplicación para exportar.");
+      if (!Object.keys(datos).length) {
+        alert("No hay datos guardados para exportar.");
         return;
       }
       const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const enlace = document.createElement("a");
-      const fecha = new Date().toISOString().split("T")[0];
-      enlace.href = url;
-      enlace.download = `respaldo_papeleria_produccion_${fecha}.json`;
-      document.body.appendChild(enlace);
-      enlace.click();
-      document.body.removeChild(enlace);
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `backup_creaciones_jj_${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     };
 
-    window.importarBackup = function(event) {
+    window.importarBackup = function (event) {
       const archivo = event.target.files[0];
       if (!archivo) return;
       const lector = new FileReader();
-      lector.onload = function(e) {
+      lector.onload = function (e) {
         try {
           const datos = JSON.parse(e.target.result);
-          for (const clave in datos) {
-            localStorage.setItem(clave, datos[clave]);
-          }
-          alert("¡Copia de seguridad restaurada con éxito! La página se actualizará.");
+          for (const k in datos) localStorage.setItem(k, datos[k]);
+          alert("¡Copia restaurada! La página se actualizará.");
           window.location.reload();
-        } catch (error) {
-          alert("Error: El archivo seleccionado no tiene un formato JSON válido.");
+        } catch {
+          alert("El archivo no es un JSON válido.");
         }
       };
       lector.readAsText(archivo);
