@@ -14,8 +14,8 @@ self.addEventListener('push', function(event) {
   }
   const options = {
     body: data.body,
-    icon: './icons/icon-192.png',
-    badge: './icons/icon-192.png',
+    icon: './logo_creaciones_jj.png',
+    badge: './logo_creaciones_jj.png',
     vibrate: [200, 100, 200]
   };
   event.waitUntil(
