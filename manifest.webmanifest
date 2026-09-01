@@ -1,13 +1,24 @@
 {
-  "name": "Prioridad Producción",
-  "short_name": "Producción",
-  "description": "Cola operativa y prioridades de producción.",
-  "start_url": "./",
+  "name": "Creaciones JJ – Prioridad Producción",
+  "short_name": "Creaciones JJ",
+  "description": "Sistema de gestión de producción para Creaciones JJ – Ochoa & Risquez",
+  "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#F8F6F1",
-  "theme_color": "#143B5F",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "orientation": "portrait",
   "icons": [
-    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "./logo_creaciones_jj.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./logo_creaciones_jj.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }
