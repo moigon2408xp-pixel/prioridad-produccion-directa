@@ -1,8 +1,9 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 10.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
- * Exportación explícita de funciones de temas al objeto global (window),
- * alineación visual limpia del modal de detalles y gestión de eventos sin errores.
+ * Versión 11.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * "Creaciones JJ - Ochoa & Risquez"
+ * Saneamiento visual de Responsable (de "1" a Valentina/Sin asignar) y
+ * autocompletado inteligente de número de teléfono mediante directorio.
  */
 
 const $ = (selector) => document.querySelector(selector);
@@ -93,7 +94,6 @@ function resetCustomTheme() {
   showToast("Tema restablecido a valores por defecto.");
 }
 
-// EXPORTACIÓN A SCOPE GLOBAL WINDOW PARA EVITAR REFERENCIA PERDIDA EN SCRIPT MODULE
 window.toggleTheme = toggleTheme;
 window.setAccent = setAccent;
 window.saveCustomColor = saveCustomColor;
@@ -195,28 +195,37 @@ const normalizeType = (t) => {
   return String(t).trim();
 };
 
-const normalizeOrder = (o) => ({
-  id: String(o.id || o['ID Pedido'] || o.ID || "").trim(),
-  cliente: String(o.cliente || o.Cliente || "Sin cliente").trim(),
-  tipo: String(o.tipo || o['Tipo de trabajo'] || o.Tipo || o.trabajo || "Sin tipo").trim(),
-  motivo: String(o.motivo || o.Motivo || o['Temática'] || o.tematica || "").trim(),
-  descripcion: String(o.descripcion || o.Descripción || "").trim(),
-  entrega: String(o.entrega || o['Fecha entrega'] || o.Entrega || "").trim(),
-  responsable: String(o.responsable || o.Responsable || "Sin asignar").trim(),
-  estado: String(o.estado || o.Estado || "Pendiente").trim(),
-  diseno: String(o.diseno || o.diseño || "No").trim(),
-  material: String(o.material || o.Material || "No").trim(),
-  telefono: cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || ""),
-  comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
-  fotoReferencia: String(o.fotoReferencia || o.Fotos_Referencia || o.referencias || "").trim(),
-  fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || o.foto || "").trim(),
-  inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
-  finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
-  duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
-  ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
-  tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausadoMin || 0),
-  cerrado: String(o.cerrado || o.Cerrado || "No").trim()
-});
+const normalizeOrder = (o) => {
+  let resp = String(o.responsable || o.Responsable || "").trim();
+  if (!resp || resp === "1" || !isNaN(resp)) {
+    resp = "Valentina"; // Fallback a Valentina si era "1" por desfasamiento
+  }
+
+  let phone = cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || "");
+
+  return {
+    id: String(o.id || o['ID Pedido'] || o.ID || "").trim(),
+    cliente: String(o.cliente || o.Cliente || "Sin cliente").trim(),
+    tipo: String(o.tipo || o['Tipo de trabajo'] || o.Tipo || o.trabajo || "Sin tipo").trim(),
+    motivo: String(o.motivo || o.Motivo || o['Temática'] || o.tematica || "").trim(),
+    descripcion: String(o.descripcion || o.Descripción || "").trim(),
+    entrega: String(o.entrega || o['Fecha entrega'] || o.Entrega || "").trim(),
+    responsable: resp,
+    estado: String(o.estado || o.Estado || "Pendiente").trim(),
+    diseno: String(o.diseno || o.diseño || "No").trim(),
+    material: String(o.material || o.Material || "No").trim(),
+    telefono: phone,
+    comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
+    fotoReferencia: String(o.fotoReferencia || o.Fotos_Referencia || o.referencias || "").trim(),
+    fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || o.foto || "").trim(),
+    inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
+    finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
+    duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
+    ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
+    tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausadoMin || 0),
+    cerrado: String(o.cerrado || o.Cerrado || "No").trim()
+  };
+};
 
 const normalizeUser = (u) => {
   if (!u) return { name: "", role: "trabajador", active: true };
@@ -428,20 +437,30 @@ async function refresh(showMessage = true) {
     const response = await api("profile_dashboard");
     const rawData = response.data || response || {};
     
-    state.data = {
-      myOrders: (rawData.myOrders || []).map(normalizeOrder),
-      teamCritical: (rawData.teamCritical || []).map(normalizeOrder),
-      allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder),
-      finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || []).map(normalizeOrder),
-      users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
-      dailyPerformance: rawData.dailyPerformance || {}
-    };
-    
     const rawClients = rawData.frequentClients || rawData.clients || rawData.clientes || rawData.telefonos || [];
     const rawTypes = rawData.frequentTypes || rawData.types || rawData.tipos || rawData.tiposTrabajo || [];
     
     state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre");
     state.frequentTypes = rawTypes.map(normalizeType).filter(t => t && t.toLowerCase() !== "tipo");
+    
+    // Auto-sanar teléfonos de pedidos a través del catálogo de clientes
+    const sanitizeOrderPhone = (ord) => {
+      if (!ord.telefono && ord.cliente) {
+        const found = state.frequentClients.find(c => c.name.toLowerCase() === ord.cliente.toLowerCase());
+        if (found && found.phone) ord.telefono = found.phone;
+      }
+      return ord;
+    };
+
+    state.data = {
+      myOrders: (rawData.myOrders || []).map(normalizeOrder).map(sanitizeOrderPhone),
+      teamCritical: (rawData.teamCritical || []).map(normalizeOrder).map(sanitizeOrderPhone),
+      allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder).map(sanitizeOrderPhone),
+      finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || []).map(normalizeOrder).map(sanitizeOrderPhone),
+      users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
+      dailyPerformance: rawData.dailyPerformance || {}
+    };
+    
     state.waTemplate = rawData.waTemplate || state.waTemplate;
     state.offline = false;
     
@@ -679,7 +698,7 @@ function settingsView() {
 
   return `
     <div class="card settings-card" style="padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-card); margin-bottom:20px;">
-      <h3 style="margin-bottom:14px;">Mi Perfil y Personalización</h3>
+      <h3 style="margin-bottom:14px;">Mi Perfil y Personalización - Creaciones JJ</h3>
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
         <div><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
         <div><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
@@ -767,7 +786,7 @@ function render() {
     if (roleLabelEl && state.session) {
       const roleStr = String(state.session.role || "trabajador").toUpperCase();
       const nameStr = String(state.session.name || "Usuario").toUpperCase();
-      roleLabelEl.textContent = `${roleStr} · ${nameStr}`;
+      roleLabelEl.textContent = `CREACIONES JJ · ${roleStr} · ${nameStr}`;
     }
     
     const screenEl = $("#screen");
@@ -832,7 +851,6 @@ function closeModal() {
   if (m) m.close();
 }
 
-// DETALLE FORMATEADO CON ESPACIADO LIMPIO (PUNTOS Y DOS PUNTOS)
 function detail(order) {
   const rawPhone = cleanPhoneNumber(order.telefono);
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
@@ -981,7 +999,7 @@ function formOrder() {
   const types = state.frequentTypes;
   
   openModal(`
-    <div class="modal-head"><h2>Registrar Pedido</h2><button class="close-button" data-action="close">×</button></div>
+    <div class="modal-head"><h2>Registrar Pedido - Creaciones JJ</h2><button class="close-button" data-action="close">×</button></div>
     
     <div class="magic-paste-box">
       <div class="magic-paste-title">✨ Pegado Mágico (WhatsApp / Plantillas de Reposteras)</div>
