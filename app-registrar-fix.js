@@ -387,7 +387,7 @@ function generateTimeOptions(selectedTime = "11:00 AM") {
   return hours.map(h => `<option value="${h}" ${h === selectedTime ? "selected" : ""}>${h}</option>`).join("");
 }
 
-// ==== 4. PEGADO MÁGICO CON DETECCIÓN DE DÍAS DE LA SEMANA Y PLANTILLAS ====
+// ==== 4. PEGADO MÁGICO AVANZADO PARA REPOSTERAS Y WHATSAPP ====
 function parseMagicPasteText(rawText) {
   const result = {
     cliente: "",
@@ -403,77 +403,115 @@ function parseMagicPasteText(rawText) {
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   
-  const clienteMatch = rawText.match(/(?:cliente|nombre|para|comprador)[:\s]+([^\n\r,*]+)/i);
+  // 1. Detección de Cliente / Nombre
+  const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de)[:\s]+([^\n\r,*]+)/i);
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
-  } else if (lines.length > 0 && !lines[0].includes(":")) {
-    result.cliente = lines[0].replace(/^hola,?\s*/i, "").trim();
+  } else {
+    // Buscar en directorio de clientes guardados
+    for (const c of (state.frequentClients || [])) {
+      if (c.name && rawText.toLowerCase().includes(c.name.toLowerCase())) {
+        result.cliente = c.name;
+        if (c.phone) result.telefono = c.phone;
+        break;
+      }
+    }
+    if (!result.cliente && lines.length > 0 && !lines[0].includes(":")) {
+      result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de)\b,?\s*/i, "").trim();
+    }
   }
   
-  const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
-  if (phoneMatch) {
-    result.telefono = cleanPhoneNumber(phoneMatch[0]);
+  // 2. Teléfono / WhatsApp
+  if (!result.telefono) {
+    const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
+    if (phoneMatch) {
+      result.telefono = cleanPhoneNumber(phoneMatch[0]);
+    }
   }
   
-  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema)[:\s]+([^\n\r,*]+)/i);
+  // 3. Motivo / Temática
+  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema|personaje|temática\/motivo)[:\s]+([^\n\r,*]+)/i);
   if (motivoMatch) {
     result.motivo = motivoMatch[1].trim();
+  } else {
+    for (const m of (state.frequentMotivos || [])) {
+      if (m && rawText.toLowerCase().includes(m.toLowerCase())) {
+        result.motivo = m;
+        break;
+      }
+    }
   }
 
-  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item)[:\s]+([^\n\r,*]+)/i);
+  // 4. Tipo de Trabajo
+  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item|pedido)[:\s]+([^\n\r,*]+)/i);
   if (typeMatch) {
     result.tipo = typeMatch[1].trim();
   } else {
-    for (const t of state.frequentTypes) {
+    for (const t of (state.frequentTypes || [])) {
       if (t && rawText.toLowerCase().includes(t.toLowerCase())) {
         result.tipo = t;
         break;
       }
     }
+    if (!result.tipo) {
+      if (/topper/i.test(rawText)) result.tipo = "Topper";
+      else if (/piñata|pinata/i.test(rawText)) result.tipo = "Piñata";
+      else if (/maqueta/i.test(rawText)) result.tipo = "Maqueta";
+      else if (/banderín|banderin/i.test(rawText)) result.tipo = "Banderín";
+      else if (/caja/i.test(rawText)) result.tipo = "Caja Explosiva";
+    }
   }
   
-  const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-  const dayMatch = rawText.match(/(?:entregar|fecha|para)[:\s]*([a-záéíóúñ]+)/i);
+  // 5. Fecha de Entrega (Días de la semana, 'mañana', 'hoy', o fechas DD/MM/YYYY)
+  const lowerText = rawText.toLowerCase();
+  const today = new Date();
   
-  if (dayMatch) {
-    const matchedWord = dayMatch[1].toLowerCase();
-    const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
+  if (/\bmañana\b/.test(lowerText)) {
+    const tom = new Date(today);
+    tom.setDate(tom.getDate() + 1);
+    result.fechaEntrega = tom.toISOString().split("T")[0];
+  } else if (/\bhoy\b/.test(lowerText)) {
+    result.fechaEntrega = today.toISOString().split("T")[0];
+  } else {
+    const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
+    const dayMatch = rawText.match(/(?:entregar|fecha|para|el)[:\s]*([a-záéíóúñ]+)/i);
     
-    if (dayIdx !== -1) {
-      const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx));
-      const today = new Date();
-      const currentDayOfWeek = today.getDay();
+    if (dayMatch) {
+      const matchedWord = dayMatch[1].toLowerCase();
+      const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
       
-      let diff = targetDayOfWeek - currentDayOfWeek;
-      if (diff <= 0) diff += 7;
-      
-      const targetDate = new Date(today.setDate(today.getDate() + diff));
-      const year = targetDate.getFullYear();
-      const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
-      const day = targetDate.getDate().toString().padStart(2, '0');
-      result.fechaEntrega = `${year}-${month}-${day}`;
+      if (dayIdx !== -1) {
+        const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx));
+        const currentDayOfWeek = today.getDay();
+        
+        let diff = targetDayOfWeek - currentDayOfWeek;
+        if (diff <= 0) diff += 7;
+        
+        const targetDate = new Date();
+        targetDate.setDate(today.getDate() + diff);
+        result.fechaEntrega = targetDate.toISOString().split("T")[0];
+      }
     }
   }
 
   if (!result.fechaEntrega) {
-    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
+    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/);
     if (dateMatch) {
       const parsedDate = safeParseDate(dateMatch[0]);
       if (parsedDate) {
-        const year = parsedDate.getFullYear();
-        const month = (parsedDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = parsedDate.getDate().toString().padStart(2, '0');
-        result.fechaEntrega = `${year}-${month}-${day}`;
+        result.fechaEntrega = parsedDate.toISOString().split("T")[0];
       }
     }
   }
   
+  // 6. Hora de Entrega
   const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (timeMatch) {
     let hourNum = parseInt(timeMatch[1], 10);
+    const minStr = timeMatch[2] || "00";
     const ampm = timeMatch[3].toUpperCase();
     if (hourNum < 10) hourNum = "0" + hourNum;
-    result.horaEntrega = `${hourNum}:00 ${ampm}`;
+    result.horaEntrega = `${hourNum}:${minStr} ${ampm}`;
   }
 
   return result;
