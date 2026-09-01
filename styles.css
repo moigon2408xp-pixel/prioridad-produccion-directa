@@ -52,6 +52,9 @@
    ============================================================ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* CLASE ESENCIAL: oculta secciones enteras (login ↔ workspace) */
+.hidden { display: none !important; }
+
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--bg-main);
