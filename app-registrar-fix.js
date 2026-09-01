@@ -279,17 +279,29 @@ const priority = (order) => {
   const deliveryDate = safeParseDate(order.entrega);
   if (!deliveryDate) return "now";
   
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const checkDate = new Date(deliveryDate);
+  const now = new Date();
+
+  const deliveryInfo = (state.frequentClients || []).find(
+    c => c.name.toLowerCase() === (order.cliente || "").toLowerCase()
+  );
+  const hasDelivery = deliveryInfo && deliveryInfo.delivery === "Sí";
+  
+  let targetDeadline = new Date(deliveryDate);
+  if (hasDelivery) {
+    targetDeadline.setDate(targetDeadline.getDate() - 1);
+  }
+
+  if (targetDeadline < now) return "overdue";
+  
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const checkDate = new Date(targetDeadline);
   checkDate.setHours(0, 0, 0, 0);
   
-  if (checkDate < today) return "overdue";
-  
   const prepDays = getEstimatedPrepDays(order.tipo);
-  const diffDays = Math.ceil((checkDate - today) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.ceil((checkDate - todayStart) / (1000 * 60 * 60 * 24));
   
-  if (diffDays <= prepDays) return "now";
+  if (diffDays <= 0 || diffDays <= prepDays) return "now";
   if (diffDays <= prepDays + 1) return "today";
   return "later";
 };
@@ -1162,6 +1174,16 @@ function detail(order) {
           </div>
         </div>
       ` : ''}
+
+      <div style="margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">📝 BITÁCORA DE NOTAS Y OBSERVACIONES:</span>
+          <button type="button" class="secondary-button" id="add-note-btn" style="padding:2px 8px; font-size:11px;">＋ Añadir Nota</button>
+        </div>
+        <div style="background:var(--bg-main); padding:8px 12px; border-radius:6px; font-size:12px; max-height:120px; overflow-y:auto; color:var(--text-main); line-height:1.5;">
+          ${order.notas ? escapeHtml(order.notas).replace(/\n/g, '<br/>') : '<em style="color:var(--text-muted);">Sin observaciones o notas registradas.</em>'}
+        </div>
+      </div>
     </div>
     ${rawPhone ? `<div class="actions" style="margin-top:16px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%;">📲 Notificar por WhatsApp</a></div>` : ""}
     ${isLead() ? `
@@ -1179,8 +1201,17 @@ function detail(order) {
       closeModal();
       openFinishModal(order, val);
     } else {
+      let pauseNote = "";
+      if (val === "Pausado") {
+        pauseNote = prompt("Motivo de la pausa (ej: Esperando material, respuesta del cliente...):");
+        if (pauseNote === null) return;
+      }
       try {
-        await api("profile_update_order", { id: order.id, changes: { estado: val } });
+        await api("profile_update_order", {
+          id: order.id,
+          user: state.session?.name || "Usuario",
+          changes: { estado: val, nota: pauseNote }
+        });
         closeModal();
         await refresh(false);
         showToast(`Estado cambiado a ${val}.`);
@@ -1199,6 +1230,24 @@ function detail(order) {
       await refresh(false);
     } catch (err) {
       alert(`Error al actualizar estado del diseño: ${err.message}`);
+    }
+  });
+
+  $("#add-note-btn")?.addEventListener("click", async () => {
+    const text = prompt("Escribe una nota u observación para este pedido:");
+    if (text && text.trim()) {
+      try {
+        await api("profile_update_order", {
+          id: order.id,
+          user: state.session?.name || "Usuario",
+          changes: { nota: text.trim() }
+        });
+        showToast("Nota añadida a la bitácora.");
+        closeModal();
+        await refresh(false);
+      } catch (err) {
+        alert(`Error al guardar la nota: ${err.message}`);
+      }
     }
   });
 }
