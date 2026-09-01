@@ -1653,7 +1653,8 @@ document.getElementById("refresh")?.addEventListener("click", () => refresh());
 
 document.querySelectorAll(".nav-button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    state.screen = btn.dataset.screen;
+    state.screen = btn.dataset.screen || "now";
+    state.searchQuery = ""; // Limpiar filtro de búsqueda al cambiar de vista
     render();
   });
 });
