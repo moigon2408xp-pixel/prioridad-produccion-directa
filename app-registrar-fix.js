@@ -223,6 +223,7 @@ const normalizeOrder = (o) => {
     estado: String(o.estado || o.Estado || "Pendiente").trim(),
     diseno: String(o.diseno || o.diseño || "No").trim(),
     material: String(o.material || o.Material || "No").trim(),
+    notas: String(o.notas || o.Notas || o.observaciones || o.Observaciones || "").trim(),
     telefono: phone,
     comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
     fotoReferencia: String(o.fotoReferencia || o.Fotos_Referencia || o.referencias || "").trim(),
@@ -611,6 +612,7 @@ function orderCard(order, position) {
       ${order.telefono ? `<span>·</span><span>📞 ${escapeHtml(order.telefono)}</span>` : ''}
     </div>
     ${deadlineInterno ? `<div class="cc-delivery-warning">${deadlineInterno}</div>` : ''}
+    ${order.notas ? `<div style="font-size:11px; color:#d97706; background:rgba(217,119,6,.1); border:1px solid rgba(217,119,6,.3); border-radius:4px; padding:3px 8px; margin-top:2px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📝 ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ''}
   </button>`;
 }
 
