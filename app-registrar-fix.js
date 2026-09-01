@@ -1150,32 +1150,7 @@ function formNewUser() {
   });
 }
 
-const loginForm = $("#login-form");
-if (loginForm) {
-  loginForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      const res = await api("profile_login", { name: $("#login-name").value.trim(), pin: $("#login-pin").value.trim() });
-      state.session = res.session;
-      store.set("pp_profile_session", state.session);
-      $("#login-view")?.classList.add("hidden");
-      $("#workspace")?.classList.remove("hidden");
-      await refresh(false);
-    } catch (err) {
-      const errEl = $("#login-error");
-      if (errEl) errEl.textContent = err.message;
-    }
-  });
-}
-
-$("#refresh")?.addEventListener("click", () => refresh());
-
-document.querySelectorAll(".nav-button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.screen = btn.dataset.screen;
-    render();
-  });
-});
+// (listeners de login, refresh y nav-button están al final del archivo)
 
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");
@@ -1198,8 +1173,7 @@ document.addEventListener("click", async (e) => {
   if (act === "logout") {
     store.remove("pp_profile_session");
     state.session = null;
-    $("#workspace")?.classList.add("hidden");
-    $("#login-view")?.classList.remove("hidden");
+    showLogin();
     return;
   }
   if (act === "toggle-user") {
@@ -1288,10 +1262,58 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-// Inicialización de temas e interfaz
+// ============================================================
+// INICIALIZACIÓN — siempre decide qué vista es visible
+// ============================================================
+function showLogin() {
+  const loginEl     = document.getElementById("login-view");
+  const workspaceEl = document.getElementById("workspace");
+  if (loginEl)     { loginEl.style.display     = "flex"; }
+  if (workspaceEl) { workspaceEl.style.display  = "none"; }
+}
+
+function showWorkspace() {
+  const loginEl     = document.getElementById("login-view");
+  const workspaceEl = document.getElementById("workspace");
+  if (loginEl)     { loginEl.style.display     = "none"; }
+  if (workspaceEl) { workspaceEl.style.display  = "flex"; }
+}
+
+// Ajustar referencia en login submit
+const loginFormEl = document.getElementById("login-form");
+if (loginFormEl) {
+  loginFormEl.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById("login-error");
+    try {
+      const res = await api("profile_login", {
+        name: document.getElementById("login-name").value.trim(),
+        pin:  document.getElementById("login-pin").value.trim()
+      });
+      state.session = res.session;
+      store.set("pp_profile_session", state.session);
+      showWorkspace();
+      await refresh(false);
+    } catch (err) {
+      if (errEl) errEl.textContent = err.message;
+    }
+  });
+}
+
+document.getElementById("refresh")?.addEventListener("click", () => refresh());
+
+document.querySelectorAll(".nav-button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.screen = btn.dataset.screen;
+    render();
+  });
+});
+
+// Aplicar tema y decidir vista inicial
 applyTheme();
 if (state.session) {
-  $("#login-view")?.classList.add("hidden");
-  $("#workspace")?.classList.remove("hidden");
+  showWorkspace();
   refresh(false);
+} else {
+  showLogin();
 }
