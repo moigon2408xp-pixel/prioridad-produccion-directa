@@ -258,6 +258,7 @@ const state = {
   waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
   searchQuery: "",
+  perfTimeframe: "today",
   offline: false,
   data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} },
 };
@@ -549,38 +550,51 @@ function orderCard(order, position) {
   const deliveryInfo = state.frequentClients.find(
     c => c.name.toLowerCase() === order.cliente.toLowerCase()
   );
-  const hasDelivery = deliveryInfo && deliveryInfo.delivery === 'S\u00ed';
+  const hasDelivery = deliveryInfo && deliveryInfo.delivery === 'Sí';
   
   const entregaDate = safeParseDate(order.entrega);
   let deadlineInterno = '';
   if (hasDelivery && entregaDate) {
     const prev = new Date(entregaDate);
     prev.setDate(prev.getDate() - 1);
-    deadlineInterno = `\u26a0\ufe0f Listo para: ${prev.getDate().toString().padStart(2,'0')}/${(prev.getMonth()+1).toString().padStart(2,'0')} (d\u00eda anterior por delivery)`;
+    deadlineInterno = `⚠️ Listo para: ${prev.getDate().toString().padStart(2,'0')}/${(prev.getMonth()+1).toString().padStart(2,'0')} (día anterior por delivery)`;
   }
   
+  const disenoVal = order.diseno || "Sí";
+  let disenoBadge = '';
+  if (disenoVal === "No") {
+    disenoBadge = `<span style="background:#fee2e2; color:#dc2626; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: PENDIENTE ❌</span>`;
+  } else if (disenoVal === "En proceso") {
+    disenoBadge = `<span style="background:#fef3c7; color:#d97706; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: En proceso ✏️</span>`;
+  } else {
+    disenoBadge = `<span style="background:#dcfce7; color:#15803d; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: Listo ✅</span>`;
+  }
+
   return `<button class="${cardClass}" data-action="detail" data-id="${escapeHtml(order.id)}">
     <div class="cc-top">
       <div class="cc-left">
         <span class="cc-id">${escapeHtml(order.id)}</span>
         <span class="cc-client">${escapeHtml(order.cliente)}</span>
-        ${order.motivo ? `<span class="badge-motivo-sm">\ud83c\udfa8 ${escapeHtml(order.motivo)}</span>` : ''}
-        ${hasDelivery ? `<span class="badge-delivery">\ud83d\ude9a ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
+        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
+          ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
+          ${disenoBadge}
+          ${hasDelivery ? `<span class="badge-delivery">🚚 ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
+        </div>
       </div>
       <div class="cc-right">
-        ${isOverdue ? '<span class="pill-overdue">\ud83d\udea8 RETRASADO</span>' : ''}
-        ${isNow && !isOverdue ? '<span class="pill-urgent">\u26a1 Hacer ahora</span>' : ''}
-        ${isToday && !isOverdue ? '<span class="pill-today">\u23f0 Hoy</span>' : ''}
-        ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">\ud83d\udcc5 Programado</span>' : ''}
+        ${isOverdue ? '<span class="pill-overdue">🚨 RETRASADO</span>' : ''}
+        ${isNow && !isOverdue ? '<span class="pill-urgent">⚡ Hacer ahora</span>' : ''}
+        ${isToday && !isOverdue ? '<span class="pill-today">⏰ Hoy</span>' : ''}
+        ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">📅 Programado</span>' : ''}
       </div>
     </div>
     <div class="cc-meta">
-      <span>${escapeHtml(order.tipo)}</span>
-      <span>\u00b7</span>
+      <span>${escapeHtml(order.tipo || 'Sin tipo')}</span>
+      <span>·</span>
       <span>${escapeHtml(formatDate(order.entrega))}</span>
-      <span>\u00b7</span>
+      <span>·</span>
       <span>${escapeHtml(order.responsable)}</span>
-      ${order.telefono ? `<span>\u00b7</span><span>\ud83d\udcde ${escapeHtml(order.telefono)}</span>` : ''}
+      ${order.telefono ? `<span>·</span><span>📞 ${escapeHtml(order.telefono)}</span>` : ''}
     </div>
     ${deadlineInterno ? `<div class="cc-delivery-warning">${deadlineInterno}</div>` : ''}
   </button>`;
@@ -739,21 +753,81 @@ function teamView() {
   `;
 }
 
-function openWorkerPerfModal(workerName) {
-  const dailyPerf = state.data.dailyPerformance || {};
-  const workerData = dailyPerf[workerName] || { completedToday: 0, totalMinToday: 0, orders: [] };
+function computeWorkerPerformance(timeframe = "today") {
+  const finished = state.data.finishedOrders || [];
+  const users = (state.data.users || []).filter(u => u.active);
+  const now = new Date();
+  
+  let filterFn = () => true;
+  
+  if (timeframe === "today") {
+    const todayIso = now.toISOString().split("T")[0];
+    filterFn = (o) => {
+      if (!o.finProduccion) return false;
+      return String(o.finProduccion).startsWith(todayIso);
+    };
+  } else if (timeframe === "week") {
+    const day = now.getDay();
+    const diffToMon = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMon);
+    monday.setHours(0,0,0,0);
+    
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23,59,59,999);
+    
+    filterFn = (o) => {
+      if (!o.finProduccion) return false;
+      const d = new Date(o.finProduccion);
+      return d >= monday && d <= sunday;
+    };
+  } else if (timeframe === "month") {
+    const monthIso = now.toISOString().substring(0, 7);
+    filterFn = (o) => {
+      if (!o.finProduccion) return false;
+      return String(o.finProduccion).startsWith(monthIso);
+    };
+  }
+  
+  const filtered = finished.filter(filterFn);
+  const perfMap = {};
+  
+  users.forEach(u => {
+    perfMap[u.name] = { completed: 0, totalMin: 0, orders: [] };
+  });
+  
+  filtered.forEach(o => {
+    const w = o.responsable || "Sin asignar";
+    if (!perfMap[w]) {
+      perfMap[w] = { completed: 0, totalMin: 0, orders: [] };
+    }
+    perfMap[w].completed += 1;
+    perfMap[w].totalMin += Number(o.duracionRealMin || 0);
+    perfMap[w].orders.push(o);
+  });
+  
+  return perfMap;
+}
+
+function openWorkerPerfModal(workerName, timeframe) {
+  const tf = timeframe || state.perfTimeframe || "today";
+  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
+  const perfMap = computeWorkerPerformance(tf);
+  const workerData = perfMap[workerName] || { completed: 0, totalMin: 0, orders: [] };
   const workerOrders = workerData.orders || [];
 
   openModal(`
     <div class="modal-head">
-      <h2>🏆 Rendimiento de ${escapeHtml(workerName)} Hoy</h2>
+      <h2>🏆 Rendimiento de ${escapeHtml(workerName)} (${tfLabels[tf] || tf})</h2>
       <button class="close-button" data-action="close">×</button>
     </div>
     <div style="margin-bottom:16px; padding:12px; background:var(--bg-main); border-radius:var(--radius-md);">
-      <p style="font-size:14px; font-weight:700;">Pedidos Completados Hoy: <span style="color:var(--primary-color);">${workerData.completedToday}</span></p>
-      <p style="font-size:14px; font-weight:700;">Tiempo Total Invertido: <span style="color:var(--primary-color);">${workerData.totalMinToday} min</span></p>
+      <p style="font-size:14px; font-weight:700;">Pedidos Completados: <span style="color:var(--primary-color);">${workerData.completed}</span></p>
+      <p style="font-size:14px; font-weight:700;">Tiempo Total Invertido: <span style="color:var(--primary-color);">${workerData.totalMin} min</span></p>
+      ${workerData.completed > 0 ? `<p style="font-size:13px; color:var(--text-muted); margin-top:4px;">⏱️ Promedio por pedido: <strong>${Math.round(workerData.totalMin / workerData.completed)} min</strong></p>` : ''}
     </div>
-    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS TERMINADOS HOY:</p>
+    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS TERMINADOS (${workerOrders.length}):</p>
     <div style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto;">
       ${workerOrders.length ? workerOrders.map(o => `
         <div style="padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card);">
@@ -761,14 +835,15 @@ function openWorkerPerfModal(workerName) {
             <span>${escapeHtml(o.cliente)} (${escapeHtml(o.id)})</span>
             <span style="color:var(--success-color);">${escapeHtml(o.estado)}</span>
           </div>
-          <p style="font-size:13px; color:var(--text-muted);">${escapeHtml(o.tipo)} ${o.motivo ? `· Motivo: ${escapeHtml(o.motivo)}` : ''}</p>
-          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo: <strong>${o.duracionRealMin} min</strong> | 📝 Observación: ${escapeHtml(o.comentarioCierre || "Sin observación")}</p>
+          <p style="font-size:13px; color:var(--text-muted);">${escapeHtml(o.tipo || 'Sin tipo')} ${o.motivo ? `· Motivo: ${escapeHtml(o.motivo)}` : ''}</p>
+          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo: <strong>${o.duracionRealMin || 0} min</strong> | 📝 Observación: ${escapeHtml(o.comentarioCierre || "Sin observación")}</p>
         </div>
-      `).join("") : '<div class="team-note">No hay detalles de pedidos terminados hoy.</div>'}
+      `).join("") : '<div class="team-note">No hay pedidos registrados en este período.</div>'}
     </div>
   `);
 }
 window.openWorkerPerfModal = openWorkerPerfModal;
+window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
 function settingsView() {
   const session = state.session || {};
@@ -857,9 +932,17 @@ function settingsView() {
     </div>
     
     ${isLead() ? `
-      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📊 RENDIMIENTO Y PRODUCCIÓN DE HOY (HAZ CLIC PARA VER PEDIDOS)</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; margin-top:20px;">
+        <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin:0;">📊 RENDIMIENTO DE PRODUCCIÓN POR TRABAJADOR (${tfLabels[tf]})</p>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button type="button" class="secondary-button" style="${tf==='today'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('today')">📅 Hoy</button>
+          <button type="button" class="secondary-button" style="${tf==='week'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('week')">📆 Esta Semana</button>
+          <button type="button" class="secondary-button" style="${tf==='month'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('month')">🗓️ Este Mes</button>
+          <button type="button" class="secondary-button" style="${tf==='all'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('all')">📊 Histórico</button>
+        </div>
+      </div>
       <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
-        ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos el día de hoy.</div>'}
+        ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos en este período.</div>'}
       </div>
 
       <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
@@ -993,9 +1076,18 @@ function detail(order) {
       </div>
       
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO:</span>
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
         <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
           ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
+        </select>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DEL DISEÑO:</span>
+        <select id="design-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
+          <option value="No" ${order.diseno === "No" ? "selected" : ""}>Pendiente por diseñar ❌</option>
+          <option value="En proceso" ${order.diseno === "En proceso" ? "selected" : ""}>En proceso ✏️</option>
+          <option value="Sí" ${(order.diseno === "Sí" || !order.diseno) ? "selected" : ""}>Listo para fabricar ✅</option>
         </select>
       </div>
 
@@ -1075,6 +1167,18 @@ function detail(order) {
       } catch (err) {
         alert(`Error: ${err.message}`);
       }
+    }
+  });
+
+  $("#design-change-select")?.addEventListener("change", async (e) => {
+    const val = e.target.value;
+    try {
+      await api("profile_update_order", { id: order.id, changes: { diseno: val } });
+      order.diseno = val;
+      showToast(`Diseño actualizado a: ${val}`);
+      await refresh(false);
+    } catch (err) {
+      alert(`Error al actualizar estado del diseño: ${err.message}`);
     }
   });
 }
