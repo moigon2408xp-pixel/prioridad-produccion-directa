@@ -173,17 +173,26 @@ function formatDate(value) {
 
 // Universal Normalizers
 const normalizeClient = (c) => {
-  if (!c) return { name: "", phone: "" };
+  if (!c) return { name: '', phone: '', delivery: 'No', zona: '', direccion: '' };
   if (Array.isArray(c)) {
-    return { name: String(c[0] || "").trim(), phone: cleanPhoneNumber(c[1] || "") };
-  }
-  if (typeof c === "object") {
     return {
-      name: String(c.name || c.nombre || c.Nombre || c.cliente || c[0] || "").trim(),
-      phone: cleanPhoneNumber(c.phone || c.telefono || c.Telefono || c.celular || c.tel || c[1] || "")
+      name: String(c[0] || '').trim(),
+      phone: cleanPhoneNumber(c[1] || ''),
+      delivery: String(c[2] || 'No').trim(),
+      zona: String(c[3] || '').trim(),
+      direccion: String(c[4] || '').trim()
     };
   }
-  return { name: String(c).trim(), phone: "" };
+  if (typeof c === 'object') {
+    return {
+      name: String(c.name || c.nombre || c.Nombre || c.cliente || c[0] || '').trim(),
+      phone: cleanPhoneNumber(c.phone || c.telefono || c.Telefono || c.celular || c.tel || c[1] || ''),
+      delivery: String(c.delivery || c.Delivery || 'No').trim(),
+      zona: String(c.zona || c.Zona || '').trim(),
+      direccion: String(c.direccion || c.Direccion || '').trim()
+    };
+  }
+  return { name: String(c).trim(), phone: '', delivery: 'No', zona: '', direccion: '' };
 };
 
 const normalizeType = (t) => {
@@ -244,6 +253,7 @@ const normalizeUser = (u) => {
 const state = {
   session: store.get("pp_profile_session", null),
   frequentClients: [],
+  frequentMotivos: [],
   frequentTypes: [],
   waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
@@ -443,6 +453,9 @@ async function refresh(showMessage = true) {
     state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre");
     state.frequentTypes = rawTypes.map(normalizeType).filter(t => t && t.toLowerCase() !== "tipo");
     
+    const rawMotivos = rawData.motivos || rawData.frequentMotivos || [];
+    state.frequentMotivos = rawMotivos.filter(m => m && m.toLowerCase() !== 'motivo');
+    
     // Auto-sanar teléfonos de pedidos a través del catálogo de clientes
     const sanitizeOrderPhone = (ord) => {
       if (!ord.telefono && ord.cliente) {
@@ -487,21 +500,53 @@ function priorityPill(order) {
 }
 
 function orderCard(order, position) {
-  const isCrit = priority(order) === "overdue" || priority(order) === "now";
-  return `<button class="order-card ${isCrit ? 'critical-alert' : ''}" data-action="detail" data-id="${escapeHtml(order.id)}">
-    <div class="order-top">
-      <div>
-        <h3>${position === undefined ? "" : `${position + 1}. `}${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
-        <p>${escapeHtml(order.tipo)}</p>
-        ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
+  const prio = priority(order);
+  const isOverdue = prio === 'overdue';
+  const isNow = prio === 'now';
+  const isToday = prio === 'today';
+  
+  let cardClass = 'order-card-compact';
+  if (isOverdue) cardClass += ' card-overdue';
+  else if (isNow) cardClass += ' card-urgent';
+  else if (isToday) cardClass += ' card-today';
+  
+  const deliveryInfo = state.frequentClients.find(
+    c => c.name.toLowerCase() === order.cliente.toLowerCase()
+  );
+  const hasDelivery = deliveryInfo && deliveryInfo.delivery === 'S\u00ed';
+  
+  const entregaDate = safeParseDate(order.entrega);
+  let deadlineInterno = '';
+  if (hasDelivery && entregaDate) {
+    const prev = new Date(entregaDate);
+    prev.setDate(prev.getDate() - 1);
+    deadlineInterno = `\u26a0\ufe0f Listo para: ${prev.getDate().toString().padStart(2,'0')}/${(prev.getMonth()+1).toString().padStart(2,'0')} (d\u00eda anterior por delivery)`;
+  }
+  
+  return `<button class="${cardClass}" data-action="detail" data-id="${escapeHtml(order.id)}">
+    <div class="cc-top">
+      <div class="cc-left">
+        <span class="cc-id">${escapeHtml(order.id)}</span>
+        <span class="cc-client">${escapeHtml(order.cliente)}</span>
+        ${order.motivo ? `<span class="badge-motivo-sm">\ud83c\udfa8 ${escapeHtml(order.motivo)}</span>` : ''}
+        ${hasDelivery ? `<span class="badge-delivery">\ud83d\ude9a ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
       </div>
-      ${priorityPill(order)}
+      <div class="cc-right">
+        ${isOverdue ? '<span class="pill-overdue">\ud83d\udea8 RETRASADO</span>' : ''}
+        ${isNow && !isOverdue ? '<span class="pill-urgent">\u26a1 Hacer ahora</span>' : ''}
+        ${isToday && !isOverdue ? '<span class="pill-today">\u23f0 Hoy</span>' : ''}
+        ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">\ud83d\udcc5 Programado</span>' : ''}
+      </div>
     </div>
-    <div class="meta">
-      Estado: <strong>${escapeHtml(order.estado)}</strong> · Asignado a: <strong>${escapeHtml(order.responsable)}</strong><br/>
-      Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
-      Teléfono: ${escapeHtml(order.telefono || "No registrado")}
+    <div class="cc-meta">
+      <span>${escapeHtml(order.tipo)}</span>
+      <span>\u00b7</span>
+      <span>${escapeHtml(formatDate(order.entrega))}</span>
+      <span>\u00b7</span>
+      <span>${escapeHtml(order.responsable)}</span>
+      ${order.telefono ? `<span>\u00b7</span><span>\ud83d\udcde ${escapeHtml(order.telefono)}</span>` : ''}
     </div>
+    ${deadlineInterno ? `<div class="cc-delivery-warning">${deadlineInterno}</div>` : ''}
   </button>`;
 }
 
@@ -547,7 +592,22 @@ function nowView() {
   const critical = sortOrdersByUrgency(
     (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
   );
-  return `${state.offline ? '<p class="offline">Mostrando información guardada localmente.</p>' : ""}
+  const overdueOrders = sortOrdersByUrgency(
+    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'overdue')
+  );
+  const urgentOrders = sortOrdersByUrgency(
+    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'now')
+  );
+  const criticalBanner = (overdueOrders.length > 0 || urgentOrders.length > 0) ? `
+    <div class="critical-banner">
+      <div class="critical-banner-inner">
+        ${overdueOrders.length > 0 ? `<span class="banner-overdue">\ud83d\udea8 ${overdueOrders.length} RETRASADO${overdueOrders.length>1?'S':''}</span>` : ''}
+        ${urgentOrders.length > 0 ? `<span class="banner-urgent">\u26a1 ${urgentOrders.length} HACER AHORA</span>` : ''}
+        <span class="banner-hint">Revisa las tarjetas marcadas</span>
+      </div>
+    </div>` : '';
+
+  return `${criticalBanner}${state.offline ? '<p class="offline">Mostrando informaci\u00f3n guardada localmente.</p>' : ""}
   ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO (${escapeHtml(next.id)})</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} ${next.motivo ? `(${escapeHtml(next.motivo)})` : ''} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
   <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">CRÍTICOS DEL EQUIPO</p>
   <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay pedidos críticos en el taller.</div>'}</div>`;
@@ -620,6 +680,17 @@ function teamView() {
   const orders = filterOrdersBySearch(rawOrders);
   
   return `
+    ${(() => {
+      const ov = sortOrdersByUrgency((state.data.allOrders||[]).filter(o=>active(o)&&priority(o)==='overdue'));
+      const urg = sortOrdersByUrgency((state.data.allOrders||[]).filter(o=>active(o)&&priority(o)==='now'));
+      return (ov.length > 0 || urg.length > 0) ? `
+        <div class="critical-banner" style="margin-bottom:12px;">
+          <div class="critical-banner-inner">
+            ${ov.length > 0 ? `<span class="banner-overdue">\ud83d\udea8 ${ov.length} RETRASADO${ov.length>1?'S':''}</span>` : ''}
+            ${urg.length > 0 ? `<span class="banner-urgent">\u26a1 ${urg.length} URGENTE${urg.length>1?'S':''}</span>` : ''}
+          </div>
+        </div>` : '';
+    })()}
     <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
       <button class="primary-button" data-action="new-order">＋ Registrar pedido</button>
     </div>
@@ -766,6 +837,15 @@ function settingsView() {
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
     ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>` : ''}
     <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
+    ${isLead() ? `<button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>` : ''}
+    <div class="user-list">${(state.frequentMotivos||[]).map(m => `
+      <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
+        <strong>🎨 ${escapeHtml(m)}</strong>
+        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-motivo" data-motivo="${escapeHtml(m)}">🗑️</button>` : ''}
+      </div>
+    `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
   `;
 }
 
@@ -857,40 +937,63 @@ function detail(order) {
   const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
   const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
 
+  const clientInfo = state.frequentClients.find(
+    c => c.name.toLowerCase() === order.cliente.toLowerCase()
+  ) || {};
+  const hasDelivery = clientInfo.delivery === "Sí";
+
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
     <div class="form-grid" style="gap:12px; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TIPO DE TRABAJO:</span>
-        <strong>${escapeHtml(order.tipo)}</strong>
+        <strong style="color:var(--text-main);">${escapeHtml(order.tipo)}</strong>
       </div>
-      ${order.motivo ? `
-        <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">MOTIVO / TEMÁTICA:</span>
-          <strong>${escapeHtml(order.motivo)}</strong>
-        </div>
-      ` : ''}
+      
+      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">MOTIVO / TEMÁTICA:</span>
+        <strong style="color:var(--text-main);">${escapeHtml(order.motivo || "Sin especificar")}</strong>
+      </div>
+      
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO:</span>
         <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
           ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
         </select>
       </div>
+
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA:</span>
-        <strong>${escapeHtml(formatDate(order.entrega))}</strong>
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA SOLICITADA POR CLIENTE:</span>
+        <strong style="color:var(--text-main);">${escapeHtml(formatDate(order.entrega))}</strong>
       </div>
+
+      ${hasDelivery ? `
+        <div style="display:flex; flex-direction:column; gap:4px; border:1px solid #0284c7; background:rgba(2,132,199,.1); padding:10px; border-radius:8px;">
+          <span style="font-weight:800; color:#0284c7; font-size:13px;">🚚 PEDIDO CON DELIVERY A DOMICILIO</span>
+          <span style="font-size:13px;"><strong>Sector / Zona:</strong> ${escapeHtml(clientInfo.zona || 'Norte / No especificada')}</span>
+          <span style="font-size:13px;"><strong>Dirección exacta:</strong> ${escapeHtml(clientInfo.direccion || 'Sin dirección registrada')}</span>
+          <span style="font-size:12px; color:#d97706; font-weight:800; margin-top:4px;">⚠️ El pedido DEBE estar completamente terminado el día anterior para enviarse por la mañana.</span>
+        </div>
+      ` : `
+        <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA EN LOCAL / RETIRO:</span>
+          <strong style="color:var(--text-main);">Cliente retira en tienda</strong>
+        </div>
+      `}
+
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">RESPONSABLE:</span>
-        <strong>${escapeHtml(order.responsable)}</strong>
+        <strong style="color:var(--text-main);">${escapeHtml(order.responsable)}</strong>
       </div>
+      
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO:</span>
-        <strong>${escapeHtml(order.telefono || "No registrado")}</strong>
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO WHATSAPP:</span>
+        <strong style="color:var(--text-main);">${escapeHtml(order.telefono || "No registrado")}</strong>
       </div>
+      
       <div style="display:flex; flex-direction:column; gap:4px; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">DESCRIPCIÓN / MEDIDAS:</span>
-        <p style="font-size:14px; background:var(--bg-main); padding:8px; border-radius:6px;">${escapeHtml(order.descripcion || "Sin descripción")}</p>
+        <p style="font-size:14px; background:var(--bg-main); padding:8px; border-radius:6px; color:var(--text-main);">${escapeHtml(order.descripcion || "Sin descripción")}</p>
       </div>
       
       ${refLinks.length ? `
@@ -997,6 +1100,7 @@ function formOrder() {
   const users = (state.data.users || []).filter(u => u.active);
   const clients = state.frequentClients;
   const types = state.frequentTypes;
+  const motivos = state.frequentMotivos || [];
   
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido - Creaciones JJ</h2><button class="close-button" data-action="close">×</button></div>
@@ -1012,6 +1116,7 @@ function formOrder() {
         <label class="field"><span class="field-label">SELECCIONAR CLIENTE GUARDADO</span>
           <select id="fc-select"><option value="">-- Autocompletar datos --</option>${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone || "Sin tel.")})</option>`).join("")}</select>
         </label>` : ''}
+      <div id="delivery-warning" class="delivery-warning-box" style="display:none;"></div>
       <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente"></label>
       <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" type="tel" placeholder="Ingresa o cambia el número"></label>
       
