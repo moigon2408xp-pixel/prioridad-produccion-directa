@@ -798,6 +798,7 @@ function computeWorkerPerformance(timeframe = "today") {
   });
   
   filtered.forEach(o => {
+    if (String(o.estado || "").toLowerCase().trim() === "cancelado") return;
     const w = o.responsable || "Sin asignar";
     if (!perfMap[w]) {
       perfMap[w] = { completed: 0, totalMin: 0, orders: [] };
