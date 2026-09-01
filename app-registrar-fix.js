@@ -325,6 +325,50 @@ const active = (order) => {
 const operable = (order) => active(order);
 const isLead = () => ["manager", "jefa"].includes(state.session?.role);
 
+async function compressImageFile(file, maxWidth = 1200, maxHeight = 1200, quality = 0.8) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return resolve(file);
+            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+              type: "image/jpeg",
+              lastModified: Date.now()
+            });
+            resolve(compressedFile);
+          },
+          "image/jpeg",
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 function showToast(message) {
   const toast = $("#toast");
   if (!toast) return;
@@ -945,6 +989,7 @@ function settingsView() {
 
       <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
         <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
+        ${isLead() ? `<button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>` : ''}
         <button class="secondary-button" data-action="logout">Cerrar sesión</button>
         <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
       </div>
@@ -1282,12 +1327,13 @@ function openFinishModal(order, targetStatus) {
     const imagesData = [];
     
     for (const f of files) {
+      const compressed = await compressImageFile(f);
       const base64 = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(f);
+        reader.readAsDataURL(compressed);
       });
-      imagesData.push({ data: base64, mimeType: f.type });
+      imagesData.push({ data: base64, mimeType: "image/jpeg" });
     }
     
     try {
@@ -1433,12 +1479,13 @@ function formOrder() {
     const referenceImages = [];
 
     for (const f of refFiles) {
+      const compressed = await compressImageFile(f);
       const base64 = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(f);
+        reader.readAsDataURL(compressed);
       });
-      referenceImages.push({ data: base64, mimeType: f.type });
+      referenceImages.push({ data: base64, mimeType: "image/jpeg" });
     }
 
     try {
@@ -1658,6 +1705,16 @@ document.addEventListener("click", async (e) => {
         closeModal();
         await refresh(false);
         showToast("Pedido eliminado.");
+      } catch (err) { alert(err.message); }
+    }
+    return;
+  }
+  if (act === "archive-old-orders") {
+    if (confirm("¿Deseas mover los proyectos terminados de más de 60 días al libro histórico para acelerar la aplicación?")) {
+      try {
+        const res = await api("profile_archive_old_orders", { days: 60 });
+        await refresh(false);
+        showToast(res.mensaje || "Archivado completado.");
       } catch (err) { alert(err.message); }
     }
     return;
