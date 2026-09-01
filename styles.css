@@ -774,22 +774,29 @@ body {
 
 /* Topes visuales según urgencia */
 .card-overdue {
-  border-left-color: #dc2626 !important;
-  background: rgba(220,38,38,.07) !important;
-  animation: pulse-overdue 1.8s ease-in-out infinite;
+  border: 3px solid #ef4444 !important;
+  border-left: 8px solid #dc2626 !important;
+  background: linear-gradient(135deg, rgba(127,29,29,0.55) 0%, rgba(220,38,38,0.25) 100%) !important;
+  animation: pulse-overdue 1.5s ease-in-out infinite alternate !important;
 }
 .card-urgent {
   border-left-color: #d97706 !important;
-  background: rgba(217,119,6,.06) !important;
+  background: rgba(217,119,6,.08) !important;
 }
 .card-today {
   border-left-color: #0ea5e9 !important;
-  background: rgba(14,165,233,.05) !important;
+  background: rgba(14,165,233,.06) !important;
 }
 
 @keyframes pulse-overdue {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,.0); }
-  50%       { box-shadow: 0 0 0 4px rgba(220,38,38,.25); }
+  0% {
+    box-shadow: 0 0 10px 2px rgba(239,68,68,0.5), inset 0 0 10px rgba(220,38,38,0.2);
+    border-color: #ef4444;
+  }
+  100% {
+    box-shadow: 0 0 25px 6px rgba(239,68,68,0.95), inset 0 0 20px rgba(220,38,38,0.4);
+    border-color: #f87171;
+  }
 }
 
 /* Partes de la tarjeta compacta */
@@ -833,13 +840,20 @@ body {
 
 /* Pills de prioridad */
 .pill-overdue {
-  background: #dc2626;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 20px;
-  letter-spacing: .3px;
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  padding: 4px 10px !important;
+  border-radius: 20px !important;
+  letter-spacing: .5px !important;
+  box-shadow: 0 0 12px rgba(220,38,38,0.85) !important;
+  animation: blink-pill 1s infinite alternate;
+}
+
+@keyframes blink-pill {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.08); opacity: 0.88; }
 }
 .pill-urgent {
   background: #d97706;
