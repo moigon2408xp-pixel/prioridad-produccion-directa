@@ -953,15 +953,15 @@ function settingsView() {
     ` : ''}
     
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    ${isLead() ? `<button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>` : ''}
+    <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
     <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
     
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    ${isLead() ? `<button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>` : ''}
+    <button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>
     <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
     
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
-    ${isLead() ? `<button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>` : ''}
+    <button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>
     <div class="user-list">${(state.frequentMotivos||[]).map(m => `
       <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
         <strong>🎨 ${escapeHtml(m)}</strong>
@@ -1000,6 +1000,11 @@ function render() {
     document.querySelectorAll(".nav-button").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
+
+    const backupBox = document.querySelector(".backup-container");
+    if (backupBox) {
+      backupBox.style.display = isLead() ? "flex" : "none";
+    }
 
     $("#history-search-input")?.addEventListener("input", (e) => {
       state.searchQuery = e.target.value;
@@ -1077,21 +1082,33 @@ function detail(order) {
         <strong style="color:var(--text-main);">${escapeHtml(order.motivo || "Sin especificar")}</strong>
       </div>
       
-      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
-        <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-          ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
-        </select>
-      </div>
+      ${(active(order) || isLead()) ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
+          <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
+            ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
+          </select>
+        </div>
 
-      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DEL DISEÑO:</span>
-        <select id="design-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-          <option value="No" ${order.diseno === "No" ? "selected" : ""}>Pendiente por diseñar ❌</option>
-          <option value="En proceso" ${order.diseno === "En proceso" ? "selected" : ""}>En proceso ✏️</option>
-          <option value="Sí" ${(order.diseno === "Sí" || !order.diseno) ? "selected" : ""}>Listo para fabricar ✅</option>
-        </select>
-      </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DEL DISEÑO:</span>
+          <select id="design-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
+            <option value="No" ${order.diseno === "No" ? "selected" : ""}>Pendiente por diseñar ❌</option>
+            <option value="En proceso" ${order.diseno === "En proceso" ? "selected" : ""}>En proceso ✏️</option>
+            <option value="Sí" ${(order.diseno === "Sí" || !order.diseno) ? "selected" : ""}>Listo para fabricar ✅</option>
+          </select>
+        </div>
+      ` : `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ESTADO DE PRODUCCIÓN:</span>
+          <strong style="color:var(--success-color);">${escapeHtml(order.estado)}</strong>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ESTADO DEL DISEÑO:</span>
+          <strong style="color:var(--text-main);">${escapeHtml(order.diseno || "Sí")}</strong>
+        </div>
+      `}
 
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA SOLICITADA POR CLIENTE:</span>
