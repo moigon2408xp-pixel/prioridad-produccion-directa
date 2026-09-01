@@ -665,7 +665,7 @@ function nowView() {
 
 function queueView() {
   const list = getMyOpenOrders();
-  return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes</strong></div>';
+  return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes en tu bandeja</strong></div>';
 }
 
 function historyView() {
@@ -848,7 +848,9 @@ window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 function settingsView() {
   const session = state.session || {};
   const customColors = store.get("pp_custom_colors", {});
-  const dailyPerf = state.data.dailyPerformance || {};
+  const tf = state.perfTimeframe || "today";
+  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
+  const perfMap = computeWorkerPerformance(tf);
   
   const fcList = state.frequentClients.map((c) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
@@ -871,10 +873,10 @@ function settingsView() {
     </div>
   `).join("");
 
-  const perfRows = Object.keys(dailyPerf).map(uName => `
-    <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}')">
+  const perfRows = Object.keys(perfMap).map(uName => `
+    <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}', '${tf}')">
       <span><strong>👤 ${escapeHtml(uName)}</strong></span>
-      <span>🏆 <strong>${dailyPerf[uName].completedToday}</strong> pedidos hoy (${dailyPerf[uName].totalMinToday} min) 🔍</span>
+      <span>🏆 <strong>${perfMap[uName].completed}</strong> pedidos (${perfMap[uName].totalMin} min) 🔍</span>
     </div>
   `).join("");
 
@@ -977,7 +979,7 @@ function render() {
   
   try {
     applyTheme();
-    const screenNames = { now: "Ahora", queue: "Mi cola", team: "Equipo", history: "Historial", settings: "Ajustes" };
+    const screenNames = { now: "Ahora", queue: "Mi Bandeja", team: "Equipo", history: "Historial", settings: "Ajustes" };
     
     const titleEl = $("#screen-title");
     if (titleEl) titleEl.textContent = screenNames[state.screen] || "Ahora";
