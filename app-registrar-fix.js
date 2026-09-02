@@ -323,7 +323,28 @@ const active = (order) => {
 };
 
 const operable = (order) => active(order);
-const isLead = () => ["manager", "jefa"].includes(state.session?.role);
+const isLead = () => {
+  const r = String(state.session?.role || "").toLowerCase().trim();
+  return ["manager", "jefe", "jefa"].includes(r);
+};
+
+function formatRoleLabel(roleStr) {
+  const r = String(roleStr || "").toLowerCase().trim();
+  if (r === "jefe") return "Jefe";
+  if (r === "jefa") return "Jefa";
+  if (r === "manager") return "Manager";
+  if (r === "trabajadora") return "Trabajadora";
+  return "Trabajador";
+}
+
+function getLocalDateStr(d = new Date()) {
+  const dateObj = (typeof d === "string" || typeof d === "number") ? new Date(d) : d;
+  if (!dateObj || isNaN(dateObj.getTime())) return "";
+  const year = dateObj.getFullYear();
+  const month = (dateObj.getMonth() + 1).toString().padStart(2, "0");
+  const day = dateObj.getDate().toString().padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 async function compressImageFile(file, maxWidth = 1200, maxHeight = 1200, quality = 0.8) {
   if (!file || !file.type || !file.type.startsWith("image/")) return file;
@@ -860,10 +881,10 @@ function computeWorkerPerformance(timeframe = "today") {
   let filterFn = () => true;
   
   if (timeframe === "today") {
-    const todayIso = now.toISOString().split("T")[0];
+    const todayLocal = getLocalDateStr(now);
     filterFn = (o) => {
       if (!o.finProduccion) return false;
-      return String(o.finProduccion).startsWith(todayIso);
+      return getLocalDateStr(o.finProduccion) === todayLocal;
     };
   } else if (timeframe === "week") {
     const day = now.getDay();
@@ -943,6 +964,187 @@ function openWorkerPerfModal(workerName, timeframe) {
   `);
 }
 window.openWorkerPerfModal = openWorkerPerfModal;
+
+function openSummaryReportModal(timeframe) {
+  const tf = timeframe || state.perfTimeframe || "today";
+  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
+  const finished = state.data.finishedOrders || [];
+  const now = new Date();
+  
+  let filterFn = () => true;
+  if (tf === "today") {
+    const todayLocal = getLocalDateStr(now);
+    filterFn = (o) => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal;
+  } else if (tf === "week") {
+    const day = now.getDay();
+    const diffToMon = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMon);
+    monday.setHours(0,0,0,0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23,59,59,999);
+    filterFn = (o) => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday;
+  } else if (tf === "month") {
+    const monthIso = now.toISOString().substring(0, 7);
+    filterFn = (o) => o.finProduccion && String(o.finProduccion).startsWith(monthIso);
+  }
+  
+  const orders = finished.filter(filterFn);
+  const totalMin = orders.reduce((sum, o) => sum + Number(o.duracionRealMin || 0), 0);
+  const totalRev = orders.reduce((sum, o) => sum + Number(o.costo || 0), 0);
+
+  openModal(`
+    <div class="modal-head">
+      <h2>📋 Lista Resumida de Pedidos Cumplidos (${tfLabels[tf] || tf})</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="margin-bottom:12px; padding:10px; background:var(--bg-main); border-radius:6px; font-size:13px;">
+      <span>Total Pedidos: <strong>${orders.length}</strong></span> · 
+      <span>Tiempo Total: <strong>${totalMin} min</strong></span>
+      ${isLead() ? ` · <span style="color:#059669; font-weight:800;">Ingresos Totales: $${totalRev.toFixed(2)}</span>` : ''}
+    </div>
+    <div style="max-height:380px; overflow-y:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
+            <th style="padding:6px;">ID</th>
+            <th style="padding:6px;">Cliente</th>
+            <th style="padding:6px;">Tipo / Motivo</th>
+            <th style="padding:6px;">Responsable</th>
+            <th style="padding:6px;">Minutos</th>
+            ${isLead() ? `<th style="padding:6px;">Costo ($)</th>` : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${orders.map(o => `
+            <tr style="border-bottom:1px solid var(--border-color);">
+              <td style="padding:6px; font-weight:bold;">${escapeHtml(o.id)}</td>
+              <td style="padding:6px;">${escapeHtml(o.cliente)}</td>
+              <td style="padding:6px;">${escapeHtml(o.tipo)}${o.motivo ? ` (${escapeHtml(o.motivo)})` : ''}</td>
+              <td style="padding:6px;">${escapeHtml(o.responsable)}</td>
+              <td style="padding:6px;">${o.duracionRealMin || 0} min</td>
+              ${isLead() ? `<td style="padding:6px; font-weight:bold; color:#059669;">$${Number(o.costo || 0).toFixed(2)}</td>` : ''}
+            </tr>
+          `).join('') || '<tr><td colspan="6" style="padding:12px; text-align:center; color:var(--text-muted);">No hay pedidos cumplidos en este período.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `);
+}
+window.openSummaryReportModal = openSummaryReportModal;
+
+function openFinancialReportModal() {
+  if (!isLead()) return;
+  const finished = state.data.finishedOrders || [];
+  const now = new Date();
+  const todayLocal = getLocalDateStr(now);
+  
+  const todayOrders = finished.filter(o => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal);
+  
+  const day = now.getDay();
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMon);
+  monday.setHours(0,0,0,0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  const weekOrders = finished.filter(o => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday);
+  
+  const monthIso = now.toISOString().substring(0, 7);
+  const monthOrders = finished.filter(o => o.finProduccion && String(o.finProduccion).startsWith(monthIso));
+  
+  const sumRev = (arr) => arr.reduce((s, o) => s + Number(o.costo || 0), 0);
+
+  const revToday = sumRev(todayOrders);
+  const revWeek = sumRev(weekOrders);
+  const revMonth = sumRev(monthOrders);
+  const revAll = sumRev(finished);
+
+  openModal(`
+    <div class="modal-head">
+      <h2>💵 Balance Financiero de Ingresos (Solo Jefes)</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
+      <div style="background:rgba(16,185,129,.1); border:1px solid #059669; padding:12px; border-radius:8px; text-align:center;">
+        <span style="font-size:11px; color:#059669; font-weight:800;">INGRESOS HOY</span>
+        <h3 style="color:#059669; margin-top:4px;">$${revToday.toFixed(2)}</h3>
+        <small style="color:var(--text-muted);">${todayOrders.length} pedidos</small>
+      </div>
+      <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:12px; border-radius:8px; text-align:center;">
+        <span style="font-size:11px; color:#0284c7; font-weight:800;">ESTA SEMANA</span>
+        <h3 style="color:#0284c7; margin-top:4px;">$${revWeek.toFixed(2)}</h3>
+        <small style="color:var(--text-muted);">${weekOrders.length} pedidos</small>
+      </div>
+      <div style="background:rgba(147,51,234,.1); border:1px solid #9333ea; padding:12px; border-radius:8px; text-align:center;">
+        <span style="font-size:11px; color:#9333ea; font-weight:800;">ESTE MES</span>
+        <h3 style="color:#9333ea; margin-top:4px;">$${revMonth.toFixed(2)}</h3>
+        <small style="color:var(--text-muted);">${monthOrders.length} pedidos</small>
+      </div>
+      <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:12px; border-radius:8px; text-align:center;">
+        <span style="font-size:11px; color:#d97706; font-weight:800;">HISTÓRICO COMPLETO</span>
+        <h3 style="color:#d97706; margin-top:4px;">$${revAll.toFixed(2)}</h3>
+        <small style="color:var(--text-muted);">${finished.length} pedidos</small>
+      </div>
+    </div>
+    <p style="font-size:12px; color:var(--text-muted);">💡 Recuerda que puedes asignar o corregir el costo de cada pedido abriéndolo en la sección de Historial o Detalle del pedido.</p>
+  `);
+}
+window.openFinancialReportModal = openFinancialReportModal;
+
+function openEditScheduleModal(workerName = "") {
+  if (!isLead()) return;
+  const users = (state.data.users || []).filter(u => u.active);
+  const schedules = state.data.schedules || state.data.horarios || [];
+  
+  const workerSched = schedules.find(s => s.trabajador.toLowerCase() === workerName.toLowerCase()) || {
+    lunes: "3:00 PM - 7:00 PM", martes: "3:00 PM - 7:00 PM", miercoles: "3:00 PM - 7:00 PM",
+    jueves: "3:00 PM - 7:00 PM", viernes: "3:00 PM - 7:00 PM", sabado: "Libre", domingo: "Libre"
+  };
+
+  openModal(`
+    <div class="modal-head">
+      <h2>✏️ Modificar Horario de Trabajador</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="schedule-form" class="form-grid">
+      <label class="field"><span class="field-label">SELECCIONAR TRABAJADOR</span>
+        <select name="trabajador" required>
+          ${users.map(u => `<option value="${escapeHtml(u.name)}" ${u.name.toLowerCase() === workerName.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
+        </select>
+      </label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <label class="field"><span class="field-label">LUNES</span><input name="lunes" value="${escapeHtml(workerSched.lunes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 4:00 PM - 8:30 PM"></label>
+        <label class="field"><span class="field-label">MARTES</span><input name="martes" value="${escapeHtml(workerSched.martes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 3:00 PM - 7:00 PM"></label>
+        <label class="field"><span class="field-label">MIÉRCOLES</span><input name="miercoles" value="${escapeHtml(workerSched.miercoles || "3:00 PM - 7:00 PM")}" placeholder="Ej. Medio Día 8 AM - 12 PM"></label>
+        <label class="field"><span class="field-label">JUEVES</span><input name="jueves" value="${escapeHtml(workerSched.jueves || "3:00 PM - 7:00 PM")}" placeholder="Ej. 4:00 PM - 8:30 PM"></label>
+        <label class="field"><span class="field-label">VIERNES</span><input name="viernes" value="${escapeHtml(workerSched.viernes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 3:00 PM - 7:00 PM"></label>
+        <label class="field"><span class="field-label">SÁBADO</span><input name="sabado" value="${escapeHtml(workerSched.sabado || "Libre")}" placeholder="Ej. Libre o 9 AM - 2 PM"></label>
+      </div>
+      <label class="field"><span class="field-label">DOMINGO</span><input name="domingo" value="${escapeHtml(workerSched.domingo || "Libre")}" placeholder="Ej. Libre"></label>
+      <div class="modal-footer"><button type="submit" class="primary-button">Guardar Horario</button></div>
+    </form>
+  `);
+
+  $("#schedule-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    try {
+      const data = Object.fromEntries(new FormData(e.target));
+      await api("profile_save_schedule", data);
+      closeModal();
+      await refresh(false);
+      showToast("Horario actualizado en Google Sheets.");
+    } catch (err) {
+      btn.disabled = false;
+      alert(err.message);
+    }
+  });
+}
+window.openEditScheduleModal = openEditScheduleModal;
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
 function settingsView() {
@@ -968,7 +1170,7 @@ function settingsView() {
   
   const usersList = (state.data.users || []).map((u) => `
     <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <div><strong>${escapeHtml(u.name)}</strong> <small style="color:var(--text-muted);">(${escapeHtml(u.role)})</small><br/><span style="color:${u.active ? 'var(--success-color)' : 'var(--danger-color)'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
+      <div><strong>${escapeHtml(u.name)}</strong> <small style="color:var(--text-muted);">(${escapeHtml(formatRoleLabel(u.role))})</small><br/><span style="color:${u.active ? 'var(--success-color)' : 'var(--danger-color)'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
       <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
     </div>
   `).join("");
@@ -1051,7 +1253,78 @@ function settingsView() {
       <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
       <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
-    ` : ''}
+      
+      <div style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin:0;">📅 HORARIOS Y TURNOS DEL EQUIPO</p>
+          <button type="button" class="primary-button" onclick="openEditScheduleModal()" style="padding:6px 12px; font-size:12px;">✏️ Modificar Horario</button>
+        </div>
+        <div style="overflow-x:auto; background:var(--bg-card); border-radius:var(--radius-md); border:1px solid var(--border-color); padding:12px; margin-bottom:20px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border-color); color:var(--text-muted);">
+                <th style="padding:6px 8px;">Trabajador</th>
+                <th style="padding:6px 8px;">Lun</th>
+                <th style="padding:6px 8px;">Mar</th>
+                <th style="padding:6px 8px;">Mié</th>
+                <th style="padding:6px 8px;">Jue</th>
+                <th style="padding:6px 8px;">Vie</th>
+                <th style="padding:6px 8px;">Sáb</th>
+                <th style="padding:6px 8px;">Dom</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(state.data.schedules || state.data.horarios || []).map(s => `
+                <tr style="border-bottom:1px dashed var(--border-color);">
+                  <td style="padding:6px 8px; font-weight:bold;">👤 ${escapeHtml(s.trabajador)}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.lunes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.martes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.miercoles || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.jueves || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.viernes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.sabado || 'Libre')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.domingo || 'Libre')}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="8" style="padding:10px; text-align:center; color:var(--text-muted);">No hay horarios registrados. Pulsa Modificar Horario para agregar.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ` : `
+      <div style="margin-top:24px;">
+        <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">📅 MI HORARIO Y TURNOS DEL EQUIPO</p>
+        <div style="overflow-x:auto; background:var(--bg-card); border-radius:var(--radius-md); border:1px solid var(--border-color); padding:12px; margin-bottom:20px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border-color); color:var(--text-muted);">
+                <th style="padding:6px 8px;">Trabajador</th>
+                <th style="padding:6px 8px;">Lun</th>
+                <th style="padding:6px 8px;">Mar</th>
+                <th style="padding:6px 8px;">Mié</th>
+                <th style="padding:6px 8px;">Jue</th>
+                <th style="padding:6px 8px;">Vie</th>
+                <th style="padding:6px 8px;">Sáb</th>
+                <th style="padding:6px 8px;">Dom</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(state.data.schedules || state.data.horarios || []).map(s => `
+                <tr style="border-bottom:1px dashed var(--border-color);">
+                  <td style="padding:6px 8px; font-weight:bold;">👤 ${escapeHtml(s.trabajador)}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.lunes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.martes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.miercoles || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.jueves || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.viernes || '3-7 PM')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.sabado || 'Libre')}</td>
+                  <td style="padding:6px 8px;">${escapeHtml(s.domingo || 'Libre')}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="8" style="padding:10px; text-align:center; color:var(--text-muted);">No hay horarios asignados aún.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `}
     
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
     <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
@@ -1239,6 +1512,26 @@ function detail(order) {
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO WHATSAPP:</span>
         <strong style="color:var(--text-main);">${escapeHtml(order.telefono || "No registrado")}</strong>
       </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">⏱️ TIEMPO INVERTIDO (MIN):</span>
+        ${isLead() ? `
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="number" id="order-duration-input" value="${order.duracionRealMin || 0}" style="width:70px; padding:4px 6px; border-radius:6px; border:1px solid var(--border-color);">
+            <button type="button" class="secondary-button" id="save-duration-btn" style="padding:4px 6px; font-size:11px;">💾 Min</button>
+          </div>
+        ` : `<strong style="color:var(--text-main);">${order.duracionRealMin || 0} min</strong>`}
+      </div>
+
+      ${isLead() ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px; background:rgba(16,185,129,.1); padding:8px; border-radius:6px;">
+          <span style="font-weight:700; color:#059669; font-size:12px;">💵 PRECIO / COSTO COBRADO ($):</span>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="number" step="0.01" id="order-cost-input" value="${order.costo || 0}" style="width:90px; padding:4px 8px; border-radius:6px; border:1px solid #059669; font-weight:bold;">
+            <button type="button" class="primary-button" id="save-cost-btn" style="padding:4px 8px; font-size:11px; background:#059669;">💾 Guardar $</button>
+          </div>
+        </div>
+      ` : ''}
       
       <div style="display:flex; flex-direction:column; gap:4px; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">DESCRIPCIÓN / MEDIDAS:</span>
@@ -1337,6 +1630,26 @@ function detail(order) {
         alert(`Error al guardar la nota: ${err.message}`);
       }
     }
+  });
+
+  $("#save-cost-btn")?.addEventListener("click", async () => {
+    const val = parseFloat($("#order-cost-input")?.value || 0);
+    try {
+      await api("profile_save_cost", { id: order.id, costo: val });
+      order.costo = val;
+      showToast(`Costo de $${val.toFixed(2)} guardado.`);
+      await refresh(false);
+    } catch (err) { alert(err.message); }
+  });
+
+  $("#save-duration-btn")?.addEventListener("click", async () => {
+    const val = parseInt($("#order-duration-input")?.value || 0, 10);
+    try {
+      await api("profile_update_order", { id: order.id, changes: { duracionRealMin: val } });
+      order.duracionRealMin = val;
+      showToast(`Duración actualizada a ${val} min.`);
+      await refresh(false);
+    } catch (err) { alert(err.message); }
   });
 }
 
@@ -1547,13 +1860,15 @@ function formNewUser() {
   openModal(`
     <div class="modal-head"><h2>Crear Perfil de Usuario</h2><button class="close-button" data-action="close">×</button></div>
     <form id="user-form" class="form-grid">
-      <label class="field"><span class="field-label">NOMBRE DEL TRABAJADOR</span><input name="name" required placeholder="Ej. Carla"></label>
+      <label class="field"><span class="field-label">NOMBRE DEL TRABAJADOR / JEFE</span><input name="name" required placeholder="Ej. Carlos / Valentina"></label>
       <label class="field"><span class="field-label">PIN DE ACCESO (6 DÍGITOS)</span><input name="pin" type="password" inputmode="numeric" required maxlength="6" placeholder="123456"></label>
       <label class="field"><span class="field-label">ROL DE USUARIO</span>
         <select name="role">
-          <option value="trabajador">Trabajador</option>
-          <option value="jefa">Jefa</option>
-          <option value="manager">Manager</option>
+          <option value="trabajador">Trabajador (Hombre)</option>
+          <option value="trabajadora">Trabajadora (Mujer)</option>
+          <option value="jefe">Jefe (Administrador Hombre)</option>
+          <option value="jefa">Jefa (Administradora Mujer)</option>
+          <option value="manager">Manager / Jefatura General</option>
         </select>
       </label>
       <div class="modal-footer">
