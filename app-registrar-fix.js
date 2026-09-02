@@ -803,7 +803,7 @@ function historyView() {
         
         return `
           <article class="order-card">
-            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
+            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
               <div>
                 <h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
                 <p>${escapeHtml(order.tipo)}</p>
@@ -811,10 +811,11 @@ function historyView() {
               </div>
               <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
             </div>
-            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
+            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
               Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
               Responsable: ${escapeHtml(order.responsable)}<br/>
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
+              ${isLead() ? `<span style="color:#059669; font-weight:bold;">💵 Costo registrado: $${Number(order.costo || 0).toFixed(2)}</span><br/>` : ''}
               ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
               ${order.notas ? `<div style="font-size:12px; color:#d97706; margin-top:4px; font-weight:600;">📝 <strong>Bitácora:</strong> ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ""}
               
@@ -1100,8 +1101,8 @@ function openEditScheduleModal(workerName = "") {
   const schedules = state.data.schedules || state.data.horarios || [];
   
   const workerSched = schedules.find(s => s.trabajador.toLowerCase() === workerName.toLowerCase()) || {
-    lunes: "3:00 PM - 7:00 PM", martes: "3:00 PM - 7:00 PM", miercoles: "3:00 PM - 7:00 PM",
-    jueves: "3:00 PM - 7:00 PM", viernes: "3:00 PM - 7:00 PM", sabado: "Libre", domingo: "Libre"
+    lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
+    jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
   };
 
   openModal(`
@@ -1109,6 +1110,19 @@ function openEditScheduleModal(workerName = "") {
       <h2>✏️ Modificar Horario de Trabajador</h2>
       <button class="close-button" data-action="close">×</button>
     </div>
+
+    <div style="background:var(--bg-main); padding:10px; border-radius:8px; margin-bottom:12px;">
+      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">PLANTILLAS RÁPIDAS DE TURNO (CLIC PARA APLICAR A TODOS LOS DÍAS):</p>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A (8-1 / 3-7 PM)</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B (8-1 / 4-8:30 PM)</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana (8-1 PM)</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A (3-7 PM)</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B (4-8:30 PM)</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('Libre')">⚪ Día Libre</button>
+      </div>
+    </div>
+
     <form id="schedule-form" class="form-grid">
       <label class="field"><span class="field-label">SELECCIONAR TRABAJADOR</span>
         <select name="trabajador" required>
@@ -1116,17 +1130,24 @@ function openEditScheduleModal(workerName = "") {
         </select>
       </label>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <label class="field"><span class="field-label">LUNES</span><input name="lunes" value="${escapeHtml(workerSched.lunes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 4:00 PM - 8:30 PM"></label>
-        <label class="field"><span class="field-label">MARTES</span><input name="martes" value="${escapeHtml(workerSched.martes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 3:00 PM - 7:00 PM"></label>
-        <label class="field"><span class="field-label">MIÉRCOLES</span><input name="miercoles" value="${escapeHtml(workerSched.miercoles || "3:00 PM - 7:00 PM")}" placeholder="Ej. Medio Día 8 AM - 12 PM"></label>
-        <label class="field"><span class="field-label">JUEVES</span><input name="jueves" value="${escapeHtml(workerSched.jueves || "3:00 PM - 7:00 PM")}" placeholder="Ej. 4:00 PM - 8:30 PM"></label>
-        <label class="field"><span class="field-label">VIERNES</span><input name="viernes" value="${escapeHtml(workerSched.viernes || "3:00 PM - 7:00 PM")}" placeholder="Ej. 3:00 PM - 7:00 PM"></label>
-        <label class="field"><span class="field-label">SÁBADO</span><input name="sabado" value="${escapeHtml(workerSched.sabado || "Libre")}" placeholder="Ej. Libre o 9 AM - 2 PM"></label>
+        <label class="field"><span class="field-label">LUNES</span><input id="sched-lunes" name="lunes" value="${escapeHtml(workerSched.lunes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
+        <label class="field"><span class="field-label">MARTES</span><input id="sched-martes" name="martes" value="${escapeHtml(workerSched.martes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
+        <label class="field"><span class="field-label">MIÉRCOLES</span><input id="sched-miercoles" name="miercoles" value="${escapeHtml(workerSched.miercoles || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
+        <label class="field"><span class="field-label">JUEVES</span><input id="sched-jueves" name="jueves" value="${escapeHtml(workerSched.jueves || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
+        <label class="field"><span class="field-label">VIERNES</span><input id="sched-viernes" name="viernes" value="${escapeHtml(workerSched.viernes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
+        <label class="field"><span class="field-label">SÁBADO</span><input id="sched-sabado" name="sabado" value="${escapeHtml(workerSched.sabado || "8:00 AM - 1:00 PM")}"></label>
       </div>
-      <label class="field"><span class="field-label">DOMINGO</span><input name="domingo" value="${escapeHtml(workerSched.domingo || "Libre")}" placeholder="Ej. Libre"></label>
+      <label class="field"><span class="field-label">DOMINGO</span><input id="sched-domingo" name="domingo" value="${escapeHtml(workerSched.domingo || "Libre")}"></label>
       <div class="modal-footer"><button type="submit" class="primary-button">Guardar Horario</button></div>
     </form>
   `);
+
+  window.applySchedPreset = function(presetText) {
+    ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"].forEach(d => {
+      const el = document.getElementById("sched-" + d);
+      if (el) el.value = presetText;
+    });
+  };
 
   $("#schedule-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1137,7 +1158,7 @@ function openEditScheduleModal(workerName = "") {
       await api("profile_save_schedule", data);
       closeModal();
       await refresh(false);
-      showToast("Horario actualizado en Google Sheets.");
+      showToast("Horario guardado en Google Sheets.");
     } catch (err) {
       btn.disabled = false;
       alert(err.message);
@@ -1145,6 +1166,147 @@ function openEditScheduleModal(workerName = "") {
   });
 }
 window.openEditScheduleModal = openEditScheduleModal;
+window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
+
+function schedulesView() {
+  const schedules = state.data.schedules || state.data.horarios || [];
+  return `
+    <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+        <div>
+          <h2 style="margin:0;">📅 Horarios y Turnos del Equipo</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Consulta los turnos de mañana (8-1 PM), tarde (3-7 PM / 4-8:30 PM) y universidad de cada trabajador.</p>
+        </div>
+        ${isLead() ? `<button type="button" class="primary-button" onclick="openEditScheduleModal()">✏️ Modificar Horario</button>` : ''}
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
+              <th style="padding:10px;">Trabajador</th>
+              <th style="padding:10px;">Lunes</th>
+              <th style="padding:10px;">Martes</th>
+              <th style="padding:10px;">Miércoles</th>
+              <th style="padding:10px;">Jueves</th>
+              <th style="padding:10px;">Viernes</th>
+              <th style="padding:10px;">Sábado</th>
+              <th style="padding:10px;">Domingo</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${schedules.map(s => `
+              <tr style="border-bottom:1px dashed var(--border-color);">
+                <td style="padding:10px; font-weight:bold; white-space:nowrap;">👤 ${escapeHtml(s.trabajador)}</td>
+                <td style="padding:10px;">${escapeHtml(s.lunes || '8-1 PM / 3-7 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.martes || '8-1 PM / 3-7 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.miercoles || '8-1 PM / 3-7 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.jueves || '8-1 PM / 3-7 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.viernes || '8-1 PM / 3-7 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.sabado || '8-1 PM')}</td>
+                <td style="padding:10px; color:var(--text-muted);">${escapeHtml(s.domingo || 'Libre')}</td>
+              </tr>
+            `).join("") || '<tr><td colspan="8" style="padding:20px; text-align:center; color:var(--text-muted);">No hay horarios registrados aún. Pulsa Modificar Horario para agregar.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function financesView() {
+  if (!isLead()) {
+    return `<div class="empty"><strong>Acceso Restringido: Este módulo solo está disponible para Jefes y Managers.</strong></div>`;
+  }
+  
+  const finished = state.data.finishedOrders || [];
+  const now = new Date();
+  const todayLocal = getLocalDateStr(now);
+  
+  const todayOrders = finished.filter(o => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal);
+  
+  const day = now.getDay();
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMon);
+  monday.setHours(0,0,0,0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  const weekOrders = finished.filter(o => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday);
+  
+  const monthIso = now.toISOString().substring(0, 7);
+  const monthOrders = finished.filter(o => o.finProduccion && String(o.finProduccion).startsWith(monthIso));
+  
+  const sumRev = (arr) => arr.reduce((s, o) => s + Number(o.costo || 0), 0);
+
+  const revToday = sumRev(todayOrders);
+  const revWeek = sumRev(weekOrders);
+  const revMonth = sumRev(monthOrders);
+  const revAll = sumRev(finished);
+
+  return `
+    <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
+      <div style="margin-bottom:16px;">
+        <h2 style="margin:0;">💵 Control Financiero y Registro de Ingresos</h2>
+        <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Panel confidencial de Jefatura para auditar montos cobrados y rendimiento económico.</p>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;">
+        <div style="background:rgba(16,185,129,.1); border:1px solid #059669; padding:16px; border-radius:10px; text-align:center;">
+          <span style="font-size:12px; color:#059669; font-weight:800;">INGRESOS HOY</span>
+          <h2 style="color:#059669; margin:6px 0 0 0;">$${revToday.toFixed(2)}</h2>
+          <small style="color:var(--text-muted);">${todayOrders.length} trabajos</small>
+        </div>
+        <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:16px; border-radius:10px; text-align:center;">
+          <span style="font-size:12px; color:#0284c7; font-weight:800;">ESTA SEMANA</span>
+          <h2 style="color:#0284c7; margin:6px 0 0 0;">$${revWeek.toFixed(2)}</h2>
+          <small style="color:var(--text-muted);">${weekOrders.length} trabajos</small>
+        </div>
+        <div style="background:rgba(147,51,234,.1); border:1px solid #9333ea; padding:16px; border-radius:10px; text-align:center;">
+          <span style="font-size:12px; color:#9333ea; font-weight:800;">ESTE MES</span>
+          <h2 style="color:#9333ea; margin:6px 0 0 0;">$${revMonth.toFixed(2)}</h2>
+          <small style="color:var(--text-muted);">${monthOrders.length} trabajos</small>
+        </div>
+        <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:16px; border-radius:10px; text-align:center;">
+          <span style="font-size:12px; color:#d97706; font-weight:800;">HISTÓRICO COMPLETO</span>
+          <h2 style="color:#d97706; margin:6px 0 0 0;">$${revAll.toFixed(2)}</h2>
+          <small style="color:var(--text-muted);">${finished.length} trabajos</small>
+        </div>
+      </div>
+
+      <h3 style="font-size:15px; margin-bottom:12px;">DESGLOSE DE PROYECTOS CON COBRO REGISTRADO (${finished.length})</h3>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
+              <th style="padding:8px;">ID</th>
+              <th style="padding:8px;">Cliente</th>
+              <th style="padding:8px;">Tipo</th>
+              <th style="padding:8px;">Motivo</th>
+              <th style="padding:8px;">Responsable</th>
+              <th style="padding:8px;">Duración</th>
+              <th style="padding:8px;">Monto Cobrado ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${finished.map(o => `
+              <tr style="border-bottom:1px solid var(--border-color); cursor:pointer;" data-action="detail" data-id="${escapeHtml(o.id)}" data-scope="finished">
+                <td style="padding:8px; font-weight:bold;">${escapeHtml(o.id)}</td>
+                <td style="padding:8px;">${escapeHtml(o.cliente)}</td>
+                <td style="padding:8px;">${escapeHtml(o.tipo)}</td>
+                <td style="padding:8px;">${escapeHtml(o.motivo || '-')}</td>
+                <td style="padding:8px;">${escapeHtml(o.responsable)}</td>
+                <td style="padding:8px;">${o.duracionRealMin || 0} min</td>
+                <td style="padding:8px; font-weight:bold; color:#059669;">$${Number(o.costo || 0).toFixed(2)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="7" style="padding:16px; text-align:center; color:var(--text-muted);">No hay trabajos finalizados.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
 function settingsView() {
@@ -1353,21 +1515,32 @@ function render() {
   
   try {
     applyTheme();
-    const screenNames = { now: "Ahora", queue: "Mi Bandeja", team: "Equipo", history: "Historial", settings: "Ajustes" };
+    const screenNames = {
+      now: "Ahora", queue: "Mi Bandeja", team: "Equipo",
+      history: "Historial", schedules: "Horarios del Equipo",
+      finances: "Control Financiero (Solo Jefes)", settings: "Ajustes"
+    };
     
     const titleEl = $("#screen-title");
     if (titleEl) titleEl.textContent = screenNames[state.screen] || "Ahora";
     
     const roleLabelEl = $("#role-label");
     if (roleLabelEl && state.session) {
-      const roleStr = String(state.session.role || "trabajador").toUpperCase();
+      const roleStr = formatRoleLabel(state.session.role).toUpperCase();
       const nameStr = String(state.session.name || "Usuario").toUpperCase();
       roleLabelEl.textContent = `CREACIONES JJ · ${roleStr} · ${nameStr}`;
     }
     
+    const navLeadBtn = document.querySelector(".nav-lead-only");
+    if (navLeadBtn) navLeadBtn.style.display = isLead() ? "inline-flex" : "none";
+
     const screenEl = $("#screen");
     if (screenEl) {
-      const views = { now: nowView, queue: queueView, team: teamView, history: historyView, settings: settingsView };
+      const views = {
+        now: nowView, queue: queueView, team: teamView,
+        history: historyView, schedules: schedulesView,
+        finances: financesView, settings: settingsView
+      };
       screenEl.innerHTML = (views[state.screen] || views.now)();
     }
     
@@ -1903,7 +2076,17 @@ document.addEventListener("click", async (e) => {
   
   if (act === "close") return closeModal();
   if (act === "detail") {
-    const o = [...state.data.allOrders, ...state.data.finishedOrders, ...state.data.myOrders].find(i => String(i.id) === String(btn.dataset.id));
+    const scope = btn.dataset.scope;
+    const targetId = String(btn.dataset.id || "").trim();
+    let o;
+    if (scope === "finished") {
+      o = (state.data.finishedOrders || []).find(i => String(i.id).trim() === targetId);
+    } else if (scope === "active") {
+      o = [...(state.data.allOrders || []), ...(state.data.myOrders || [])].find(i => String(i.id).trim() === targetId);
+    }
+    if (!o) {
+      o = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])].find(i => String(i.id).trim() === targetId);
+    }
     if (o) detail(o);
     return;
   }
