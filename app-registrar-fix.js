@@ -538,21 +538,31 @@ function parseMagicPasteText(rawText) {
   return result;
 }
 
-// HTTP API Fetch Handler
+// HTTP API Fetch Handler con tiempo límite anti-congelamiento
 async function api(action, extra = {}) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
   const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
   try {
     const response = await fetch(baseUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     const data = await response.json();
     if (data && (data.ok || data.exito)) return data;
     throw new Error(data?.error || data?.mensaje || "Error al procesar la solicitud.");
   } catch (err) {
-    if (err.message && err.message.includes("Failed to fetch")) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error("La conexión con Google Sheets tardó demasiado. Revisa tu internet o vuelve a intentar.");
+    }
+    if (err.message && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
       throw new Error("Error de conexión con Google Sheets. Verifica tu internet.");
     }
     throw err;
@@ -2315,18 +2325,45 @@ const loginFormEl = document.getElementById("login-form");
 if (loginFormEl) {
   loginFormEl.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const btn = loginFormEl.querySelector("button[type='submit']");
     const errEl = document.getElementById("login-error");
+    
+    const nameVal = (document.getElementById("login-name")?.value || "").trim();
+    const pinVal  = (document.getElementById("login-pin")?.value || "").trim();
+
+    if (!nameVal || !pinVal) {
+      if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "⏳ Entrando...";
+    }
+    if (errEl) errEl.textContent = "";
+
     try {
-      const res = await api("profile_login", {
-        name: document.getElementById("login-name").value.trim(),
-        pin:  document.getElementById("login-pin").value.trim()
-      });
+      const res = await api("profile_login", { name: nameVal, pin: pinVal });
       state.session = res.session;
       store.set("pp_profile_session", state.session);
       showWorkspace();
       await refresh(false);
     } catch (err) {
-      if (errEl) errEl.textContent = err.message;
+      console.warn("Login online falló, verificando sesión local previa:", err);
+      const lastSession = store.get("pp_profile_session", null);
+      if (lastSession && lastSession.name && lastSession.name.toLowerCase() === nameVal.toLowerCase()) {
+        state.session = lastSession;
+        showWorkspace();
+        await refresh(false);
+        showToast("⚠️ Modo fuera de línea: Iniciaste sesión con tus datos guardados.");
+      } else {
+        if (errEl) errEl.textContent = err.message || "Error al iniciar sesión. Revisa tu nombre y PIN.";
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Iniciar sesión";
+      }
     }
   });
 }
