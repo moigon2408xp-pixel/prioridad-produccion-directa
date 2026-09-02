@@ -1319,6 +1319,91 @@ function financesView() {
 }
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
+function exportPerformancePDF(tf) {
+  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
+  const perfMap = computeWorkerPerformance(tf);
+  const nowStr = new Date().toLocaleDateString('es-VE', { dateStyle: 'long' });
+
+  const printWin = window.open('', '_blank');
+  if (!printWin) {
+    alert("Permite las ventanas emergentes en tu navegador para imprimir el PDF.");
+    return;
+  }
+
+  const rowsHtml = Object.keys(perfMap).map(uName => {
+    const data = perfMap[uName];
+    const avgMin = data.completed > 0 ? Math.round(data.totalMin / data.completed) : 0;
+    return `
+      <tr>
+        <td style="padding:10px; border:1px solid #ccc; font-weight:bold;">👤 ${escapeHtml(uName)}</td>
+        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.completed}</td>
+        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.totalMin} min</td>
+        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${avgMin} min/pedido</td>
+      </tr>
+    `;
+  }).join('');
+
+  printWin.document.write(`
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <title>Reporte de Rendimiento - Creaciones JJ</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 30px; color: #333; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
+        .header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
+        .header p { margin: 5px 0 0 0; color: #666; font-size: 14px; }
+        .meta { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; color: #555; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
+        th { background: #1e3a8a; color: white; padding: 10px; border: 1px solid #1e3a8a; text-align: left; }
+        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
+        .sig-box { width: 45%; text-align: center; border-top: 1px solid #aaa; padding-top: 8px; font-size: 12px; color: #666; }
+        @media print {
+          button { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>CREACIONES JJ · OCHOA & RISQUEZ</h1>
+        <p>Reporte Oficial de Rendimiento de Producción por Trabajador</p>
+      </div>
+
+      <div class="meta">
+        <span><strong>Período evaluado:</strong> ${tfLabels[tf] || tf}</span>
+        <span><strong>Fecha de emisión:</strong> ${nowStr}</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Trabajador</th>
+            <th style="text-align:center;">Pedidos Completados</th>
+            <th style="text-align:center;">Tiempo Invertido</th>
+            <th style="text-align:center;">Promedio por Pedido</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml || '<tr><td colspan="4" style="text-align:center; padding:20px;">No hay datos registrados en este período.</td></tr>'}
+        </tbody>
+      </table>
+
+      <div class="signatures">
+        <div class="sig-box">Firma del Manager / Jefatura</div>
+        <div class="sig-box">Sello del Taller Creaciones JJ</div>
+      </div>
+
+      <div style="text-align:center; margin-top:30px;">
+        <button onclick="window.print()" style="padding:10px 20px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir / Guardar como PDF</button>
+      </div>
+    </body>
+    </html>
+  `);
+  printWin.document.close();
+}
+window.exportPerformancePDF = exportPerformancePDF;
+
 function settingsView() {
   const session = state.session || {};
   const customColors = store.get("pp_custom_colors", {});
@@ -1408,91 +1493,6 @@ function settingsView() {
       </div>
     </div>
     
-function exportPerformancePDF(tf) {
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const perfMap = computeWorkerPerformance(tf);
-  const nowStr = new Date().toLocaleDateString('es-VE', { dateStyle: 'long' });
-
-  const printWin = window.open('', '_blank');
-  if (!printWin) {
-    alert("Permite las ventanas emergentes en tu navegador para imprimir el PDF.");
-    return;
-  }
-
-  const rowsHtml = Object.keys(perfMap).map(uName => {
-    const data = perfMap[uName];
-    const avgMin = data.completed > 0 ? Math.round(data.totalMin / data.completed) : 0;
-    return `
-      <tr>
-        <td style="padding:10px; border:1px solid #ccc; font-weight:bold;">👤 ${escapeHtml(uName)}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.completed}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.totalMin} min</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${avgMin} min/pedido</td>
-      </tr>
-    `;
-  }).join('');
-
-  printWin.document.write(`
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-      <meta charset="UTF-8">
-      <title>Reporte de Rendimiento - Creaciones JJ</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 30px; color: #333; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
-        .header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
-        .header p { margin: 5px 0 0 0; color: #666; font-size: 14px; }
-        .meta { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; color: #555; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-        th { background: #1e3a8a; color: white; padding: 10px; border: 1px solid #1e3a8a; text-align: left; }
-        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
-        .sig-box { width: 45%; text-align: center; border-top: 1px solid #aaa; padding-top: 8px; font-size: 12px; color: #666; }
-        @media print {
-          button { display: none; }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>CREACIONES JJ · OCHOA & RISQUEZ</h1>
-        <p>Reporte Oficial de Rendimiento de Producción por Trabajador</p>
-      </div>
-
-      <div class="meta">
-        <span><strong>Período evaluado:</strong> ${tfLabels[tf] || tf}</span>
-        <span><strong>Fecha de emisión:</strong> ${nowStr}</span>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Trabajador</th>
-            <th style="text-align:center;">Pedidos Completados</th>
-            <th style="text-align:center;">Tiempo Invertido</th>
-            <th style="text-align:center;">Promedio por Pedido</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || '<tr><td colspan="4" style="text-align:center; padding:20px;">No hay datos registrados en este período.</td></tr>'}
-        </tbody>
-      </table>
-
-      <div class="signatures">
-        <div class="sig-box">Firma del Manager / Jefatura</div>
-        <div class="sig-box">Sello del Taller Creaciones JJ</div>
-      </div>
-
-      <div style="text-align:center; margin-top:30px;">
-        <button onclick="window.print()" style="padding:10px 20px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir / Guardar como PDF</button>
-      </div>
-    </body>
-    </html>
-  `);
-  printWin.document.close();
-}
-window.exportPerformancePDF = exportPerformancePDF;
-
     ${isLead() ? `
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; margin-top:20px;">
         <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin:0;">📊 RENDIMIENTO DE PRODUCCIÓN POR TRABAJADOR (${tfLabels[tf]})</p>
@@ -1512,6 +1512,25 @@ window.exportPerformancePDF = exportPerformancePDF;
       <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
       <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
     ` : ''}
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
+    <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
+    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
+    <button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>
+    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
+    
+    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
+    <button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>
+    <div class="user-list">${(state.frequentMotivos||[]).map(m => `
+      <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
+        <strong>🎨 ${escapeHtml(m)}</strong>
+        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-motivo" data-motivo="${escapeHtml(m)}">🗑️</button>` : ''}
+      </div>
+    `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
+  `;
+}
     
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
     <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
