@@ -693,6 +693,38 @@ function checkAndSendPushNotifications() {
       }
     }
   }
+
+  // 3. Notificar a Jefes / Managers sobre pedidos terminados pendientes de revisión o entrega
+  if (isLead()) {
+    const finished = state.data.finishedOrders || [];
+    const pendingReview = finished.filter(o => {
+      const est = String(o.estado || "").toLowerCase().trim();
+      return est === "terminado"; // terminado por el trabajador pero aún no entregado
+    });
+
+    let notifiedIds = {};
+    try {
+      notifiedIds = JSON.parse(localStorage.getItem("pp_notified_finished_orders") || "{}");
+    } catch(e) {}
+
+    let newlyNotified = false;
+    pendingReview.forEach(o => {
+      if (!notifiedIds[o.id]) {
+        notifiedIds[o.id] = Date.now();
+        newlyNotified = true;
+        new Notification(`🔔 Pedido Terminado: ${o.id} – ${o.cliente}`, {
+          body: `¡${o.responsable || 'Un trabajador'} terminó el pedido (${o.tipo}${o.motivo ? ' · ' + o.motivo : ''})! Pulsa para revisar evidencias y marcar como Entregado.`,
+          icon: "./logo_creaciones_jj.png"
+        });
+      }
+    });
+
+    if (newlyNotified) {
+      try {
+        localStorage.setItem("pp_notified_finished_orders", JSON.stringify(notifiedIds));
+      } catch(e) {}
+    }
+  }
 }
 
 function priorityPill(order) {
@@ -839,7 +871,17 @@ function historyView() {
   const rawOrders = state.data.finishedOrders || [];
   const orders = filterOrdersBySearch(rawOrders);
   
+  const pendingWa = orders.filter(o => o.telefono && o.waNotificado !== "Sí" && String(o.estado).toLowerCase() !== "cancelado");
+  
   return `
+    ${(isLead() && pendingWa.length > 0) ? `
+      <div style="background:rgba(37,211,102,0.12); border:1px solid #25D366; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <strong style="color:#15803d; font-size:13px;">📲 ${pendingWa.length} PEDIDO(S) LISTO(S) PENDIENTES DE AVISAR POR WHATSAPP</strong>
+          <p style="margin:2px 0 0; font-size:12px; color:var(--text-muted);">Pulsa el botón verde en cada pedido desde el celular corporativo para avisar al cliente con un toque.</p>
+        </div>
+      </div>
+    ` : ''}
     <div class="search-bar-container" style="margin-bottom:16px;">
       <span>🔍</span>
       <input type="text" id="history-search-input" placeholder="Buscar por cliente, teléfono, motivo, ID (PED-0001) o trabajador..." value="${escapeHtml(state.searchQuery)}">
@@ -848,6 +890,11 @@ function historyView() {
       <div class="order-list">${orders.map((order) => {
         const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
         const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
+        const isDelivered = String(order.estado).toLowerCase().trim() === "entregado";
+        const isWaSent = String(order.waNotificado).toLowerCase().trim() === "sí" || String(order.waNotificado).toLowerCase().trim() === "si";
+        const waBadge = isWaSent
+          ? `<span style="background:#dcfce7; color:#15803d; font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px;">✅ WhatsApp Enviado</span>`
+          : (order.telefono ? `<span style="background:#fef3c7; color:#d97706; font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px;">⚠️ WhatsApp Pendiente</span>` : '');
         
         return `
           <article class="order-card">
@@ -855,13 +902,17 @@ function historyView() {
               <div>
                 <h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
                 <p>${escapeHtml(order.tipo)}</p>
-                ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                  ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
+                  ${waBadge}
+                </div>
               </div>
-              <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
+              <span class="priority" style="background:${isDelivered ? '#059669' : '#2e7d32'}; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
             </div>
             <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
               Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
               Responsable: ${escapeHtml(order.responsable)}<br/>
+              ${order.telefono ? `📞 Teléfono: <strong>${escapeHtml(order.telefono)}</strong><br/>` : ''}
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
               ${isLead() ? `<span style="color:#059669; font-weight:bold;">💵 Costo registrado: $${Number(order.costo || 0).toFixed(2)}</span><br/>` : ''}
               ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
@@ -884,7 +935,12 @@ function historyView() {
             ${isLead() ? `
               <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
                 <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
-                ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+                ${!isDelivered ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+                ${order.telefono ? `
+                  <button class="secondary-button" style="background:#25D366; color:white; border:none; flex:1; display:flex; align-items:center; justify-content:center; gap:6px;" data-action="notify-wa-corporate" data-id="${escapeHtml(order.id)}" data-phone="${escapeHtml(order.telefono)}" data-client="${escapeHtml(order.cliente)}" data-type="${escapeHtml(order.tipo)}" data-motivo="${escapeHtml(order.motivo || '')}">
+                    📲 ${isWaSent ? 'Reenviar WhatsApp' : 'Avisar WhatsApp (Corporativo)'}
+                  </button>
+                ` : ''}
               </div>
             ` : ''}
           </article>
@@ -1196,6 +1252,7 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
   const presets = [
     { label: "🔵 Completo A (8-1 / 3-7 PM)", val: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM" },
     { label: "🟣 Completo B (8-1 / 4-8:30 PM)", val: "8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM" },
+    { label: "🟡 Completo Extendido (8-1 / 3-8:30 PM)", val: "8:00 AM - 1:00 PM / 3:00 PM - 8:30 PM" },
     { label: "🟢 Solo Mañana (8-1 PM)", val: "8:00 AM - 1:00 PM" },
     { label: "🟠 Solo Tarde A (3-7 PM)", val: "3:00 PM - 7:00 PM" },
     { label: "🔴 Solo Tarde B (4-8:30 PM)", val: "4:00 PM - 8:30 PM" },
@@ -1244,6 +1301,7 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B</button>
+        <button type="button" class="secondary-button" style="font-size:11px; background:#eab308; color:#000; font-weight:bold; border:none;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 8:30 PM')">🟡 Extendido (8-1 / 3-8:30 PM)</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B</button>
@@ -1711,6 +1769,7 @@ function settingsView() {
 
       <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
         <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
+        <button class="secondary-button pwa-install-btn" onclick="if (window.triggerPwaInstall) window.triggerPwaInstall();" style="background:#2563eb; color:white; border:none; font-weight:bold;">💻 Instalar App en esta PC</button>
         ${isLead() ? `
           <button class="primary-button" data-action="force-update" style="background:#dc2626; color:white; border:none; font-weight:bold;">🚀 Forzar Actualización a Todo el Equipo</button>
           <button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>
@@ -1885,7 +1944,7 @@ function detail(order) {
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
           <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
           <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-            ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
+            ${(isLead() ? ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"] : ["Pendiente", "En proceso", "Pausado", "Terminado", "Cancelado"]).map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
           </select>
         </div>
 
@@ -2584,12 +2643,51 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "mark-delivered") {
+    if (!isLead()) {
+      alert("Solo el Jefe o Manager tiene permiso para marcar un pedido como Entregado.");
+      return;
+    }
     try {
-      await api("profile_update_order", { id: btn.dataset.id, changes: { estado: "Entregado" } });
+      await api("profile_update_order", {
+        id: btn.dataset.id,
+        role: state.session?.role || "trabajador",
+        changes: { estado: "Entregado" }
+      });
       closeModal();
       await refresh(false);
       showToast("Proyecto marcado como Entregado.");
     } catch (err) { alert(err.message); }
+    return;
+  }
+  if (act === "notify-wa-corporate") {
+    const rawPhone = btn.dataset.phone || "";
+    const cleanTel = cleanPhoneNumber(rawPhone);
+    if (!cleanTel) {
+      alert("Este pedido no tiene un teléfono válido registrado.");
+      return;
+    }
+    const idOrd = btn.dataset.id;
+    const clientName = btn.dataset.client || "Cliente";
+    const tipoOrd = btn.dataset.type || "Pedido";
+    const motivoOrd = btn.dataset.motivo ? ` (${btn.dataset.motivo})` : "";
+    const tmpl = state.waTemplate || "Hola {cliente}, tu pedido de {tipo} en Creaciones JJ ya se encuentra listo para retirar.";
+    const msg = tmpl
+      .replace(/{cliente}/g, clientName)
+      .replace(/{tipo}/g, tipoOrd + motivoOrd)
+      .replace(/{id}/g, idOrd);
+
+    const waUrl = `https://api.whatsapp.com/send?phone=${cleanTel}&text=${encodeURIComponent(msg)}`;
+    window.open(waUrl, "_blank");
+
+    try {
+      await api("profile_update_order", { id: idOrd, changes: { waNotificado: "Sí" } });
+      const targetOrd = (state.data.finishedOrders || []).find(o => String(o.id) === String(idOrd));
+      if (targetOrd) targetOrd.waNotificado = "Sí";
+      showToast("✅ Marcado como notificado por WhatsApp.");
+      render();
+    } catch(e) {
+      console.warn("Error guardando waNotificado:", e);
+    }
     return;
   }
 });
