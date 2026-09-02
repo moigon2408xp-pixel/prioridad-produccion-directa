@@ -1989,6 +1989,7 @@ function closeModal() {
 }
 
 function detail(order) {
+  state.selectedOrder = order;
   const rawPhone = cleanPhoneNumber(order.telefono);
   const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
   const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
@@ -2063,7 +2064,7 @@ function detail(order) {
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">RESPONSABLE:</span>
         <div style="display:flex; align-items:center; gap:8px;">
           <strong style="color:var(--text-main);">${escapeHtml(order.responsable)}</strong>
-          ${active(order) ? `<button type="button" class="secondary-button" style="background:#4f46e5; color:white; border:none; padding:3px 8px; font-size:11px; font-weight:700;" onclick="openReassignModal(state.selectedOrder)">👥 Reasignar</button>` : ''}
+          ${active(order) ? `<button type="button" class="secondary-button" style="background:#4f46e5; color:white; border:none; padding:4px 10px; font-size:12px; font-weight:700; border-radius:6px; cursor:pointer;" data-action="reassign-order" data-id="${escapeHtml(order.id)}" onclick="openReassignModal('${escapeHtml(order.id)}')">👥 Reasignar</button>` : ''}
         </div>
       </div>
 
@@ -2337,8 +2338,19 @@ function openFinishModal(order, targetStatus) {
   });
 }
 
-function openReassignModal(order) {
-  if (!order) return;
+function openReassignModal(orderOrId) {
+  let order = orderOrId;
+  if (typeof order === "string") {
+    const all = [...(state.data.allOrders || []), ...(state.data.myOrders || []), ...(state.data.finishedOrders || [])];
+    order = all.find(o => String(o.id).trim().toLowerCase() === String(orderOrId).trim().toLowerCase());
+  }
+  if (!order) order = state.selectedOrder;
+  if (!order) {
+    alert("No se pudo cargar el pedido para reasignar.");
+    return;
+  }
+  state.selectedOrder = order;
+
   const users = (state.data.users || []).filter(u => u.active && u.name.toLowerCase() !== String(order.responsable || "").toLowerCase());
   const currentResp = order.responsable || "Sin asignar";
   const currentMin = Number(order.duracionRealMin || 0);
@@ -2917,6 +2929,10 @@ document.addEventListener("click", async (e) => {
       await refresh(false);
       showToast("Proyecto marcado como Entregado.");
     } catch (err) { alert(err.message); }
+    return;
+  }
+  if (act === "reassign-order") {
+    openReassignModal(btn.dataset.id || state.selectedOrder);
     return;
   }
   if (act === "notify-wa-corporate") {
