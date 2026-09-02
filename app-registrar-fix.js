@@ -1105,12 +1105,50 @@ function openFinancialReportModal() {
 }
 window.openFinancialReportModal = openFinancialReportModal;
 
-function openEditScheduleModal(workerName = "") {
+function getWeekDetails(offsetWeeks = 0) {
+  const now = new Date();
+  now.setDate(now.getDate() + (offsetWeeks * 7));
+  const day = now.getDay();
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMon);
+  monday.setHours(0,0,0,0);
+  
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  
+  const pad = (n) => n.toString().padStart(2, '0');
+  const dMon = `${pad(monday.getDate())}/${pad(monday.getMonth()+1)}`;
+  const dSun = `${pad(sunday.getDate())}/${pad(sunday.getMonth()+1)}/${sunday.getFullYear()}`;
+  
+  const semanaId = `${monday.getFullYear()}-W${pad(Math.ceil((((monday - new Date(monday.getFullYear(),0,1))/86400000)+new Date(monday.getFullYear(),0,1).getDay()+1)/7))}`;
+  const semanaLabel = `Semana del ${dMon} al ${dSun}`;
+  
+  return { monday, sunday, semanaId, semanaLabel, isCurrent: offsetWeeks === 0 };
+}
+
+window.changeScheduleWeek = function(delta) {
+  state.selectedWeekOffset = (state.selectedWeekOffset || 0) + delta;
+  render();
+};
+
+window.resetScheduleWeek = function() {
+  state.selectedWeekOffset = 0;
+  render();
+};
+
+function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSemanaLabel = "") {
   if (!isLead()) return;
   const users = (state.data.users || []).filter(u => u.active);
   const schedules = state.data.schedules || state.data.horarios || [];
   
-  const workerSched = schedules.find(s => s.trabajador.toLowerCase() === workerName.toLowerCase()) || {
+  const curWeek = getWeekDetails(state.selectedWeekOffset || 0);
+  const semId = targetSemanaId || curWeek.semanaId;
+  const semLabel = targetSemanaLabel || curWeek.semanaLabel;
+
+  const defaultUser = workerName || (users[0]?.name || "");
+  const workerSched = schedules.find(s => s.trabajador.toLowerCase() === defaultUser.toLowerCase() && (s.semana === semId || !s.semana)) || schedules.find(s => s.trabajador.toLowerCase() === defaultUser.toLowerCase()) || {
     lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
     jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
   };
@@ -1121,8 +1159,12 @@ function openEditScheduleModal(workerName = "") {
       <button class="close-button" data-action="close">×</button>
     </div>
 
+    <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:10px 12px; border-radius:8px; margin-bottom:12px; font-size:13px; color:#0284c7; font-weight:bold;">
+      🗓️ Asignando para: ${escapeHtml(semLabel)} ${curWeek.isCurrent ? '(Semana en Curso)' : ''}
+    </div>
+
     <div style="background:var(--bg-main); padding:10px; border-radius:8px; margin-bottom:12px;">
-      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">PLANTILLAS RÁPIDAS DE TURNO (CLIC PARA APLICAR A TODOS LOS DÍAS):</p>
+      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">PLANTILLAS RÁPIDAS (CLIC PARA APLICAR A TODOS LOS DÍAS):</p>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A (8-1 / 3-7 PM)</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B (8-1 / 4-8:30 PM)</button>
@@ -1134,9 +1176,10 @@ function openEditScheduleModal(workerName = "") {
     </div>
 
     <form id="schedule-form" class="form-grid">
+      <input type="hidden" name="semana" value="${escapeHtml(semId)}">
       <label class="field"><span class="field-label">SELECCIONAR TRABAJADOR</span>
         <select name="trabajador" required>
-          ${users.map(u => `<option value="${escapeHtml(u.name)}" ${u.name.toLowerCase() === workerName.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
+          ${users.map(u => `<option value="${escapeHtml(u.name)}" ${u.name.toLowerCase() === defaultUser.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
         </select>
       </label>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
@@ -1148,7 +1191,7 @@ function openEditScheduleModal(workerName = "") {
         <label class="field"><span class="field-label">SÁBADO</span><input id="sched-sabado" name="sabado" value="${escapeHtml(workerSched.sabado || "8:00 AM - 1:00 PM")}"></label>
       </div>
       <label class="field"><span class="field-label">DOMINGO</span><input id="sched-domingo" name="domingo" value="${escapeHtml(workerSched.domingo || "Libre")}"></label>
-      <div class="modal-footer"><button type="submit" class="primary-button">Guardar Horario</button></div>
+      <div class="modal-footer"><button type="submit" class="primary-button">Guardar Horario de esta Semana</button></div>
     </form>
   `);
 
@@ -1168,7 +1211,7 @@ function openEditScheduleModal(workerName = "") {
       await api("profile_save_schedule", data);
       closeModal();
       await refresh(false);
-      showToast("Horario guardado en Google Sheets.");
+      showToast("Horario guardado en Google Sheets para esta semana.");
     } catch (err) {
       btn.disabled = false;
       alert(err.message);
@@ -1179,15 +1222,35 @@ window.openEditScheduleModal = openEditScheduleModal;
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
 function schedulesView() {
-  const schedules = state.data.schedules || state.data.horarios || [];
+  const allSchedules = state.data.schedules || state.data.horarios || [];
+  const offset = state.selectedWeekOffset || 0;
+  const wk = getWeekDetails(offset);
+  
+  // Filtrar horarios que coincidan con la semana seleccionada o los sin semana si estamos en la actual
+  const schedules = allSchedules.filter(s => {
+    if (s.semana) return s.semana === wk.semanaId || s.semana === wk.semanaLabel;
+    return wk.isCurrent;
+  });
+
   return `
     <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
         <div>
           <h2 style="margin:0;">📅 Horarios y Turnos del Equipo</h2>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Consulta los turnos de mañana (8-1 PM), tarde (3-7 PM / 4-8:30 PM) y universidad de cada trabajador.</p>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Consulta y asigna turnos rotativos por semana para cada trabajador.</p>
         </div>
-        ${isLead() ? `<button type="button" class="primary-button" onclick="openEditScheduleModal()">✏️ Modificar Horario</button>` : ''}
+        ${isLead() ? `<button type="button" class="primary-button" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">✏️ Modificar Horario (${wk.isCurrent ? 'Esta Semana' : wk.semanaLabel})</button>` : ''}
+      </div>
+
+      <!-- Selector de semanas e histórico -->
+      <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-main); padding:10px 14px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color); flex-wrap:wrap; gap:8px;">
+        <button type="button" class="secondary-button" onclick="changeScheduleWeek(-1)">◀ Semana Anterior</button>
+        <div style="text-align:center;">
+          <strong style="font-size:14px; color:var(--primary-color);">🗓️ ${escapeHtml(wk.semanaLabel)}</strong>
+          ${wk.isCurrent ? '<span style="background:var(--success-color); color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; margin-left:6px;">EN CURSO</span>' : ''}
+          ${!wk.isCurrent ? '<button type="button" class="secondary-button" style="padding:2px 8px; font-size:11px; margin-left:6px;" onclick="resetScheduleWeek()">Semana Actual</button>' : ''}
+        </div>
+        <button type="button" class="secondary-button" onclick="changeScheduleWeek(1)">Semana Siguiente ▶</button>
       </div>
 
       <div style="overflow-x:auto;">
@@ -1208,15 +1271,15 @@ function schedulesView() {
             ${schedules.map(s => `
               <tr style="border-bottom:1px dashed var(--border-color);">
                 <td style="padding:10px; font-weight:bold; white-space:nowrap;">👤 ${escapeHtml(s.trabajador)}</td>
-                <td style="padding:10px;">${escapeHtml(s.lunes || '8-1 PM / 3-7 PM')}</td>
-                <td style="padding:10px;">${escapeHtml(s.martes || '8-1 PM / 3-7 PM')}</td>
-                <td style="padding:10px;">${escapeHtml(s.miercoles || '8-1 PM / 3-7 PM')}</td>
-                <td style="padding:10px;">${escapeHtml(s.jueves || '8-1 PM / 3-7 PM')}</td>
-                <td style="padding:10px;">${escapeHtml(s.viernes || '8-1 PM / 3-7 PM')}</td>
-                <td style="padding:10px;">${escapeHtml(s.sabado || '8-1 PM')}</td>
+                <td style="padding:10px;">${escapeHtml(s.lunes || 'Libre')}</td>
+                <td style="padding:10px;">${escapeHtml(s.martes || 'Libre')}</td>
+                <td style="padding:10px;">${escapeHtml(s.miercoles || 'Libre')}</td>
+                <td style="padding:10px;">${escapeHtml(s.jueves || 'Libre')}</td>
+                <td style="padding:10px;">${escapeHtml(s.viernes || 'Libre')}</td>
+                <td style="padding:10px;">${escapeHtml(s.sabado || 'Libre')}</td>
                 <td style="padding:10px; color:var(--text-muted);">${escapeHtml(s.domingo || 'Libre')}</td>
               </tr>
-            `).join("") || '<tr><td colspan="8" style="padding:20px; text-align:center; color:var(--text-muted);">No hay horarios registrados aún. Pulsa Modificar Horario para agregar.</td></tr>'}
+            `).join("") || `<tr><td colspan="8" style="padding:26px; text-align:center; color:var(--text-muted);">No hay horarios registrados para ${escapeHtml(wk.semanaLabel)}.<br/>${isLead() ? `<button type="button" class="primary-button" style="margin-top:10px;" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">➕ Cargar Horario para esta semana</button>` : ''}</td></tr>`}
           </tbody>
         </table>
       </div>
