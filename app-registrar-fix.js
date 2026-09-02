@@ -596,13 +596,18 @@ async function refresh(showMessage = true) {
       return ord;
     };
 
+    const rawSchedules = rawData.schedules || rawData.horarios || [];
+    state.schedules = rawSchedules;
+
     state.data = {
       myOrders: (rawData.myOrders || []).map(normalizeOrder).map(sanitizeOrderPhone),
       teamCritical: (rawData.teamCritical || []).map(normalizeOrder).map(sanitizeOrderPhone),
       allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder).map(sanitizeOrderPhone),
       finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || []).map(normalizeOrder).map(sanitizeOrderPhone),
       users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
-      dailyPerformance: rawData.dailyPerformance || {}
+      dailyPerformance: rawData.dailyPerformance || {},
+      schedules: rawSchedules,
+      horarios: rawSchedules
     };
     
     state.waTemplate = rawData.waTemplate || state.waTemplate;
@@ -612,10 +617,23 @@ async function refresh(showMessage = true) {
     store.set("pp_profile_clients", state.frequentClients);
     store.set("pp_profile_types", state.frequentTypes);
     store.set("pp_profile_motivos", state.frequentMotivos);
-    if (rawData.schedules || rawData.horarios) {
-      state.schedules = rawData.schedules || rawData.horarios || [];
-      store.set("pp_profile_schedules", state.schedules);
+    store.set("pp_profile_schedules", rawSchedules);
+
+    // Detección de orden de actualización forzada por el Manager
+    const serverVer = String(rawData.appVersion || rawData.version || "");
+    const localVer = store.get("pp_app_version", "");
+    if (serverVer && localVer && serverVer !== localVer) {
+      store.set("pp_app_version", serverVer);
+      showToast("🚀 Nueva actualización del taller recibida. Recargando...", 3000);
+      setTimeout(() => {
+        window.location.reload(true);
+      }, 1200);
+      return;
     }
+    if (serverVer) {
+      store.set("pp_app_version", serverVer);
+    }
+
     render();
     checkAndSendPushNotifications();
     if (showMessage) showToast("Información sincronizada.");
@@ -1301,13 +1319,19 @@ window.openEditScheduleModal = openEditScheduleModal;
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
 function schedulesView() {
-  const allSchedules = state.data.schedules || state.data.horarios || [];
+  const allSchedules = state.data.schedules || state.schedules || state.data.horarios || [];
   const offset = state.selectedWeekOffset || 0;
   const wk = getWeekDetails(offset);
   
   // Filtrar horarios que coincidan con la semana seleccionada o los sin semana si estamos en la actual
   const schedules = allSchedules.filter(s => {
-    if (s.semana) return s.semana === wk.semanaId || s.semana === wk.semanaLabel;
+    if (s.semana) {
+      const sSem = String(s.semana).trim().toLowerCase();
+      return sSem === wk.semanaId.toLowerCase() || 
+             sSem === wk.semanaLabel.toLowerCase() ||
+             sSem.includes(wk.semanaId.toLowerCase()) ||
+             wk.semanaLabel.toLowerCase().includes(sSem);
+    }
     return wk.isCurrent;
   });
 
@@ -1630,7 +1654,10 @@ function settingsView() {
 
       <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
         <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
-        ${isLead() ? `<button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>` : ''}
+        ${isLead() ? `
+          <button class="primary-button" data-action="force-update" style="background:#dc2626; color:white; border:none; font-weight:bold;">🚀 Forzar Actualización a Todo el Equipo</button>
+          <button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>
+        ` : ''}
         <button class="secondary-button" data-action="logout">Cerrar sesión</button>
         <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
       </div>
@@ -2487,6 +2514,18 @@ document.addEventListener("click", async (e) => {
     }
     return;
   }
+  if (act === "force-update") {
+    if (confirm("¿Deseas forzar la actualización inmediata en todas las sesiones y teléfonos activos del taller?\n\nTodos los dispositivos del equipo recargarán automáticamente la versión más reciente.")) {
+      try {
+        const newVer = "v_" + Date.now();
+        await api("profile_force_update", { version: newVer });
+        store.set("pp_app_version", newVer);
+        showToast("🚀 Orden de actualización global enviada a todo el equipo.");
+        await refresh(false);
+      } catch (err) { alert(`Error al forzar actualización: ${err.message}`); }
+    }
+    return;
+  }
   if (act === "mark-delivered") {
     try {
       await api("profile_update_order", { id: btn.dataset.id, changes: { estado: "Entregado" } });
@@ -2606,3 +2645,10 @@ if (state.session) {
 } else {
   showLogin();
 }
+
+// Latido periódico en segundo plano (cada 45 segundos) para sincronizar pedidos y detectar actualizaciones forzadas
+setInterval(() => {
+  if (state.session && !document.hidden) {
+    refresh(false);
+  }
+}, 45000);
