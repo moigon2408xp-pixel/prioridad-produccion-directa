@@ -1531,7 +1531,6 @@ function settingsView() {
     `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
   `;
 }
-}
 
 function render() {
   if (!state.session) {
