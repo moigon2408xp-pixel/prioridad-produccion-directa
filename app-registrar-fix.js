@@ -245,7 +245,9 @@ const normalizeOrder = (o) => {
     ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
     tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausadoMin || 0),
     cerrado: String(o.cerrado || o.Cerrado || "No").trim(),
-    costo: Number(o.costo || o.Costo || o.precio || o.monto || 0)
+    costo: Number(o.costo || o.Costo || o.precio || o.monto || 0),
+    colaboradores: o.colaboradores || o.Colaboradores || "",
+    waNotificado: String(o.waNotificado || o.WhatsApp_Notificado || o.wanotificado || "No").trim()
   };
 };
 
@@ -777,6 +779,15 @@ function orderCard(order, position) {
           ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
           ${disenoBadge}
           ${hasDelivery ? `<span class="badge-delivery">🚚 ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
+          ${(() => {
+            let colabs = [];
+            try { colabs = typeof order.colaboradores === 'string' ? JSON.parse(order.colaboradores) : order.colaboradores; } catch(e) {}
+            if (Array.isArray(colabs) && colabs.length > 0) {
+              const prevW = colabs[colabs.length - 1].trabajador;
+              return `<span style="background:rgba(79,70,229,0.12); color:#4f46e5; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">👥 En equipo (${escapeHtml(prevW)} ➔ ${escapeHtml(order.responsable)})</span>`;
+            }
+            return '';
+          })()}
         </div>
       </div>
       <div class="cc-right">
@@ -1021,12 +1032,46 @@ function computeWorkerPerformance(timeframe = "today") {
   filtered.forEach(o => {
     if (String(o.estado || "").toLowerCase().trim() === "cancelado") return;
     const w = o.responsable || "Sin asignar";
+    
+    // Si tiene colaboradores previos por reasignación:
+    let colabs = [];
+    if (o.colaboradores) {
+      try {
+        colabs = typeof o.colaboradores === "string" ? JSON.parse(o.colaboradores) : o.colaboradores;
+      } catch(e) {}
+    }
+    
+    let totalColabMin = 0;
+    if (Array.isArray(colabs) && colabs.length > 0) {
+      colabs.forEach(c => {
+        const cWorker = c.trabajador || "Colaborador";
+        const cMin = Number(c.tiempoMin || 0);
+        totalColabMin += cMin;
+        
+        if (!perfMap[cWorker]) {
+          perfMap[cWorker] = { completed: 0, assisted: 0, totalMin: 0, orders: [] };
+        }
+        perfMap[cWorker].totalMin += cMin;
+        perfMap[cWorker].assisted = (perfMap[cWorker].assisted || 0) + 1;
+        perfMap[cWorker].orders.push({
+          ...o,
+          rolEnPedido: `Colaboración (${cMin} min - ${c.motivo || 'Reasignado'})`,
+          tiempoAportado: cMin
+        });
+      });
+    }
+    
     if (!perfMap[w]) {
-      perfMap[w] = { completed: 0, totalMin: 0, orders: [] };
+      perfMap[w] = { completed: 0, assisted: 0, totalMin: 0, orders: [] };
     }
     perfMap[w].completed += 1;
-    perfMap[w].totalMin += Number(o.duracionRealMin || 0);
-    perfMap[w].orders.push(o);
+    const finalWorkerMin = Math.max(0, Number(o.duracionRealMin || 0) - totalColabMin);
+    perfMap[w].totalMin += (totalColabMin > 0 ? finalWorkerMin : Number(o.duracionRealMin || 0));
+    perfMap[w].orders.push({
+      ...o,
+      rolEnPedido: totalColabMin > 0 ? `Cierre (${finalWorkerMin} min / en equipo)` : 'Completado completo',
+      tiempoAportado: (totalColabMin > 0 ? finalWorkerMin : Number(o.duracionRealMin || 0))
+    });
   });
   
   return perfMap;
@@ -1036,7 +1081,7 @@ function openWorkerPerfModal(workerName, timeframe) {
   const tf = timeframe || state.perfTimeframe || "today";
   const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
   const perfMap = computeWorkerPerformance(tf);
-  const workerData = perfMap[workerName] || { completed: 0, totalMin: 0, orders: [] };
+  const workerData = perfMap[workerName] || { completed: 0, assisted: 0, totalMin: 0, orders: [] };
   const workerOrders = workerData.orders || [];
 
   openModal(`
@@ -1045,11 +1090,11 @@ function openWorkerPerfModal(workerName, timeframe) {
       <button class="close-button" data-action="close">×</button>
     </div>
     <div style="margin-bottom:16px; padding:12px; background:var(--bg-main); border-radius:var(--radius-md);">
-      <p style="font-size:14px; font-weight:700;">Pedidos Completados: <span style="color:var(--primary-color);">${workerData.completed}</span></p>
+      <p style="font-size:14px; font-weight:700;">Pedidos Cumplidos: <span style="color:var(--primary-color);">${workerData.completed}</span> ${workerData.assisted ? `<span style="color:#6366f1; font-size:12px; margin-left:6px;">(+${workerData.assisted} colaboraciones)</span>` : ''}</p>
       <p style="font-size:14px; font-weight:700;">Tiempo Total Invertido: <span style="color:var(--primary-color);">${workerData.totalMin} min</span></p>
-      ${workerData.completed > 0 ? `<p style="font-size:13px; color:var(--text-muted); margin-top:4px;">⏱️ Promedio por pedido: <strong>${Math.round(workerData.totalMin / workerData.completed)} min</strong></p>` : ''}
+      ${workerData.completed > 0 ? `<p style="font-size:13px; color:var(--text-muted); margin-top:4px;">⏱️ Promedio por pedido: <strong>${Math.round(workerData.totalMin / Math.max(1, workerData.completed))} min</strong></p>` : ''}
     </div>
-    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS TERMINADOS (${workerOrders.length}):</p>
+    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS Y PARTICIPACIONES (${workerOrders.length}):</p>
     <div style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto;">
       ${workerOrders.length ? workerOrders.map(o => `
         <div style="padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card);">
@@ -1058,7 +1103,8 @@ function openWorkerPerfModal(workerName, timeframe) {
             <span style="color:var(--success-color);">${escapeHtml(o.estado)}</span>
           </div>
           <p style="font-size:13px; color:var(--text-muted);">${escapeHtml(o.tipo || 'Sin tipo')} ${o.motivo ? `· Motivo: ${escapeHtml(o.motivo)}` : ''}</p>
-          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo: <strong>${o.duracionRealMin || 0} min</strong> | 📝 Observación: ${escapeHtml(o.comentarioCierre || "Sin observación")}</p>
+          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo aportado: <strong>${o.tiempoAportado || o.duracionRealMin || 0} min</strong> ${o.rolEnPedido ? `· <span style="color:#6366f1; font-weight:bold;">${escapeHtml(o.rolEnPedido)}</span>` : ''}</p>
+          ${o.comentarioCierre ? `<p style="font-size:12px; color:var(--text-muted);">📝 Observación: ${escapeHtml(o.comentarioCierre)}</p>` : ''}
         </div>
       `).join("") : '<div class="team-note">No hay pedidos registrados en este período.</div>'}
     </div>
@@ -1717,7 +1763,7 @@ function settingsView() {
   const perfRows = Object.keys(perfMap).map(uName => `
     <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}', '${tf}')">
       <span><strong>👤 ${escapeHtml(uName)}</strong></span>
-      <span>🏆 <strong>${perfMap[uName].completed}</strong> pedidos (${perfMap[uName].totalMin} min) 🔍</span>
+      <span>🏆 <strong>${perfMap[uName].completed}</strong> cumplidos ${perfMap[uName].assisted ? `<span style="color:#6366f1; font-size:11px;">(+${perfMap[uName].assisted} asist.)</span>` : ''} (${perfMap[uName].totalMin} min) 🔍</span>
     </div>
   `).join("");
 
@@ -1987,10 +2033,31 @@ function detail(order) {
         </div>
       `}
 
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">RESPONSABLE:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(order.responsable)}</strong>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <strong style="color:var(--text-main);">${escapeHtml(order.responsable)}</strong>
+          ${active(order) ? `<button type="button" class="secondary-button" style="background:#4f46e5; color:white; border:none; padding:3px 8px; font-size:11px; font-weight:700;" onclick="openReassignModal(state.selectedOrder)">👥 Reasignar</button>` : ''}
+        </div>
       </div>
+
+      ${(() => {
+        let colabs = [];
+        try {
+          colabs = typeof order.colaboradores === 'string' ? JSON.parse(order.colaboradores) : order.colaboradores;
+        } catch(e) {}
+        if (!Array.isArray(colabs) || !colabs.length) return '';
+        return `
+          <div style="background:rgba(79,70,229,0.08); border:1px solid #818cf8; border-radius:8px; padding:8px 12px; margin-top:2px; margin-bottom:6px;">
+            <strong style="color:#4338ca; font-size:12px; display:block; margin-bottom:4px;">👥 TRABAJO EN EQUIPO / REASIGNACIONES PREVIAS:</strong>
+            ${colabs.map(c => `
+              <div style="font-size:12px; color:var(--text-main); margin-bottom:4px; padding-bottom:4px; border-bottom:1px dashed rgba(79,70,229,0.2);">
+                👤 <strong>${escapeHtml(c.trabajador)}:</strong> ${c.tiempoMin || 0} min aportados ${c.motivo ? `· <em>${escapeHtml(c.motivo)}</em>` : ''} ${c.nota ? `· "${escapeHtml(c.nota)}"` : ''} <small style="color:var(--text-muted);">(${escapeHtml(c.fecha || '')})</small>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      })()}
       
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO WHATSAPP:</span>
@@ -2054,7 +2121,7 @@ function detail(order) {
         </div>
       </div>
     </div>
-    ${rawPhone ? `<div class="actions" style="margin-top:16px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%;">📲 Notificar por WhatsApp</a></div>` : ""}
+    ${rawPhone ? `<div class="actions" style="margin-top:16px;"><button type="button" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%; font-weight:bold; padding:10px; border:none;" data-action="notify-wa-corporate" data-id="${escapeHtml(order.id)}" data-phone="${escapeHtml(order.telefono)}" data-client="${escapeHtml(order.cliente)}" data-type="${escapeHtml(order.tipo)}" data-motivo="${escapeHtml(order.motivo || '')}">📲 Notificar por WhatsApp</button></div>` : ""}
     ${isLead() ? `
       <div class="actions" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
         ${!active(order) ? `<button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>` : ''}
@@ -2243,6 +2310,173 @@ function openFinishModal(order, targetStatus) {
     }
   });
 }
+
+function openReassignModal(order) {
+  if (!order) return;
+  const users = (state.data.users || []).filter(u => u.active && u.name.toLowerCase() !== String(order.responsable || "").toLowerCase());
+  const currentResp = order.responsable || "Sin asignar";
+  const currentMin = Number(order.duracionRealMin || 0);
+
+  openModal(`
+    <div class="modal-head">
+      <h2>👥 Reasignar Pedido a Otro Trabajador</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="reassign-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px;">
+        <div>📦 <strong>Pedido:</strong> ${escapeHtml(order.id)} – ${escapeHtml(order.cliente)}</div>
+        <div style="margin-top:4px;">👤 <strong>Responsable actual:</strong> <strong style="color:var(--primary-color);">${escapeHtml(currentResp)}</strong></div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">⏱️ MINUTOS DEDICADOS POR ${escapeHtml(currentResp).toUpperCase()} HASTA AHORA:</span>
+        <input type="number" name="timeSpent" min="0" value="${currentMin}" required placeholder="Minutos que dedicó el trabajador saliente">
+        <small style="color:var(--text-muted); font-size:11px;">Este tiempo se acreditará al trabajador actual en sus métricas de rendimiento.</small>
+      </label>
+
+      <label class="field">
+        <span class="field-label">👤 NUEVO RESPONSABLE ASIGNADO:</span>
+        <select name="newWorker" required>
+          <option value="">-- Seleccionar nuevo responsable --</option>
+          ${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">📋 MOTIVO DE LA REASIGNACIÓN:</span>
+        <select name="motivoSelect" id="reassign-motivo-select" onchange="if (this.value==='__CUSTOM__'){document.getElementById('reassign-custom-motivo').style.display='block';}else{document.getElementById('reassign-custom-motivo').style.display='none';}">
+          <option value="Vacaciones del trabajador">🏖️ Vacaciones del trabajador</option>
+          <option value="Fin de jornada / turno">⏰ Fin de jornada / turno</option>
+          <option value="Alta demanda / apoyo en taller">⚡ Alta demanda / apoyo en taller</option>
+          <option value="Cambio de técnica / especialidad">🎨 Cambio de técnica / especialidad</option>
+          <option value="__CUSTOM__">✏️ Otro motivo...</option>
+        </select>
+        <input type="text" id="reassign-custom-motivo" name="customMotivo" placeholder="Escribe el motivo..." style="display:none; margin-top:6px;">
+      </label>
+
+      <label class="field">
+        <span class="field-label">📝 AVANCE DEJADO / INDICACIONES PARA EL NUEVO COMPAÑERO:</span>
+        <textarea name="nota" placeholder="Ej: Diseño listo y cortado en plotter. Falta armar capas de foami y pegar..."></textarea>
+      </label>
+
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button" style="background:#4f46e5; border:none;">Transferir y Guardar Reasignación</button>
+      </div>
+    </form>
+  `);
+
+  $("#reassign-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Reasignando pedido...";
+
+    const formData = new FormData(e.target);
+    const newWorker = formData.get("newWorker");
+    const timeSpent = Number(formData.get("timeSpent") || 0);
+    const motSel = formData.get("motivoSelect");
+    const motivo = (motSel === "__CUSTOM__") ? (formData.get("customMotivo") || "Reasignado") : motSel;
+    const nota = formData.get("nota") || "";
+
+    try {
+      await api("profile_reassign_order", {
+        id: order.id,
+        prevWorker: currentResp,
+        newWorker: newWorker,
+        timeSpent: timeSpent,
+        motivo: motivo,
+        nota: nota,
+        user: state.session?.name || "Manager"
+      });
+      closeModal();
+      await refresh(false);
+      showToast(`✅ Pedido reasignado a ${newWorker}. Se reconoció el tiempo de ${currentResp}.`);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Transferir y Guardar Reasignación";
+      alert(`Error al reasignar pedido: ${err.message}`);
+    }
+  });
+}
+window.openReassignModal = openReassignModal;
+
+function openWhatsAppModal(orderData) {
+  const cleanTel = cleanPhoneNumber(orderData.phone || "");
+  const idOrd = orderData.id;
+  const clientName = orderData.client || "Cliente";
+  const tipoOrd = orderData.type || "Pedido";
+  const motivoOrd = orderData.motivo ? ` (${orderData.motivo})` : "";
+  const tmpl = state.waTemplate || "Hola {cliente}, tu pedido de {tipo} en Creaciones JJ ya se encuentra listo para retirar.";
+  const msg = tmpl
+    .replace(/{cliente}/g, clientName)
+    .replace(/{tipo}/g, tipoOrd + motivoOrd)
+    .replace(/{id}/g, idOrd);
+
+  const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanTel}&text=${encodeURIComponent(msg)}`;
+  const waAppUrl = `https://api.whatsapp.com/send?phone=${cleanTel}&text=${encodeURIComponent(msg)}`;
+
+  openModal(`
+    <div class="modal-head">
+      <h2>📲 Notificar por WhatsApp (${escapeHtml(idOrd)})</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div class="form-grid">
+      <div style="background:var(--bg-main); padding:12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px;">
+        <div>👤 <strong>Cliente:</strong> ${escapeHtml(clientName)}</div>
+        <div style="margin-top:4px;">📞 <strong>Teléfono:</strong> <strong style="color:var(--primary-color);">${escapeHtml(cleanTel || 'No registrado')}</strong></div>
+        <div style="margin-top:10px; font-weight:700; font-size:12px; color:var(--text-muted);">MENSAJE AUTOMÁTICO:</div>
+        <div id="wa-modal-text" style="background:var(--bg-card); padding:10px; border-radius:6px; margin-top:4px; font-size:12px; border:1px dashed var(--border-color); line-height:1.5; color:var(--text-main); white-space:pre-wrap;">${escapeHtml(msg)}</div>
+      </div>
+
+      <p style="font-size:12px; color:var(--text-muted); margin:4px 0;">Opciones de envío compatibles con Opera GX, Chrome y Celular:</p>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <a href="${waWebUrl}" target="_blank" rel="noopener" class="primary-button" style="background:#25D366; color:white; text-decoration:none; text-align:center; padding:10px; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="markOrderWaNotified('${escapeHtml(idOrd)}')">
+          🌐 Abrir WhatsApp Web (Opera GX / Chrome)
+        </a>
+
+        <a href="${waAppUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#128C7E; color:white; border:none; text-decoration:none; text-align:center; padding:10px; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="markOrderWaNotified('${escapeHtml(idOrd)}')">
+          📱 Abrir WhatsApp Móvil / App de Escritorio
+        </a>
+
+        <button type="button" class="secondary-button" style="background:#0284c7; color:white; border:none; padding:10px; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="copyWaTextAndNotify('${escapeHtml(idOrd)}', '${escapeHtml(cleanTel)}', '${escapeHtml(encodeURIComponent(msg))}')">
+          📋 Copiar Mensaje (Para pegar en WhatsApp lateral de Opera GX)
+        </button>
+      </div>
+
+      <div class="modal-footer" style="margin-top:10px;">
+        <button type="button" class="secondary-button" data-action="close">Cerrar</button>
+      </div>
+    </div>
+  `);
+}
+window.openWhatsAppModal = openWhatsAppModal;
+
+window.markOrderWaNotified = async function(idOrd) {
+  try {
+    await api("profile_update_order", { id: idOrd, changes: { waNotificado: "Sí" } });
+    const targetOrd = (state.data.finishedOrders || []).find(o => String(o.id) === String(idOrd));
+    if (targetOrd) targetOrd.waNotificado = "Sí";
+    const actOrd = (state.data.allOrders || []).find(o => String(o.id) === String(idOrd));
+    if (actOrd) actOrd.waNotificado = "Sí";
+    showToast("✅ Marcado como notificado por WhatsApp.");
+    render();
+  } catch(e) {
+    console.warn("Error guardando waNotificado:", e);
+  }
+};
+
+window.copyWaTextAndNotify = async function(idOrd, tel, encMsg) {
+  const decodedMsg = decodeURIComponent(encMsg);
+  try {
+    await navigator.clipboard.writeText(decodedMsg);
+    showToast("📋 ¡Mensaje copiado! Pégalo en tu WhatsApp de Opera GX.");
+  } catch(e) {
+    prompt("Copia el mensaje:", decodedMsg);
+  }
+  await window.markOrderWaNotified(idOrd);
+};
 
 function formOrder() {
   const users = (state.data.users || []).filter(u => u.active);
@@ -2660,34 +2894,13 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "notify-wa-corporate") {
-    const rawPhone = btn.dataset.phone || "";
-    const cleanTel = cleanPhoneNumber(rawPhone);
-    if (!cleanTel) {
-      alert("Este pedido no tiene un teléfono válido registrado.");
-      return;
-    }
-    const idOrd = btn.dataset.id;
-    const clientName = btn.dataset.client || "Cliente";
-    const tipoOrd = btn.dataset.type || "Pedido";
-    const motivoOrd = btn.dataset.motivo ? ` (${btn.dataset.motivo})` : "";
-    const tmpl = state.waTemplate || "Hola {cliente}, tu pedido de {tipo} en Creaciones JJ ya se encuentra listo para retirar.";
-    const msg = tmpl
-      .replace(/{cliente}/g, clientName)
-      .replace(/{tipo}/g, tipoOrd + motivoOrd)
-      .replace(/{id}/g, idOrd);
-
-    const waUrl = `https://api.whatsapp.com/send?phone=${cleanTel}&text=${encodeURIComponent(msg)}`;
-    window.open(waUrl, "_blank");
-
-    try {
-      await api("profile_update_order", { id: idOrd, changes: { waNotificado: "Sí" } });
-      const targetOrd = (state.data.finishedOrders || []).find(o => String(o.id) === String(idOrd));
-      if (targetOrd) targetOrd.waNotificado = "Sí";
-      showToast("✅ Marcado como notificado por WhatsApp.");
-      render();
-    } catch(e) {
-      console.warn("Error guardando waNotificado:", e);
-    }
+    openWhatsAppModal({
+      id: btn.dataset.id,
+      phone: btn.dataset.phone,
+      client: btn.dataset.client,
+      type: btn.dataset.type,
+      motivo: btn.dataset.motivo
+    });
     return;
   }
 });
