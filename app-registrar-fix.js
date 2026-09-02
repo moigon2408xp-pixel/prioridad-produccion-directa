@@ -879,7 +879,14 @@ function queueView() {
 }
 
 function historyView() {
-  const rawOrders = state.data.finishedOrders || [];
+  const rawOrders = (state.data.finishedOrders || []).slice().sort((a, b) => {
+    const dA = safeParseDate(a.finProduccion || a.entrega) || new Date(0);
+    const dB = safeParseDate(b.finProduccion || b.entrega) || new Date(0);
+    if (dA.getTime() !== dB.getTime()) return dB.getTime() - dA.getTime();
+    const numA = parseInt((a.id.match(/\d+/) || [0])[0], 10);
+    const numB = parseInt((b.id.match(/\d+/) || [0])[0], 10);
+    return numB - numA;
+  });
   const orders = filterOrdersBySearch(rawOrders);
   
   const pendingWa = orders.filter(o => o.telefono && o.waNotificado !== "Sí" && String(o.estado).toLowerCase() !== "cancelado");
@@ -986,6 +993,25 @@ function teamView() {
     </div>
     <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
     <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos que coincidan con la búsqueda.</div>'}</div>
+
+    ${(() => {
+      const readyOrders = (state.data.finishedOrders || []).filter(o => {
+        const est = String(o.estado || "").toLowerCase().trim();
+        return est === "terminado";
+      });
+      if (!readyOrders.length) return '';
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; padding:14px 18px; background:rgba(46,125,50,0.08); border:1px solid #2e7d32; border-radius:var(--radius-md); flex-wrap:wrap; gap:10px;">
+          <div>
+            <strong style="color:#1b5e20; font-size:14px;">📦 ${readyOrders.length} PEDIDO(S) TERMINADOS LISTOS EN TALLER</strong>
+            <p style="margin:2px 0 0; font-size:12px; color:var(--text-muted);">Completados por los trabajadores, listos para revisión, entrega al cliente o aviso por WhatsApp.</p>
+          </div>
+          <button type="button" class="secondary-button" style="background:#2e7d32; color:white; border:none; padding:8px 14px; font-weight:bold; cursor:pointer;" onclick="state.screen='history'; render();">
+            Ver en Historial (${readyOrders.length}) ➔
+          </button>
+        </div>
+      `;
+    })()}
   `;
 }
 
