@@ -1,2595 +1,1492 @@
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
- * Versión 11.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
+ * Versión 11.0 Definitiva - Google Apps Script Backend (Code.gs)
  * "Creaciones JJ - Ochoa & Risquez"
- * Saneamiento visual de Responsable (de "1" a Valentina/Sin asignar) y
- * autocompletado inteligente de número de teléfono mediante directorio.
+ * Incluye auto-sanado de filas antiguas desfasadas en Google Sheets,
+ * búsqueda inteligente de teléfonos por cliente y corrección de Responsable.
  */
 
-const $ = (selector) => document.querySelector(selector);
-
-const store = {
-  get(key, fallback) {
-    try {
-      return JSON.parse(localStorage.getItem(key)) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  },
-  set(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
-  },
-  remove(key) {
-    localStorage.removeItem(key);
-  },
-};
-
-// ==== 1. GESTIÓN Y INYECCIÓN REACTIVA DE TEMAS Y COLORES ====
-function applyTheme() {
-  const currentTheme = store.get("pp_theme", "light");
-  const currentAccent = store.get("pp_accent", "blue");
-  const customColors = store.get("pp_custom_colors", {});
-  
-  document.documentElement.setAttribute("data-theme", currentTheme);
-  document.documentElement.setAttribute("data-accent", currentAccent);
-  
-  let styleEl = $("#dynamic-theme-style");
-  if (!styleEl) {
-    styleEl = document.createElement("style");
-    styleEl.id = "dynamic-theme-style";
-    document.head.appendChild(styleEl);
-  }
-  
-  let cssRules = [];
-  if (customColors.primary) {
-    cssRules.push(`--primary-color: ${customColors.primary} !important;`);
-    cssRules.push(`--primary-hover: ${customColors.primary} !important;`);
-  }
-  if (customColors.cardBg) {
-    cssRules.push(`--bg-card: ${customColors.cardBg} !important;`);
-  }
-  if (customColors.textMain) {
-    cssRules.push(`--text-main: ${customColors.textMain} !important;`);
-  }
-  if (customColors.mainBg) {
-    cssRules.push(`--bg-main: ${customColors.mainBg} !important;`);
-  }
-  
-  if (cssRules.length > 0) {
-    styleEl.textContent = `:root, [data-theme="dark"], [data-theme="light"] { ${cssRules.join(" ")} }`;
-  } else {
-    styleEl.textContent = "";
-  }
-
-  const icon = $("#theme-icon");
-  if (icon) icon.textContent = currentTheme === "dark" ? "☀️" : "🌙";
+function doGet(e) {
+  return procesarSolicitud(e);
 }
 
-function toggleTheme() {
-  const currentTheme = store.get("pp_theme", "light");
-  const nextTheme = currentTheme === "dark" ? "light" : "dark";
-  store.set("pp_theme", nextTheme);
-  applyTheme();
+function doPost(e) {
+  return procesarSolicitud(e);
 }
 
-function setAccent(color) {
-  store.remove("pp_custom_colors");
-  store.set("pp_accent", color);
-  applyTheme();
-  showToast("Tema de color cambiado.");
-}
-
-function saveCustomColor(key, value) {
-  const customColors = store.get("pp_custom_colors", {});
-  customColors[key] = value;
-  store.set("pp_custom_colors", customColors);
-  applyTheme();
-}
-
-function resetCustomTheme() {
-  store.remove("pp_custom_colors");
-  store.set("pp_theme", "light");
-  store.set("pp_accent", "blue");
-  applyTheme();
-  showToast("Tema restablecido a valores por defecto.");
-}
-
-window.toggleTheme = toggleTheme;
-window.setAccent = setAccent;
-window.saveCustomColor = saveCustomColor;
-window.resetCustomTheme = resetCustomTheme;
-
-function cleanPhoneNumber(phone = "") {
-  let num = String(phone || "").replace(/\D/g, "");
-  if (!num) return "";
-  if (num.startsWith("0")) num = "58" + num.slice(1);
-  else if (num.length === 10 && !num.startsWith("58")) num = "58" + num;
-  return num;
-}
-
-// ==== 2. FORMATEO Y PARSEO DE FECHAS ESTANDARIZADO ====
-function safeParseDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  let str = String(value).trim();
-  if (!str) return null;
-  
-  if (str.includes(" - ")) str = str.split(" - ")[0];
-  if (str.includes(" a las ")) str = str.split(" a las ")[0];
-  
-  var isoMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  var timeMatch = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-  
-  if (isoMatch) {
-    var year = parseInt(isoMatch[1], 10);
-    var month = parseInt(isoMatch[2], 10) - 1;
-    var day = parseInt(isoMatch[3], 10);
-    var hours = 18;
-    var minutes = 0;
-    
-    if (timeMatch) {
-      hours = parseInt(timeMatch[1], 10);
-      minutes = parseInt(timeMatch[2], 10);
-      var ap = timeMatch[3] ? timeMatch[3].toUpperCase() : "";
-      if (ap === "PM" && hours < 12) hours += 12;
-      if (ap === "AM" && hours === 12) hours = 0;
-    }
-    
-    const parsedISO = new Date(year, month, day, hours, minutes);
-    if (!isNaN(parsedISO.getTime())) return parsedISO;
-  }
-  
-  if (str.includes("/")) {
-    const parts = str.split(" ")[0].split("/");
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const year = parseInt(parts[2], 10);
-      const parsed = new Date(year, month, day);
-      if (!isNaN(parsed.getTime())) return parsed;
-    }
-  }
-  
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function formatDate(value) {
-  const date = safeParseDate(value);
-  if (!date) return value ? String(value) : "Sin fecha";
+function procesarSolicitud(e) {
   try {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    let hours = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${day}/${month}/${year} a las ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-  } catch (e) {
-    return String(value);
+    var params = {};
+    
+    // 1. Extraer parámetros URL (GET)
+    if (e && e.parameter) {
+      for (var k in e.parameter) {
+        params[k] = e.parameter[k];
+      }
+    }
+    
+    // 2. Extraer parámetros del cuerpo (POST JSON)
+    if (e && e.postData && e.postData.contents) {
+      try {
+        var body = JSON.parse(e.postData.contents);
+        for (var key in body) {
+          params[key] = body[key];
+        }
+      } catch (errJson) {
+        params["rawBody"] = e.postData.contents;
+      }
+    }
+    
+    var action = (params.action || params.accion || params.type || params.act || "").toString().trim();
+    var result = ppDespachar_(action, params);
+    return responderJSON(result);
+    
+  } catch (err) {
+    return responderJSON({
+      ok: false,
+      exito: false,
+      error: err.toString(),
+      mensaje: err.message || err.toString()
+    });
   }
 }
 
-// Universal Normalizers
-const normalizeClient = (c) => {
-  if (!c) return { name: '', phone: '', delivery: 'No', zona: '', direccion: '' };
-  if (Array.isArray(c)) {
+function responderJSON(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ==== ENRUTADOR DE ACCIONES ====
+function ppDespachar_(action, params) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var actionLower = action.toLowerCase();
+  
+  // 1. INICIO DE SESIÓN
+  if (actionLower === "profile_login" || actionLower === "login") {
+    return ppIniciarSesion_(ss, params);
+  }
+  
+  // 2. DASHBOARD / CARGAR DATOS / REFRESCAR
+  if (actionLower === "profile_dashboard" || actionLower === "dashboard" || actionLower === "refrescarmodulo" || actionLower === "") {
+    return ppDashboard_(ss, params);
+  }
+  
+  // 3. CREAR PEDIDO
+  if (actionLower === "profile_create_order" || actionLower === "crearpedido" || actionLower === "create_order") {
+    return ppCrearPedido_(ss, params);
+  }
+  
+  // 4. ACTUALIZAR PEDIDO
+  if (actionLower === "profile_update_order" || actionLower === "actualizarpedido" || actionLower === "update_order" || actionLower === "cerrarordenconfotos") {
+    return ppActualizarPedido_(ss, params);
+  }
+  
+  // 5. REABRIR PEDIDO TERMINADO
+  if (actionLower === "profile_reopen_order" || actionLower === "reabrirpedido") {
+    return ppReabrirPedido_(ss, params);
+  }
+
+  // 6. ELIMINAR PEDIDO
+  if (actionLower === "profile_delete_order" || actionLower === "eliminarpedido" || actionLower === "delete_order") {
+    return ppEliminarPedido_(ss, params);
+  }
+
+  // 6b. ARCHIVAR PEDIDOS ANTIGUOS (>60 DÍAS)
+  if (actionLower === "profile_archive_old_orders" || actionLower === "archivar_antiguos") {
+    return ppArchivarPedidosAntiguos_(ss, params);
+  }
+
+  // 6c. COSTOS E INGRESOS (SOLO JEFES)
+  if (actionLower === "profile_save_cost" || actionLower === "guardarcosto") {
+    return ppGuardarCosto_(ss, params);
+  }
+
+  // 6d. HORARIOS Y TURNOS
+  if (actionLower === "profile_get_schedules" || actionLower === "obtenerhorarios") {
+    return { ok: true, exito: true, schedules: ppObtenerHorarios_(ss) };
+  }
+  if (actionLower === "profile_save_schedule" || actionLower === "guardarhorario") {
+    return ppGuardarHorario_(ss, params);
+  }
+
+  // 7. GESTIÓN DE USUARIOS
+  if (actionLower === "profile_create_user" || actionLower === "crearusuario") {
+    return ppCrearUsuario_(ss, params);
+  }
+  if (actionLower === "profile_toggle_user" || actionLower === "actualizarusuario") {
+    return ppToggleUsuario_(ss, params);
+  }
+
+  // 8. GESTIÓN DE CLIENTES FRECUENTES
+  if (actionLower === "profile_create_client" || actionLower === "guardarcliente") {
+    return ppGuardarCliente_(ss, params);
+  }
+  if (actionLower === "profile_delete_client" || actionLower === "eliminarcliente") {
+    return ppEliminarCliente_(ss, params);
+  }
+
+  // 9. GESTIÓN DE TIPOS DE TRABAJO
+  if (actionLower === "profile_create_type" || actionLower === "guardartipo") {
+    return ppGuardarTipo_(ss, params);
+  }
+  if (actionLower === "profile_delete_type" || actionLower === "eliminartipo") {
+    return ppEliminarTipo_(ss, params);
+  }
+
+  // 10. GESTIÓN DE MOTIVOS
+  if (actionLower === "profile_create_motivo" || actionLower === "guardarmotivo") {
+    return ppGuardarMotivo_(ss, params);
+  }
+  if (actionLower === "profile_delete_motivo" || actionLower === "eliminarmotivo") {
+    return ppEliminarMotivo_(ss, params);
+  }
+
+  throw new Error("Acción no reconocida: " + action);
+}
+
+function normalizeNameStr_(str) {
+  return String(str || "").toLowerCase().trim()
+    .replace(/[áàäâ]/g, "a")
+    .replace(/[éèëê]/g, "e")
+    .replace(/[íìïî]/g, "i")
+    .replace(/[óòöô]/g, "o")
+    .replace(/[úùüû]/g, "u");
+}
+
+function cleanPinStr_(val) {
+  var s = String(val || "").trim();
+  if (s.indexOf(".") !== -1) s = s.split(".")[0].trim();
+  return s;
+}
+
+// ==== 1. INICIO DE SESIÓN ====
+function ppIniciarSesion_(ss, params) {
+  var userName = String(params.name || params.user || params.nombre || "").trim();
+  var userPin = String(params.pin || params.clave || "").trim();
+  
+  if (!userName || !userPin) {
+    throw new Error("Nombre de usuario y PIN son requeridos.");
+  }
+  
+  var sheetUsr = getOrCreateSheetFlexible_(ss, "Usuarios", ["Users", "Trabajadores", "Personal"], ["Nombre", "Rol", "PIN", "Activo"]);
+  var data = sheetUsr.getDataRange().getValues();
+  
+  var normUser = normalizeNameStr_(userName);
+  var cleanInputPin = cleanPinStr_(userPin);
+  var hashedPin = ppHash_(cleanInputPin);
+  
+  // 1. Buscar coincidencia insensible a tildes y mayúsculas
+  for (var i = 1; i < data.length; i++) {
+    var rName = String(data[i][0] || "").trim();
+    var rRole = String(data[i][1] || "trabajador").trim().toLowerCase();
+    var rawPin = String(data[i][2] || "").trim();
+    var cleanRowPin = cleanPinStr_(rawPin);
+    
+    var rActive = data[i][3];
+    var isActive = (rActive !== false && String(rActive).toUpperCase() !== "NO" && String(rActive).toUpperCase() !== "FALSE");
+    
+    var normRowName = normalizeNameStr_(rName);
+    
+    if (normRowName === normUser || (normRowName && normUser && (normRowName.indexOf(normUser) !== -1 || normUser.indexOf(normRowName) !== -1))) {
+      if (cleanRowPin !== cleanInputPin && rawPin !== cleanInputPin && cleanRowPin !== hashedPin && rawPin !== hashedPin) {
+        throw new Error("PIN de acceso incorrecto para " + rName + ". Revisa el PIN de 6 dígitos.");
+      }
+      if (!isActive) {
+        throw new Error("Este perfil de usuario (" + rName + ") se encuentra desactivado.");
+      }
+      
+      var token = Utilities.base64Encode(rName + ":" + Date.now());
+      return {
+        ok: true,
+        exito: true,
+        session: {
+          name: rName,
+          nombre: rName,
+          role: rRole || "manager",
+          rol: rRole || "manager",
+          token: token
+        },
+        token: token
+      };
+    }
+  }
+  
+  // 2. Si no existe ningún usuario registrado o el usuario es Administrador / Moises / Manager, crearlo automáticamente
+  if (data.length <= 1 || normUser.indexOf("moises") !== -1 || normUser.indexOf("manager") !== -1 || normUser.indexOf("jefe") !== -1 || normUser.indexOf("jefa") !== -1 || normUser.indexOf("admin") !== -1) {
+    var defaultRole = (normUser.indexOf("jefe") !== -1) ? "jefe" : ((normUser.indexOf("jefa") !== -1) ? "jefa" : "manager");
+    sheetUsr.appendRow([userName, defaultRole, cleanInputPin, "Sí"]);
+    
+    var tokenNew = Utilities.base64Encode(userName + ":" + Date.now());
     return {
-      name: String(c[0] || '').trim(),
-      phone: cleanPhoneNumber(c[1] || ''),
-      delivery: String(c[2] || 'No').trim(),
-      zona: String(c[3] || '').trim(),
-      direccion: String(c[4] || '').trim()
+      ok: true,
+      exito: true,
+      session: {
+        name: userName,
+        nombre: userName,
+        role: defaultRole,
+        rol: defaultRole,
+        token: tokenNew
+      },
+      token: tokenNew
     };
   }
-  if (typeof c === 'object') {
-    return {
-      name: String(c.name || c.nombre || c.Nombre || c.cliente || c[0] || '').trim(),
-      phone: cleanPhoneNumber(c.phone || c.telefono || c.Telefono || c.celular || c.tel || c[1] || ''),
-      delivery: String(c.delivery || c.Delivery || 'No').trim(),
-      zona: String(c.zona || c.Zona || '').trim(),
-      direccion: String(c.direccion || c.Direccion || '').trim()
+
+  throw new Error("El usuario '" + userName + "' no se encuentra registrado en el sistema. Solicita al Jefe o Manager que cree tu perfil.");
+}
+
+// ==== AUXILIAR DE ESTRUCTURA Y ENCABEZADOS DE HOJA ====
+function ensureCanonicalHeaders_(sheet) {
+  var canonical = [
+    "ID", "Fecha_entrada", "Cliente", "Tipo", "Motivo", "Descripcion", "Cantidad",
+    "Entrega", "Hora_entrega", "Tiempo_estimado", "Responsable", "Estado",
+    "Urgente", "Diseno", "Material", "Notas", "Prioridad_auto",
+    "Tiempo_entregar", "Score_tecnico", "Posicion", "Cerrado",
+    "Fecha_cierre", "Inicio_produccion", "Fin_produccion", "Duracion_real_min",
+    "Comentario_cierre", "Fotos_Referencia", "Fotos_Evidencia", "Entregado_en", "Retraso_min",
+    "Cerrado_por", "UltimaPausa", "TiempoPausadoMin", "Telefono"
+  ];
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow === 0) {
+    sheet.appendRow(canonical);
+    return canonical;
+  }
+  
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return String(h).toLowerCase().replace(/[^a-z0-9]/g, ""); });
+  
+  canonical.forEach(function(colName) {
+    var key = colName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (headersLower.indexOf(key) === -1) {
+      var nextCol = headers.length + 1;
+      sheet.getRange(1, nextCol).setValue(colName);
+      headers.push(colName);
+      headersLower.push(key);
+    }
+  });
+  
+  return headers;
+}
+
+// ==== 2. DASHBOARD Y CARGA INTEGRAL ====
+function ppDashboard_(ss, params) {
+  // A. Usuarios
+  var sheetUsr = getOrCreateSheetFlexible_(ss, "Usuarios", ["Users", "Trabajadores"], ["Nombre", "Rol", "PIN", "Activo"]);
+  var dataUsr = sheetUsr.getDataRange().getValues();
+  var users = [];
+  for (var u = 1; u < dataUsr.length; u++) {
+    var uName = String(dataUsr[u][0] || "").trim();
+    if (!uName) continue;
+    var uRole = String(dataUsr[u][1] || "trabajador").trim().toLowerCase();
+    var uActiveRaw = dataUsr[u][3];
+    var uActive = (uActiveRaw !== false && String(uActiveRaw).toUpperCase() !== "NO" && String(uActiveRaw).toUpperCase() !== "FALSE");
+    users.push({
+      name: uName,
+      nombre: uName,
+      role: uRole,
+      rol: uRole,
+      active: uActive,
+      activo: uActive
+    });
+  }
+
+  // B. Tipos de trabajo
+  var sheetTipos = getOrCreateSheetFlexible_(ss, "Tipos", ["Tipos de Trabajo", "TiposTrabajo", "Servicios"], ["Tipo", "DiasEstimados"]);
+  var dataTipos = sheetTipos.getDataRange().getValues();
+  var typesSet = {};
+  var typesList = [];
+  for (var t = 1; t < dataTipos.length; t++) {
+    var tVal = String(dataTipos[t][0] || "").trim();
+    if (tVal && tVal.toLowerCase() !== "tipo" && !typesSet[tVal.toLowerCase()]) {
+      typesSet[tVal.toLowerCase()] = true;
+      typesList.push(tVal);
+    }
+  }
+
+  // C. Clientes Frecuentes (con Delivery, Zona y Dirección)
+  var sheetTel = getOrCreateSheetFlexible_(ss, "Clientes", ["Telefonos", "Teléfonos", "Directorio", "Contactos"], ["Nombre", "Telefono", "Delivery", "Zona", "Direccion"]);
+  var dataTel = sheetTel.getDataRange().getValues();
+  var phonesList = [];
+  var clientsSet = {};
+  var clientDeliveryMap = {};
+  for (var p = 1; p < dataTel.length; p++) {
+    var cName     = String(dataTel[p][0] || "").trim();
+    var cTel      = String(dataTel[p][1] || "").trim();
+    var cDelivery = String(dataTel[p][2] || "No").trim();
+    var cZona     = String(dataTel[p][3] || "").trim();
+    var cDirec    = String(dataTel[p][4] || "").trim();
+    if (cName && cName.toLowerCase() !== "nombre" && cName.toLowerCase() !== "cliente") {
+      clientsSet[cName.toLowerCase()] = cTel;
+      clientDeliveryMap[cName.toLowerCase()] = { delivery: cDelivery, zona: cZona, direccion: cDirec };
+      phonesList.push({
+        name: cName, nombre: cName, cliente: cName,
+        phone: cTel, telefono: cTel, celular: cTel,
+        delivery: cDelivery, zona: cZona, direccion: cDirec
+      });
+    }
+  }
+
+  // C2. Motivos / Temáticas
+  var sheetMotivos = getOrCreateSheetFlexible_(ss, "Motivos", ["Tematicas", "Temáticas"], ["Motivo"]);
+  var dataMotivos = sheetMotivos.getDataRange().getValues();
+  var motivosList = [];
+  for (var mv = 1; mv < dataMotivos.length; mv++) {
+    var mvVal = String(dataMotivos[mv][0] || "").trim();
+    if (mvVal && mvVal.toLowerCase() !== "motivo") motivosList.push(mvVal);
+  }
+
+  // D. Pedidos
+  var sheetPed = getOrCreateSheetFlexible_(ss, "Pedidos", ["Orders", "Trabajos"], []);
+  var headers = ensureCanonicalHeaders_(sheetPed);
+  var getCol = makeColumnGetter_(headers);
+  
+  var idxId = getCol(["id", "código", "codigo", "pedido"], 0);
+  var idxCliente = getCol(["cliente", "client", "empresa"], 2);
+  var idxTipo = getCol(["tipo", "servicio", "trabajo"], 3);
+  var idxMotivo = getCol(["motivo", "temática", "tematica", "tema"], 4);
+  var idxDescripcion = getCol(["descripcion", "descripción", "detalle"], 5);
+  var idxCantidad = getCol(["cantidad", "cant"], 6);
+  var idxEntrega = getCol(["entrega", "fecha", "deadline"], 7);
+  var idxHoraEntrega = getCol(["hora_entrega", "hora"], 8);
+  var idxResponsable = getCol(["responsable", "encargado", "asignado"], 10);
+  var idxEstado = getCol(["estado", "status", "estatus"], 11);
+  var idxDiseno = getCol(["diseno", "diseño"], 13);
+  var idxMaterial = getCol(["material", "materiales"], 14);
+  var idxNotas = getCol(["notas", "nota", "observaciones"], 15);
+  var idxCerrado = getCol(["cerrado", "cerrada"], 20);
+  var idxInicioProd = getCol(["inicioproduccion", "inicio_produccion", "inicio"], 22);
+  var idxFinProd = getCol(["finproduccion", "fin_produccion", "fin"], 23);
+  var idxDuracionReal = getCol(["duracionrealmin", "duracion_real_min", "duracion"], 24);
+  var idxComentario = getCol(["comentariocierre", "comentario_cierre"], 25);
+  var idxFotosRef = getCol(["fotosreferencia", "referencias", "fotos_referencia"], 26);
+  var idxFotosEvi = getCol(["fotosevidencia", "evidencias", "evidenciasdrive", "fotos_evidencia"], 27);
+  var idxUltPausa = getCol(["ultimapausa", "ultima_pausa"], 31);
+  var idxTiempoPausa = getCol(["tiempopausadomin", "tiempo_pausado_min", "tiempopausa"], 32);
+  var idxTelefono = getCol(["telefono", "teléfono", "phone", "celular"], 33);
+
+  var dataPed = sheetPed.getDataRange().getValues();
+  var allOrders = [];
+
+  for (var o = 1; o < dataPed.length; o++) {
+    var row = dataPed[o];
+    var idVal = String(row[idxId] || "").trim();
+    if (!idVal) continue;
+
+    var orderTipo = String(row[idxTipo] || "").trim();
+    if (orderTipo && !typesSet[orderTipo.toLowerCase()]) {
+      typesSet[orderTipo.toLowerCase()] = true;
+      typesList.push(orderTipo);
+    }
+
+    var orderCliente = String(row[idxCliente] || "").trim();
+    var orderTel = String(row[idxTelefono] || "").trim();
+    var respVal = String(row[idxResponsable] || "Sin asignar").trim();
+    var estadoVal = String(row[idxEstado] || "Pendiente").trim();
+
+    // AUTO-SANEAMIENTO DE FILAS DESFASADAS EN GOOGLE SHEETS
+    if (respVal === "1" || !isNaN(respVal) || respVal === String(row[idxCantidad])) {
+      respVal = "Valentina";
+      sheetPed.getRange(o + 1, idxResponsable + 1).setValue(respVal);
+    }
+
+    if (["valentina", "jeanette", "carla", "manager", "jefa"].includes(estadoVal.toLowerCase())) {
+      respVal = estadoVal;
+      estadoVal = "Pendiente";
+      sheetPed.getRange(o + 1, idxEstado + 1).setValue(estadoVal);
+      sheetPed.getRange(o + 1, idxResponsable + 1).setValue(respVal);
+    }
+
+    // Auto-sanar número de teléfono si el cliente está registrado en directorio
+    if (!orderTel && orderCliente && clientsSet[orderCliente.toLowerCase()]) {
+      orderTel = clientsSet[orderCliente.toLowerCase()];
+      if (orderTel) {
+        sheetPed.getRange(o + 1, idxTelefono + 1).setValue(orderTel);
+      }
+    }
+
+    var orderObj = {
+      id: idVal,
+      cliente: orderCliente,
+      tipo: orderTipo,
+      motivo: String(row[idxMotivo] || "").trim(),
+      descripcion: String(row[idxDescripcion] || "").trim(),
+      cantidad: Number(row[idxCantidad] || 1),
+      entrega: parseFechaISO_(row[idxEntrega], row[idxHoraEntrega]),
+      horaEntrega: String(row[idxHoraEntrega] || "").trim(),
+      responsable: respVal,
+      estado: estadoVal,
+      diseno: String(row[idxDiseno] || "No").trim(),
+      material: String(row[idxMaterial] || "No").trim(),
+      notas: String(row[idxNotas] || "").trim(),
+      cerrado: String(row[idxCerrado] || "No").trim(),
+      inicioProduccion: row[idxInicioProd] ? parseFechaISO_(row[idxInicioProd]) : "",
+      finProduccion: row[idxFinProd] ? parseFechaISO_(row[idxFinProd]) : "",
+      duracionRealMin: Number(row[idxDuracionReal] || 0),
+      comentarioCierre: String(row[idxComentario] || "").trim(),
+      fotoReferencia: String(row[idxFotosRef] || "").trim(),
+      fotoEvidencia: String(row[idxFotosEvi] || "").trim(),
+      evidenciasDrive: String(row[idxFotosEvi] || "").trim(),
+      ultimaPausa: row[idxUltPausa] ? parseFechaISO_(row[idxUltPausa]) : "",
+      tiempoPausadoMin: Number(row[idxTiempoPausa] || 0),
+      telefono: orderTel
     };
-  }
-  return { name: String(c).trim(), phone: '', delivery: 'No', zona: '', direccion: '' };
-};
 
-const normalizeType = (t) => {
-  if (!t) return "";
-  if (Array.isArray(t)) return String(t[0] || "").trim();
-  if (typeof t === "object") {
-    return String(t.type || t.tipo || t.Tipo || t.nombre || t.trabajo || t.name || t[0] || "").trim();
-  }
-  return String(t).trim();
-};
-
-const normalizeOrder = (o) => {
-  let resp = String(o.responsable || o.Responsable || "").trim();
-  if (!resp || resp === "1" || !isNaN(resp)) {
-    resp = "Valentina"; // Fallback a Valentina si era "1" por desfasamiento
+    allOrders.push(orderObj);
   }
 
-  let phone = cleanPhoneNumber(o.telefono || o.Telefono || o['Teléfono'] || o.phone || "");
+  // E. Historial desde Proyectos_Terminados
+  var sheetTerm = getOrCreateSheetFlexible_(ss, "Proyectos_Terminados", ["Historial", "Finished"], [
+    "ID", "Cliente", "Tipo", "Motivo", "Responsable", "Estado", "Entrega", "Inicio_produccion", "Fin_produccion", "Duracion_real_min", "Comentario_cierre", "Fotos_Referencia", "Fotos_Evidencia", "Diseño", "Notas", "Costo"
+  ]);
+  ensureCanonicalTerminadosHeaders_(sheetTerm);
+  var dataTerm = sheetTerm.getDataRange().getValues();
+
+  var finishedOrdersMap = {};
+  var dailyPerformance = {};
+  var knownWorkers = ["valentina", "jeanette", "moises", "eloy", "camila", "jorge", "julieta", "carla"];
+
+  for (var j = 1; j < dataTerm.length; j++) {
+    var rTerm = dataTerm[j];
+    var tId = String(rTerm[0] || "").trim();
+    if (!tId) continue;
+
+    var tCliente = String(rTerm[1] || "").trim();
+    var tTipo = String(rTerm[2] || "").trim();
+    var tMotivo = String(rTerm[3] || "").trim();
+    var tResp = String(rTerm[4] || "").trim();
+    var tEstado = String(rTerm[5] || "Terminado").trim();
+    var tEntrega = rTerm[6] ? parseFechaISO_(rTerm[6]) : "";
+    var tInicio = rTerm[7] ? parseFechaISO_(rTerm[7]) : "";
+    var tFin = rTerm[8] ? parseFechaISO_(rTerm[8]) : "";
+    var tDuracion = Number(rTerm[9] || 0);
+    var tComentario = String(rTerm[10] || "").trim();
+    var tFotosRef = String(rTerm[11] || "").trim();
+    var tFotosEvi = String(rTerm[12] || "").trim();
+    var tDiseno = String(rTerm[13] || "Sí").trim();
+    var tNotas = String(rTerm[14] || "").trim();
+    var tCosto = Number(rTerm[15] || 0);
+
+    // AUTO-SANEAMIENTO DE COLUMNAS DESFASADAS EN PROYECTOS_TERMINADOS
+    if (tResp.toLowerCase() === "mario bros" || (!knownWorkers.includes(tResp.toLowerCase()) && knownWorkers.includes(tMotivo.toLowerCase()))) {
+      var realMotivo = (tResp.toLowerCase() === "mario bros") ? tResp : tMotivo;
+      var realResp = knownWorkers.includes(tMotivo.toLowerCase()) ? tMotivo : "Valentina";
+      tMotivo = realMotivo;
+      tResp = realResp;
+      tEstado = "Terminado";
+      try {
+        sheetTerm.getRange(j + 1, 4).setValue(tMotivo);
+        sheetTerm.getRange(j + 1, 5).setValue(tResp);
+        sheetTerm.getRange(j + 1, 6).setValue(tEstado);
+      } catch(e) {}
+    }
+
+    if (knownWorkers.includes(tEstado.toLowerCase())) {
+      tResp = tEstado;
+      tEstado = "Terminado";
+      try {
+        sheetTerm.getRange(j + 1, 5).setValue(tResp);
+        sheetTerm.getRange(j + 1, 6).setValue(tEstado);
+      } catch(e) {}
+    }
+
+    if (!isNaN(tComentario) && Number(tComentario) > 0 && tDuracion === 0) {
+      tDuracion = Number(tComentario);
+      tComentario = "";
+      try {
+        sheetTerm.getRange(j + 1, 10).setValue(tDuracion);
+        sheetTerm.getRange(j + 1, 11).setValue(tComentario);
+      } catch(e) {}
+    }
+
+    if (!tNotas && tComentario && isNaN(tComentario)) {
+      tNotas = tComentario;
+      try {
+        sheetTerm.getRange(j + 1, 15).setValue(tNotas);
+      } catch(e) {}
+    }
+
+    if (!["terminado", "entregado", "cancelado"].includes(tEstado.toLowerCase())) {
+      tEstado = "Terminado";
+      try {
+        sheetTerm.getRange(j + 1, 6).setValue(tEstado);
+      } catch(e) {}
+    }
+
+    var fOrd = {
+      id: tId,
+      cliente: tCliente,
+      tipo: tTipo,
+      motivo: tMotivo,
+      responsable: tResp,
+      estado: tEstado,
+      entrega: tEntrega,
+      inicioProduccion: tInicio,
+      finProduccion: tFin,
+      duracionRealMin: tDuracion,
+      comentarioCierre: tComentario,
+      fotoReferencia: tFotosRef,
+      fotoEvidencia: tFotosEvi,
+      diseno: tDiseno,
+      notas: tNotas,
+      costo: tCosto,
+      evidenciasDrive: tFotosEvi
+    };
+    finishedOrdersMap[tId] = fOrd;
+  }
+  
+  var finishedOrders = Object.keys(finishedOrdersMap).map(function(k) { return finishedOrdersMap[k]; });
+  
+  var todayLocalStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone() || "GMT-4", "yyyy-MM-dd");
+
+  for (var fIdx = 0; fIdx < finishedOrders.length; fIdx++) {
+    var fOrd = finishedOrders[fIdx];
+    var estLower = String(fOrd.estado || "").toLowerCase().trim();
+    if (estLower === "cancelado") continue;
+
+    var finDateStr = "";
+    if (fOrd.finProduccion) {
+      try {
+        finDateStr = Utilities.formatDate(new Date(fOrd.finProduccion), ss.getSpreadsheetTimeZone() || "GMT-4", "yyyy-MM-dd");
+      } catch (err) {
+        finDateStr = String(fOrd.finProduccion).split("T")[0];
+      }
+    }
+
+    if (finDateStr === todayLocalStr && fOrd.responsable) {
+      var rUser = fOrd.responsable;
+      if (!dailyPerformance[rUser]) {
+        dailyPerformance[rUser] = { completedToday: 0, totalMinToday: 0, orders: [] };
+      }
+      dailyPerformance[rUser].completedToday += 1;
+      dailyPerformance[rUser].totalMinToday += (fOrd.duracionRealMin || 0);
+      dailyPerformance[rUser].orders.push(fOrd);
+    }
+  }
+
+  var activeOrders = allOrders.filter(function(o) {
+    var est = o.estado.toLowerCase().trim();
+    var cer = o.cerrado.toLowerCase().trim();
+    return cer !== "sí" && cer !== "si" && est !== "terminado" && est !== "entregado" && est !== "cancelado";
+  });
+
+  var maxNum = 0;
+  for (var k in finishedOrdersMap) {
+    var m = k.match(/PED-(\d+)/i);
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  for (var a = 0; a < activeOrders.length; a++) {
+    var aOrd = activeOrders[a];
+    var mAct = aOrd.id.match(/PED-(\d+)/i);
+    if (mAct) {
+      var nA = parseInt(mAct[1], 10);
+      if (nA > maxNum) maxNum = nA;
+    }
+  }
+  var nextFreeIdNum = maxNum + 1;
+
+  for (var cIdx = 0; cIdx < activeOrders.length; cIdx++) {
+    var checkOrd = activeOrders[cIdx];
+    if (finishedOrdersMap[checkOrd.id]) {
+      var fixedId = "PED-" + String(nextFreeIdNum++).padStart(4, "0");
+      for (var r = 1; r < dataPed.length; r++) {
+        if (String(dataPed[r][idxId]).trim() === checkOrd.id) {
+          sheetPed.getRange(r + 1, idxId + 1).setValue(fixedId);
+          checkOrd.id = fixedId;
+          break;
+        }
+      }
+    }
+  }
+
+  var sessionUser = "";
+  if (params.token) {
+    try {
+      sessionUser = Utilities.newBlob(Utilities.base64Decode(params.token)).getDataAsString().split(":")[0];
+    } catch (eToken) {}
+  }
+  if (!sessionUser && params.user) sessionUser = String(params.user).trim();
+
+  var myOrders = activeOrders.filter(function(o) {
+    return sessionUser && o.responsable.toLowerCase() === sessionUser.toLowerCase();
+  });
+
+  var teamCritical = activeOrders.filter(function(o) {
+    var hs = o.entrega ? (new Date(o.entrega) - Date.now()) / 3600000 : Infinity;
+    return hs <= 4 || o.diseno.toLowerCase() === "no" || o.material.toLowerCase() === "no";
+  });
+
+  var struct = {
+    myOrders: myOrders,
+    teamCritical: teamCritical,
+    allOrders: activeOrders,
+    finishedOrders: finishedOrders,
+    users: users,
+    frequentClients: phonesList,
+    clientes: phonesList,
+    telefonos: phonesList,
+    frequentTypes: typesList,
+    tipos: typesList,
+    motivos: motivosList,
+    frequentMotivos: motivosList,
+    dailyPerformance: dailyPerformance,
+    schedules: ppObtenerHorarios_(ss),
+    horarios: ppObtenerHorarios_(ss),
+    waTemplate: "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."
+  };
 
   return {
-    id: String(o.id || o['ID Pedido'] || o.ID || "").trim(),
-    cliente: String(o.cliente || o.Cliente || "Sin cliente").trim(),
-    tipo: String(o.tipo || o['Tipo de trabajo'] || o.Tipo || o.trabajo || "Sin tipo").trim(),
-    motivo: String(o.motivo || o.Motivo || o['Temática'] || o.tematica || "").trim(),
-    descripcion: String(o.descripcion || o.Descripción || "").trim(),
-    entrega: String(o.entrega || o['Fecha entrega'] || o.Entrega || "").trim(),
-    responsable: resp,
-    estado: String(o.estado || o.Estado || "Pendiente").trim(),
-    diseno: String(o.diseno || o.diseño || "No").trim(),
-    material: String(o.material || o.Material || "No").trim(),
-    notas: String(o.notas || o.Notas || o.observaciones || o.Observaciones || "").trim(),
-    telefono: phone,
-    comentarioCierre: String(o.comentarioCierre || o.Comentario_cierre || "").trim(),
-    fotoReferencia: String(o.fotoReferencia || o.Fotos_Referencia || o.referencias || "").trim(),
-    fotoEvidencia: String(o.fotoEvidencia || o.Evidencias_Drive || o.evidenciasDrive || o.foto || "").trim(),
-    inicioProduccion: String(o.inicioProduccion || o.Inicio_produccion || "").trim(),
-    finProduccion: String(o.finProduccion || o.Fin_produccion || "").trim(),
-    duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
-    ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
-    tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausadoMin || 0),
-    cerrado: String(o.cerrado || o.Cerrado || "No").trim()
+    ok: true,
+    exito: true,
+    data: struct,
+    ...struct
   };
-};
-
-const normalizeUser = (u) => {
-  if (!u) return { name: "", role: "trabajador", active: true };
-  if (Array.isArray(u)) {
-    const isActArr = String(u[3] || "Sí").toLowerCase() === "sí" || u[3] === true || String(u[3]).toLowerCase() === "true";
-    return { name: String(u[0] || "").trim(), role: String(u[1] || "trabajador").toLowerCase().trim(), active: isActArr };
-  }
-  const isAct = typeof u.active === "boolean" ? u.active : (typeof u.activo === "boolean" ? u.activo : (String(u.active || u.activo || "Sí").toLowerCase() === "sí" || String(u.active || u.activo).toLowerCase() === "true"));
-  return {
-    name: String(u.name || u.nombre || u.Nombre || "").trim(),
-    role: String(u.role || u.rol || u.Perfil || "trabajador").toLowerCase().trim(),
-    active: isAct
-  };
-};
-
-const state = {
-  session: store.get("pp_profile_session", null),
-  frequentClients: [],
-  frequentMotivos: [],
-  frequentTypes: [],
-  waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
-  screen: "now",
-  searchQuery: "",
-  perfTimeframe: "today",
-  offline: false,
-  data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} },
-};
-
-const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
-  "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
-}[char]));
-
-// ==== 3. CÁLCULO DE PRIORIDAD Y COMPLEJIDAD ====
-const getEstimatedPrepDays = (tipo = "") => {
-  const t = tipo.toLowerCase();
-  if (t.includes("maqueta") || t.includes("caja explosiva") || t.includes("estructura")) return 4;
-  if (t.includes("piñata") || t.includes("banderín")) return 2;
-  return 1;
-};
-
-const priority = (order) => {
-  const deliveryDate = safeParseDate(order.entrega);
-  if (!deliveryDate) return "now";
-  
-  const now = new Date();
-
-  const deliveryInfo = (state.frequentClients || []).find(
-    c => c.name.toLowerCase() === (order.cliente || "").toLowerCase()
-  );
-  const hasDelivery = deliveryInfo && deliveryInfo.delivery === "Sí";
-  
-  let targetDeadline = new Date(deliveryDate);
-  if (hasDelivery) {
-    // Para pedidos con delivery, el límite de producción es el día anterior a las 8:00 PM (fin de jornada)
-    targetDeadline.setDate(targetDeadline.getDate() - 1);
-    targetDeadline.setHours(20, 0, 0, 0);
-  }
-
-  if (targetDeadline < now) return "overdue";
-  
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const checkDate = new Date(targetDeadline);
-  checkDate.setHours(0, 0, 0, 0);
-  
-  const prepDays = getEstimatedPrepDays(order.tipo);
-  const diffDays = Math.ceil((checkDate - todayStart) / (1000 * 60 * 60 * 24));
-  
-  if (diffDays <= 0 || diffDays <= prepDays) return "now";
-  if (diffDays <= prepDays + 1) return "today";
-  return "later";
-};
-
-const priorityLabel = {
-  overdue: "🚨 ¡RETRASADO!",
-  now: "Hacer ahora",
-  today: "Hacer hoy",
-  later: "Programar"
-};
-
-const active = (order) => {
-  const est = String(order.estado || "").toLowerCase().trim();
-  const cer = String(order.cerrado || "").toLowerCase().trim();
-  return cer !== "sí" && cer !== "si" && est !== "terminado" && est !== "entregado" && est !== "cancelado";
-};
-
-const operable = (order) => active(order);
-const isLead = () => {
-  const r = String(state.session?.role || "").toLowerCase().trim();
-  return ["manager", "jefe", "jefa"].includes(r);
-};
-
-function formatRoleLabel(roleStr) {
-  const r = String(roleStr || "").toLowerCase().trim();
-  if (r === "jefe") return "Jefe";
-  if (r === "jefa") return "Jefa";
-  if (r === "manager") return "Manager";
-  if (r === "trabajadora") return "Trabajadora";
-  return "Trabajador";
 }
 
-function getLocalDateStr(d = new Date()) {
-  const dateObj = (typeof d === "string" || typeof d === "number") ? new Date(d) : d;
-  if (!dateObj || isNaN(dateObj.getTime())) return "";
-  const year = dateObj.getFullYear();
-  const month = (dateObj.getMonth() + 1).toString().padStart(2, "0");
-  const day = dateObj.getDate().toString().padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-async function compressImageFile(file, maxWidth = 1200, maxHeight = 1200, quality = 0.8) {
-  if (!file || !file.type || !file.type.startsWith("image/")) return file;
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth || height > maxHeight) {
-          if (width > height) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          } else {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) return resolve(file);
-            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
-              type: "image/jpeg",
-              lastModified: Date.now()
-            });
-            resolve(compressedFile);
-          },
-          "image/jpeg",
-          quality
-        );
-      };
-      img.onerror = () => resolve(file);
-      img.src = e.target.result;
-    };
-    reader.onerror = () => resolve(file);
-    reader.readAsDataURL(file);
-  });
-}
-
-function showToast(message) {
-  const toast = $("#toast");
-  if (!toast) return;
-  toast.textContent = String(message || "Operación realizada");
-  toast.classList.add("show");
-  clearTimeout(window.ppToast);
-  window.ppToast = setTimeout(() => toast.classList.remove("show"), 3200);
-}
-
-function generateTimeOptions(selectedTime = "11:00 AM") {
-  const hours = [
-    "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
-    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
-    "07:00 PM", "08:00 PM", "09:00 PM"
-  ];
-  return hours.map(h => `<option value="${h}" ${h === selectedTime ? "selected" : ""}>${h}</option>`).join("");
-}
-
-// ==== 4. PEGADO MÁGICO AVANZADO PARA REPOSTERAS Y WHATSAPP ====
-function parseMagicPasteText(rawText) {
-  const result = {
-    cliente: "",
-    telefono: "",
-    tipo: "",
-    motivo: "",
-    fechaEntrega: "",
-    horaEntrega: "11:00 AM",
-    descripcion: rawText.trim()
-  };
+// ==== 3. CREAR NUEVO PEDIDO MAPEADO DINÁMICAMENTE ====
+function ppCrearPedido_(ss, params) {
+  var sheetPed = ss.getSheetByName("Pedidos") || ss.insertSheet("Pedidos");
+  var headers = ensureCanonicalHeaders_(sheetPed);
+  var f = params.form || params;
   
-  if (!rawText) return result;
+  // Obtener el ID numérico más alto en todas las hojas para evitar duplicar correlativos
+  var maxIdNum = 0;
+  var sheetNamesToScan = ["Pedidos", "Proyectos_Terminados", "Proyectos_Terminados_Historico"];
   
-  const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
-  
-  // 1. Detección de Cliente / Nombre
-  const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de)[:\s]+([^\n\r,*]+)/i);
-  if (clienteMatch) {
-    result.cliente = clienteMatch[1].trim();
-  } else {
-    // Buscar en directorio de clientes guardados
-    for (const c of (state.frequentClients || [])) {
-      if (c.name && rawText.toLowerCase().includes(c.name.toLowerCase())) {
-        result.cliente = c.name;
-        if (c.phone) result.telefono = c.phone;
-        break;
-      }
-    }
-    if (!result.cliente && lines.length > 0 && !lines[0].includes(":")) {
-      result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de)\b,?\s*/i, "").trim();
-    }
-  }
-  
-  // 2. Teléfono / WhatsApp
-  if (!result.telefono) {
-    const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
-    if (phoneMatch) {
-      result.telefono = cleanPhoneNumber(phoneMatch[0]);
-    }
-  }
-  
-  // 3. Motivo / Temática
-  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema|personaje|temática\/motivo)[:\s]+([^\n\r,*]+)/i);
-  if (motivoMatch) {
-    result.motivo = motivoMatch[1].trim();
-  } else {
-    for (const m of (state.frequentMotivos || [])) {
-      if (m && rawText.toLowerCase().includes(m.toLowerCase())) {
-        result.motivo = m;
-        break;
-      }
-    }
-  }
-
-  // 4. Tipo de Trabajo
-  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item|pedido)[:\s]+([^\n\r,*]+)/i);
-  if (typeMatch) {
-    result.tipo = typeMatch[1].trim();
-  } else {
-    for (const t of (state.frequentTypes || [])) {
-      if (t && rawText.toLowerCase().includes(t.toLowerCase())) {
-        result.tipo = t;
-        break;
-      }
-    }
-    if (!result.tipo) {
-      if (/topper/i.test(rawText)) result.tipo = "Topper";
-      else if (/piñata|pinata/i.test(rawText)) result.tipo = "Piñata";
-      else if (/maqueta/i.test(rawText)) result.tipo = "Maqueta";
-      else if (/banderín|banderin/i.test(rawText)) result.tipo = "Banderín";
-      else if (/caja/i.test(rawText)) result.tipo = "Caja Explosiva";
-    }
-  }
-  
-  // 5. Fecha de Entrega (Días de la semana, 'mañana', 'hoy', o fechas DD/MM/YYYY)
-  const lowerText = rawText.toLowerCase();
-  const today = new Date();
-  
-  if (/\bmañana\b/.test(lowerText)) {
-    const tom = new Date(today);
-    tom.setDate(tom.getDate() + 1);
-    result.fechaEntrega = tom.toISOString().split("T")[0];
-  } else if (/\bhoy\b/.test(lowerText)) {
-    result.fechaEntrega = today.toISOString().split("T")[0];
-  } else {
-    const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-    const dayMatch = rawText.match(/(?:entregar|fecha|para|el)[:\s]*([a-záéíóúñ]+)/i);
-    
-    if (dayMatch) {
-      const matchedWord = dayMatch[1].toLowerCase();
-      const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
-      
-      if (dayIdx !== -1) {
-        const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx));
-        const currentDayOfWeek = today.getDay();
-        
-        let diff = targetDayOfWeek - currentDayOfWeek;
-        if (diff <= 0) diff += 7;
-        
-        const targetDate = new Date();
-        targetDate.setDate(today.getDate() + diff);
-        result.fechaEntrega = targetDate.toISOString().split("T")[0];
-      }
-    }
-  }
-
-  if (!result.fechaEntrega) {
-    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/);
-    if (dateMatch) {
-      const parsedDate = safeParseDate(dateMatch[0]);
-      if (parsedDate) {
-        result.fechaEntrega = parsedDate.toISOString().split("T")[0];
-      }
-    }
-  }
-  
-  // 6. Hora de Entrega
-  const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
-  if (timeMatch) {
-    let hourNum = parseInt(timeMatch[1], 10);
-    const minStr = timeMatch[2] || "00";
-    const ampm = timeMatch[3].toUpperCase();
-    if (hourNum < 10) hourNum = "0" + hourNum;
-    result.horaEntrega = `${hourNum}:${minStr} ${ampm}`;
-  }
-
-  return result;
-}
-
-// HTTP API Fetch Handler con tiempo límite anti-congelamiento
-async function api(action, extra = {}) {
-  const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
-  const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
-  
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const response = await fetch(baseUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    const data = await response.json();
-    if (data && (data.ok || data.exito)) return data;
-    throw new Error(data?.error || data?.mensaje || "Error al procesar la solicitud.");
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error("La conexión con Google Sheets tardó demasiado. Revisa tu internet o vuelve a intentar.");
-    }
-    if (err.message && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
-      throw new Error("Error de conexión con Google Sheets. Verifica tu internet.");
-    }
-    throw err;
-  }
-}
-
-async function refresh(showMessage = true) {
-  const btnRefresh = $("#refresh");
-  if (btnRefresh) btnRefresh.textContent = "…";
-  try {
-    const response = await api("profile_dashboard");
-    const rawData = response.data || response || {};
-    
-    const rawClients = rawData.frequentClients || rawData.clients || rawData.clientes || rawData.telefonos || [];
-    const rawTypes = rawData.frequentTypes || rawData.types || rawData.tipos || rawData.tiposTrabajo || [];
-    
-    state.frequentClients = rawClients.map(normalizeClient).filter(c => c.name && c.name.toLowerCase() !== "nombre");
-    state.frequentTypes = rawTypes.map(normalizeType).filter(t => t && t.toLowerCase() !== "tipo");
-    
-    const rawMotivos = rawData.motivos || rawData.frequentMotivos || [];
-    state.frequentMotivos = rawMotivos.filter(m => m && m.toLowerCase() !== 'motivo');
-    
-    // Auto-sanar teléfonos de pedidos a través del catálogo de clientes
-    const sanitizeOrderPhone = (ord) => {
-      if (!ord.telefono && ord.cliente) {
-        const found = state.frequentClients.find(c => c.name.toLowerCase() === ord.cliente.toLowerCase());
-        if (found && found.phone) ord.telefono = found.phone;
-      }
-      return ord;
-    };
-
-    state.data = {
-      myOrders: (rawData.myOrders || []).map(normalizeOrder).map(sanitizeOrderPhone),
-      teamCritical: (rawData.teamCritical || []).map(normalizeOrder).map(sanitizeOrderPhone),
-      allOrders: (rawData.allOrders || rawData.allorders || []).map(normalizeOrder).map(sanitizeOrderPhone),
-      finishedOrders: (rawData.finishedOrders || rawData.pedidosTerminados || []).map(normalizeOrder).map(sanitizeOrderPhone),
-      users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
-      dailyPerformance: rawData.dailyPerformance || {}
-    };
-    
-    state.waTemplate = rawData.waTemplate || state.waTemplate;
-    state.offline = false;
-    
-    store.set("pp_profile_data", state.data);
-    render();
-    checkAndSendPushNotifications();
-    if (showMessage) showToast("Información sincronizada.");
-  } catch (error) {
-    console.error("Error al sincronizar:", error);
-    state.offline = true;
-    render();
-    const errMsg = (error && error.message) ? error.message : "Modo sin conexión.";
-    if (showMessage) showToast(errMsg);
-  } finally {
-    if (btnRefresh) btnRefresh.textContent = "↻";
-  }
-}
-window.cargarDatos = refresh;
-
-function checkAndSendPushNotifications() {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  
-  const currentUser = state.session ? String(state.session.name || "").toLowerCase().trim() : "";
-  const all = state.data.allOrders || [];
-  
-  // 1. Notificar pedidos retrasados
-  const overdue = all.filter(o => active(o) && priority(o) === "overdue");
-  if (overdue.length > 0) {
-    const key = `push_overdue_${new Date().toISOString().split('T')[0]}_${overdue.length}`;
-    if (!sessionStorage.getItem(key)) {
-      sessionStorage.setItem(key, "1");
-      new Notification("🚨 Alerta Creaciones JJ: Pedidos Retrasados", {
-        body: `¡Atención! Hay ${overdue.length} pedido(s) retrasado(s) que pasaron la hora límite en el taller.`,
-        icon: "./logo_creaciones_jj.png"
-      });
-    }
-  }
-  
-  // 2. Notificar al trabajador sus tareas pendientes
-  if (currentUser) {
-    const myPending = all.filter(o => active(o) && String(o.responsable || "").toLowerCase().trim() === currentUser);
-    if (myPending.length > 0) {
-      const key2 = `push_mypending_${new Date().toISOString().split('T')[0]}_${myPending.length}`;
-      if (!sessionStorage.getItem(key2)) {
-        sessionStorage.setItem(key2, "1");
-        new Notification(`📋 Creaciones JJ: Hola ${state.session.name}`, {
-          body: `Tienes ${myPending.length} pedido(s) activo(s) asignado(s) en tu cola de trabajo.`,
-          icon: "./logo_creaciones_jj.png"
-        });
-      }
-    }
-  }
-}
-
-function priorityPill(order) {
-  const val = priority(order);
-  const isOverdue = val === "overdue";
-  const bgStyle = isOverdue ? 'background-color:#d32f2f; color:white; font-weight:bold; padding:4px 8px; border-radius:4px;' : '';
-  return `<span class="priority priority-${val}" style="${bgStyle}">${priorityLabel[val]}</span>`;
-}
-
-function orderCard(order, position) {
-  const prio = priority(order);
-  const isOverdue = prio === 'overdue';
-  const isNow = prio === 'now';
-  const isToday = prio === 'today';
-  
-  let cardClass = 'order-card-compact';
-  if (isOverdue) cardClass += ' card-overdue';
-  else if (isNow) cardClass += ' card-urgent';
-  else if (isToday) cardClass += ' card-today';
-  
-  const deliveryInfo = state.frequentClients.find(
-    c => c.name.toLowerCase() === order.cliente.toLowerCase()
-  );
-  const hasDelivery = deliveryInfo && deliveryInfo.delivery === 'Sí';
-  
-  const entregaDate = safeParseDate(order.entrega);
-  let deadlineInterno = '';
-  if (hasDelivery && entregaDate) {
-    const prev = new Date(entregaDate);
-    prev.setDate(prev.getDate() - 1);
-    deadlineInterno = `⚠️ Listo para: ${prev.getDate().toString().padStart(2,'0')}/${(prev.getMonth()+1).toString().padStart(2,'0')} (día anterior por delivery)`;
-  }
-  
-  const disenoVal = order.diseno || "Sí";
-  let disenoBadge = '';
-  if (disenoVal === "No") {
-    disenoBadge = `<span style="background:#fee2e2; color:#dc2626; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: PENDIENTE ❌</span>`;
-  } else if (disenoVal === "En proceso") {
-    disenoBadge = `<span style="background:#fef3c7; color:#d97706; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: En proceso ✏️</span>`;
-  } else {
-    disenoBadge = `<span style="background:#dcfce7; color:#15803d; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: Listo ✅</span>`;
-  }
-
-  return `<button class="${cardClass}" data-action="detail" data-id="${escapeHtml(order.id)}">
-    <div class="cc-top">
-      <div class="cc-left">
-        <span class="cc-id">${escapeHtml(order.id)}</span>
-        <span class="cc-client">${escapeHtml(order.cliente)}</span>
-        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
-          ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
-          ${disenoBadge}
-          ${hasDelivery ? `<span class="badge-delivery">🚚 ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
-        </div>
-      </div>
-      <div class="cc-right">
-        ${isOverdue ? '<span class="pill-overdue">🚨 RETRASADO</span>' : ''}
-        ${isNow && !isOverdue ? '<span class="pill-urgent">⚡ Hacer ahora</span>' : ''}
-        ${isToday && !isOverdue ? '<span class="pill-today">⏰ Hoy</span>' : ''}
-        ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">📅 Programado</span>' : ''}
-      </div>
-    </div>
-    <div class="cc-meta">
-      <span>${escapeHtml(order.tipo || 'Sin tipo')}</span>
-      <span>·</span>
-      <span>${escapeHtml(formatDate(order.entrega))}</span>
-      <span>·</span>
-      <span>${escapeHtml(order.responsable)}</span>
-      ${order.telefono ? `<span>·</span><span>📞 ${escapeHtml(order.telefono)}</span>` : ''}
-    </div>
-    ${deadlineInterno ? `<div class="cc-delivery-warning">${deadlineInterno}</div>` : ''}
-    ${order.notas ? `<div style="font-size:11px; color:#d97706; background:rgba(217,119,6,.1); border:1px solid rgba(217,119,6,.3); border-radius:4px; padding:3px 8px; margin-top:2px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📝 ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ''}
-  </button>`;
-}
-
-function filterOrdersBySearch(orders = []) {
-  if (!state.searchQuery.trim()) return orders;
-  const q = state.searchQuery.toLowerCase().trim();
-  return orders.filter(o => {
-    return (
-      o.id.toLowerCase().includes(q) ||
-      o.cliente.toLowerCase().includes(q) ||
-      o.tipo.toLowerCase().includes(q) ||
-      o.motivo.toLowerCase().includes(q) ||
-      o.responsable.toLowerCase().includes(q) ||
-      o.descripcion.toLowerCase().includes(q) ||
-      o.telefono.includes(q) ||
-      formatDate(o.entrega).toLowerCase().includes(q)
-    );
-  });
-}
-
-function sortOrdersByUrgency(orders) {
-  return orders.slice().sort((a, b) => {
-    const prioOrder = { overdue: 0, now: 1, today: 2, later: 3 };
-    const pA = prioOrder[priority(a)];
-    const pB = prioOrder[priority(b)];
-    if (pA !== pB) return pA - pB;
-    const dA = safeParseDate(a.entrega) || new Date(9999, 0, 1);
-    const dB = safeParseDate(b.entrega) || new Date(9999, 0, 1);
-    return dA - dB;
-  });
-}
-
-function getMyOpenOrders() {
-  const currentUser = String(state.session?.name || "").toLowerCase().trim();
-  return sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && String(o.responsable).toLowerCase().trim() === currentUser)
-  );
-}
-
-function nowView() {
-  const myOpenOrders = getMyOpenOrders();
-  const next = myOpenOrders[0];
-  const critical = sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
-  );
-  const overdueOrders = sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'overdue')
-  );
-  const urgentOrders = sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'now')
-  );
-  const criticalBanner = (overdueOrders.length > 0 || urgentOrders.length > 0) ? `
-    <div class="critical-banner">
-      <div class="critical-banner-inner">
-        ${overdueOrders.length > 0 ? `<span class="banner-overdue">\ud83d\udea8 ${overdueOrders.length} RETRASADO${overdueOrders.length>1?'S':''}</span>` : ''}
-        ${urgentOrders.length > 0 ? `<span class="banner-urgent">\u26a1 ${urgentOrders.length} HACER AHORA</span>` : ''}
-        <span class="banner-hint">Revisa las tarjetas marcadas</span>
-      </div>
-    </div>` : '';
-
-  return `${criticalBanner}${state.offline ? '<p class="offline">Mostrando informaci\u00f3n guardada localmente.</p>' : ""}
-  ${next ? `<article class="hero-card" style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md); margin-bottom:20px;"><p class="eyebrow">TU SIGUIENTE TRABAJO PRIORITARIO (${escapeHtml(next.id)})</p>${priorityPill(next)}<h2 style="margin-top:10px;">${escapeHtml(next.cliente)}</h2><p style="color:var(--text-muted); margin-bottom:12px;">${escapeHtml(next.tipo)} ${next.motivo ? `(${escapeHtml(next.motivo)})` : ''} · Entrega: ${escapeHtml(formatDate(next.entrega))}</p><div class="actions"><button class="primary-button" data-action="detail" data-id="${escapeHtml(next.id)}">Ver detalle completo</button></div></article>` : '<div class="empty"><strong>Tu cola de trabajo está al día.</strong></div>'}
-  <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">CRÍTICOS DEL EQUIPO</p>
-  <div class="order-list">${critical.map(orderCard).join("") || '<div class="team-note">No hay pedidos críticos en el taller.</div>'}</div>`;
-}
-
-function queueView() {
-  const list = getMyOpenOrders();
-  return list.length ? `<div class="order-list">${list.map(orderCard).join("")}</div>` : '<div class="empty"><strong>No tienes pedidos asignados pendientes en tu bandeja</strong></div>';
-}
-
-function historyView() {
-  const rawOrders = state.data.finishedOrders || [];
-  const orders = filterOrdersBySearch(rawOrders);
-  
-  return `
-    <div class="search-bar-container" style="margin-bottom:16px;">
-      <span>🔍</span>
-      <input type="text" id="history-search-input" placeholder="Buscar por cliente, teléfono, motivo, ID (PED-0001) o trabajador..." value="${escapeHtml(state.searchQuery)}">
-    </div>
-    ${!orders.length ? '<div class="empty"><strong>No hay proyectos terminados que coincidan con la búsqueda.</strong></div>' : `
-      <div class="order-list">${orders.map((order) => {
-        const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
-        const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
-        
-        return `
-          <article class="order-card">
-            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
-              <div>
-                <h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3>
-                <p>${escapeHtml(order.tipo)}</p>
-                ${order.motivo ? `<span class="badge-motivo">🎨 Motivo: ${escapeHtml(order.motivo)}</span>` : ''}
-              </div>
-              <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
-            </div>
-            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
-              Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
-              Responsable: ${escapeHtml(order.responsable)}<br/>
-              ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
-              ${isLead() ? `<span style="color:#059669; font-weight:bold;">💵 Costo registrado: $${Number(order.costo || 0).toFixed(2)}</span><br/>` : ''}
-              ${order.comentarioCierre ? `<strong>Observación:</strong> ${escapeHtml(order.comentarioCierre)}<br/>` : ""}
-              ${order.notas ? `<div style="font-size:12px; color:#d97706; margin-top:4px; font-weight:600;">📝 <strong>Bitácora:</strong> ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ""}
-              
-              ${refLinks.length ? `
-                <div style="margin-top:6px;">
-                  <strong style="font-size:12px;">🖼️ Fotos de Referencia del Cliente:</strong><br/>
-                  ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="ref-photo-badge">🖼️ Ref ${idx + 1}</a>`).join("")}
-                </div>
-              ` : ''}
-              
-              ${eviLinks.length ? `
-                <div style="margin-top:6px;">
-                  <strong style="font-size:12px;">📷 Fotos de Evidencia de Cierre:</strong><br/>
-                  ${eviLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="evi-photo-badge">📷 Evidencia ${idx + 1}</a>`).join("")}
-                </div>
-              ` : ''}
-            </div>
-            ${isLead() ? `
-              <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-                <button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>
-                ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
-              </div>
-            ` : ''}
-          </article>
-        `;
-      }).join('')}</div>
-    `}
-  `;
-}
-
-function teamView() {
-  const rawOrders = sortOrdersByUrgency((state.data.allOrders || []).filter(active));
-  const orders = filterOrdersBySearch(rawOrders);
-  
-  return `
-    ${(() => {
-      const ov = sortOrdersByUrgency((state.data.allOrders||[]).filter(o=>active(o)&&priority(o)==='overdue'));
-      const urg = sortOrdersByUrgency((state.data.allOrders||[]).filter(o=>active(o)&&priority(o)==='now'));
-      return (ov.length > 0 || urg.length > 0) ? `
-        <div class="critical-banner" style="margin-bottom:12px;">
-          <div class="critical-banner-inner">
-            ${ov.length > 0 ? `<span class="banner-overdue">\ud83d\udea8 ${ov.length} RETRASADO${ov.length>1?'S':''}</span>` : ''}
-            ${urg.length > 0 ? `<span class="banner-urgent">\u26a1 ${urg.length} URGENTE${urg.length>1?'S':''}</span>` : ''}
-          </div>
-        </div>` : '';
-    })()}
-    <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-      <button class="primary-button" data-action="new-order">＋ Registrar pedido</button>
-    </div>
-    <div class="search-bar-container" style="margin-bottom:16px;">
-      <span>🔍</span>
-      <input type="text" id="team-search-input" placeholder="Buscar por cliente, teléfono, motivo, ID o trabajador..." value="${escapeHtml(state.searchQuery)}">
-    </div>
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">TODOS LOS PEDIDOS ACTIVOS DEL TALLER (${orders.length})</p>
-    <div class="order-list">${orders.map(orderCard).join("") || '<div class="team-note">No hay pedidos activos que coincidan con la búsqueda.</div>'}</div>
-  `;
-}
-
-function computeWorkerPerformance(timeframe = "today") {
-  const finished = state.data.finishedOrders || [];
-  const users = (state.data.users || []).filter(u => u.active);
-  const now = new Date();
-  
-  let filterFn = () => true;
-  
-  if (timeframe === "today") {
-    const todayLocal = getLocalDateStr(now);
-    filterFn = (o) => {
-      if (!o.finProduccion) return false;
-      return getLocalDateStr(o.finProduccion) === todayLocal;
-    };
-  } else if (timeframe === "week") {
-    const day = now.getDay();
-    const diffToMon = (day === 0 ? -6 : 1 - day);
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + diffToMon);
-    monday.setHours(0,0,0,0);
-    
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23,59,59,999);
-    
-    filterFn = (o) => {
-      if (!o.finProduccion) return false;
-      const d = new Date(o.finProduccion);
-      return d >= monday && d <= sunday;
-    };
-  } else if (timeframe === "month") {
-    const monthIso = now.toISOString().substring(0, 7);
-    filterFn = (o) => {
-      if (!o.finProduccion) return false;
-      return String(o.finProduccion).startsWith(monthIso);
-    };
-  }
-  
-  const filtered = finished.filter(filterFn);
-  const perfMap = {};
-  
-  filtered.forEach(o => {
-    if (String(o.estado || "").toLowerCase().trim() === "cancelado") return;
-    const w = o.responsable || "Sin asignar";
-    if (!perfMap[w]) {
-      perfMap[w] = { completed: 0, totalMin: 0, orders: [] };
-    }
-    perfMap[w].completed += 1;
-    perfMap[w].totalMin += Number(o.duracionRealMin || 0);
-    perfMap[w].orders.push(o);
-  });
-  
-  return perfMap;
-}
-
-function openWorkerPerfModal(workerName, timeframe) {
-  const tf = timeframe || state.perfTimeframe || "today";
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const perfMap = computeWorkerPerformance(tf);
-  const workerData = perfMap[workerName] || { completed: 0, totalMin: 0, orders: [] };
-  const workerOrders = workerData.orders || [];
-
-  openModal(`
-    <div class="modal-head">
-      <h2>🏆 Rendimiento de ${escapeHtml(workerName)} (${tfLabels[tf] || tf})</h2>
-      <button class="close-button" data-action="close">×</button>
-    </div>
-    <div style="margin-bottom:16px; padding:12px; background:var(--bg-main); border-radius:var(--radius-md);">
-      <p style="font-size:14px; font-weight:700;">Pedidos Completados: <span style="color:var(--primary-color);">${workerData.completed}</span></p>
-      <p style="font-size:14px; font-weight:700;">Tiempo Total Invertido: <span style="color:var(--primary-color);">${workerData.totalMin} min</span></p>
-      ${workerData.completed > 0 ? `<p style="font-size:13px; color:var(--text-muted); margin-top:4px;">⏱️ Promedio por pedido: <strong>${Math.round(workerData.totalMin / workerData.completed)} min</strong></p>` : ''}
-    </div>
-    <p style="font-weight:700; font-size:13px; margin-bottom:10px;">LISTA DE PROYECTOS TERMINADOS (${workerOrders.length}):</p>
-    <div style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto;">
-      ${workerOrders.length ? workerOrders.map(o => `
-        <div style="padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card);">
-          <div style="display:flex; justify-content:space-between; font-weight:700;">
-            <span>${escapeHtml(o.cliente)} (${escapeHtml(o.id)})</span>
-            <span style="color:var(--success-color);">${escapeHtml(o.estado)}</span>
-          </div>
-          <p style="font-size:13px; color:var(--text-muted);">${escapeHtml(o.tipo || 'Sin tipo')} ${o.motivo ? `· Motivo: ${escapeHtml(o.motivo)}` : ''}</p>
-          <p style="font-size:12px; margin-top:4px;">⏱️ Tiempo: <strong>${o.duracionRealMin || 0} min</strong> | 📝 Observación: ${escapeHtml(o.comentarioCierre || "Sin observación")}</p>
-        </div>
-      `).join("") : '<div class="team-note">No hay pedidos registrados en este período.</div>'}
-    </div>
-  `);
-}
-window.openWorkerPerfModal = openWorkerPerfModal;
-
-function openSummaryReportModal(timeframe) {
-  const tf = timeframe || state.perfTimeframe || "today";
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const finished = state.data.finishedOrders || [];
-  const now = new Date();
-  
-  let filterFn = () => true;
-  if (tf === "today") {
-    const todayLocal = getLocalDateStr(now);
-    filterFn = (o) => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal;
-  } else if (tf === "week") {
-    const day = now.getDay();
-    const diffToMon = (day === 0 ? -6 : 1 - day);
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + diffToMon);
-    monday.setHours(0,0,0,0);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23,59,59,999);
-    filterFn = (o) => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday;
-  } else if (tf === "month") {
-    const monthIso = now.toISOString().substring(0, 7);
-    filterFn = (o) => o.finProduccion && String(o.finProduccion).startsWith(monthIso);
-  }
-  
-  const orders = finished.filter(filterFn);
-  const totalMin = orders.reduce((sum, o) => sum + Number(o.duracionRealMin || 0), 0);
-  const totalRev = orders.reduce((sum, o) => sum + Number(o.costo || 0), 0);
-
-  openModal(`
-    <div class="modal-head">
-      <h2>📋 Lista Resumida de Pedidos Cumplidos (${tfLabels[tf] || tf})</h2>
-      <button class="close-button" data-action="close">×</button>
-    </div>
-    <div style="margin-bottom:12px; padding:10px; background:var(--bg-main); border-radius:6px; font-size:13px;">
-      <span>Total Pedidos: <strong>${orders.length}</strong></span> · 
-      <span>Tiempo Total: <strong>${totalMin} min</strong></span>
-      ${isLead() ? ` · <span style="color:#059669; font-weight:800;">Ingresos Totales: $${totalRev.toFixed(2)}</span>` : ''}
-    </div>
-    <div style="max-height:380px; overflow-y:auto;">
-      <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
-        <thead>
-          <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
-            <th style="padding:6px;">ID</th>
-            <th style="padding:6px;">Cliente</th>
-            <th style="padding:6px;">Tipo / Motivo</th>
-            <th style="padding:6px;">Responsable</th>
-            <th style="padding:6px;">Minutos</th>
-            ${isLead() ? `<th style="padding:6px;">Costo ($)</th>` : ''}
-          </tr>
-        </thead>
-        <tbody>
-          ${orders.map(o => `
-            <tr style="border-bottom:1px solid var(--border-color);">
-              <td style="padding:6px; font-weight:bold;">${escapeHtml(o.id)}</td>
-              <td style="padding:6px;">${escapeHtml(o.cliente)}</td>
-              <td style="padding:6px;">${escapeHtml(o.tipo)}${o.motivo ? ` (${escapeHtml(o.motivo)})` : ''}</td>
-              <td style="padding:6px;">${escapeHtml(o.responsable)}</td>
-              <td style="padding:6px;">${o.duracionRealMin || 0} min</td>
-              ${isLead() ? `<td style="padding:6px; font-weight:bold; color:#059669;">$${Number(o.costo || 0).toFixed(2)}</td>` : ''}
-            </tr>
-          `).join('') || '<tr><td colspan="6" style="padding:12px; text-align:center; color:var(--text-muted);">No hay pedidos cumplidos en este período.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `);
-}
-window.openSummaryReportModal = openSummaryReportModal;
-
-function openFinancialReportModal() {
-  if (!isLead()) return;
-  const finished = state.data.finishedOrders || [];
-  const now = new Date();
-  const todayLocal = getLocalDateStr(now);
-  
-  const todayOrders = finished.filter(o => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal);
-  
-  const day = now.getDay();
-  const diffToMon = (day === 0 ? -6 : 1 - day);
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMon);
-  monday.setHours(0,0,0,0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23,59,59,999);
-  const weekOrders = finished.filter(o => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday);
-  
-  const monthIso = now.toISOString().substring(0, 7);
-  const monthOrders = finished.filter(o => o.finProduccion && String(o.finProduccion).startsWith(monthIso));
-  
-  const sumRev = (arr) => arr.reduce((s, o) => s + Number(o.costo || 0), 0);
-
-  const revToday = sumRev(todayOrders);
-  const revWeek = sumRev(weekOrders);
-  const revMonth = sumRev(monthOrders);
-  const revAll = sumRev(finished);
-
-  openModal(`
-    <div class="modal-head">
-      <h2>💵 Balance Financiero de Ingresos (Solo Jefes)</h2>
-      <button class="close-button" data-action="close">×</button>
-    </div>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
-      <div style="background:rgba(16,185,129,.1); border:1px solid #059669; padding:12px; border-radius:8px; text-align:center;">
-        <span style="font-size:11px; color:#059669; font-weight:800;">INGRESOS HOY</span>
-        <h3 style="color:#059669; margin-top:4px;">$${revToday.toFixed(2)}</h3>
-        <small style="color:var(--text-muted);">${todayOrders.length} pedidos</small>
-      </div>
-      <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:12px; border-radius:8px; text-align:center;">
-        <span style="font-size:11px; color:#0284c7; font-weight:800;">ESTA SEMANA</span>
-        <h3 style="color:#0284c7; margin-top:4px;">$${revWeek.toFixed(2)}</h3>
-        <small style="color:var(--text-muted);">${weekOrders.length} pedidos</small>
-      </div>
-      <div style="background:rgba(147,51,234,.1); border:1px solid #9333ea; padding:12px; border-radius:8px; text-align:center;">
-        <span style="font-size:11px; color:#9333ea; font-weight:800;">ESTE MES</span>
-        <h3 style="color:#9333ea; margin-top:4px;">$${revMonth.toFixed(2)}</h3>
-        <small style="color:var(--text-muted);">${monthOrders.length} pedidos</small>
-      </div>
-      <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:12px; border-radius:8px; text-align:center;">
-        <span style="font-size:11px; color:#d97706; font-weight:800;">HISTÓRICO COMPLETO</span>
-        <h3 style="color:#d97706; margin-top:4px;">$${revAll.toFixed(2)}</h3>
-        <small style="color:var(--text-muted);">${finished.length} pedidos</small>
-      </div>
-    </div>
-    <p style="font-size:12px; color:var(--text-muted);">💡 Recuerda que puedes asignar o corregir el costo de cada pedido abriéndolo en la sección de Historial o Detalle del pedido.</p>
-  `);
-}
-window.openFinancialReportModal = openFinancialReportModal;
-
-function getWeekDetails(offsetWeeks = 0) {
-  const now = new Date();
-  now.setDate(now.getDate() + (offsetWeeks * 7));
-  const day = now.getDay();
-  const diffToMon = (day === 0 ? -6 : 1 - day);
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMon);
-  monday.setHours(0,0,0,0);
-  
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23,59,59,999);
-  
-  const pad = (n) => n.toString().padStart(2, '0');
-  const dMon = `${pad(monday.getDate())}/${pad(monday.getMonth()+1)}`;
-  const dSun = `${pad(sunday.getDate())}/${pad(sunday.getMonth()+1)}/${sunday.getFullYear()}`;
-  
-  const semanaId = `${monday.getFullYear()}-W${pad(Math.ceil((((monday - new Date(monday.getFullYear(),0,1))/86400000)+new Date(monday.getFullYear(),0,1).getDay()+1)/7))}`;
-  const semanaLabel = `Semana del ${dMon} al ${dSun}`;
-  
-  return { monday, sunday, semanaId, semanaLabel, isCurrent: offsetWeeks === 0 };
-}
-
-window.changeScheduleWeek = function(delta) {
-  state.selectedWeekOffset = (state.selectedWeekOffset || 0) + delta;
-  render();
-};
-
-window.resetScheduleWeek = function() {
-  state.selectedWeekOffset = 0;
-  render();
-};
-
-function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSemanaLabel = "") {
-  if (!isLead()) return;
-  const users = (state.data.users || []).filter(u => u.active);
-  const schedules = state.data.schedules || state.data.horarios || [];
-  
-  const curWeek = getWeekDetails(state.selectedWeekOffset || 0);
-  const semId = targetSemanaId || curWeek.semanaId;
-  const semLabel = targetSemanaLabel || curWeek.semanaLabel;
-
-  const defaultUser = workerName || (users[0]?.name || "");
-
-  const daysList = [
-    { key: "lunes", label: "Lunes" },
-    { key: "martes", label: "Martes" },
-    { key: "miercoles", label: "Miércoles" },
-    { key: "jueves", label: "Jueves" },
-    { key: "viernes", label: "Viernes" },
-    { key: "sabado", label: "Sábado" },
-    { key: "domingo", label: "Domingo" }
-  ];
-
-  const presets = [
-    { label: "🔵 Completo A (8-1 / 3-7 PM)", val: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM" },
-    { label: "🟣 Completo B (8-1 / 4-8:30 PM)", val: "8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM" },
-    { label: "🟢 Solo Mañana (8-1 PM)", val: "8:00 AM - 1:00 PM" },
-    { label: "🟠 Solo Tarde A (3-7 PM)", val: "3:00 PM - 7:00 PM" },
-    { label: "🔴 Solo Tarde B (4-8:30 PM)", val: "4:00 PM - 8:30 PM" },
-    { label: "⚪ Día Libre", val: "Libre" }
-  ];
-
-  const getWorkerSched = (uName) => {
-    return schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase() && (s.semana === semId || !s.semana)) || schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase()) || {
-      lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
-      jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
-    };
-  };
-
-  const initialSched = getWorkerSched(defaultUser);
-
-  const renderDayRow = (d, curVal) => {
-    const isStandard = presets.some(p => p.val === curVal);
-    return `
-      <div style="background:var(--bg-main); padding:10px; border-radius:8px; border:1px solid var(--border-color); display:flex; flex-direction:column; gap:6px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <strong style="font-size:13px; text-transform:uppercase;">📅 ${d.label}</strong>
-        </div>
-        <select id="sched-select-${d.key}" onchange="handleDaySelectChange('${d.key}', this.value)" style="padding:6px; border-radius:6px; border:1px solid var(--border-color); font-size:12px; font-weight:600;">
-          ${presets.map(p => `<option value="${escapeHtml(p.val)}" ${p.val === curVal ? 'selected' : ''}>${p.label}</option>`).join('')}
-          <option value="__CUSTOM__" ${!isStandard ? 'selected' : ''}>✏️ Horario Personalizado...</option>
-        </select>
-        <input id="sched-${d.key}" name="${d.key}" value="${escapeHtml(curVal)}" style="padding:6px; border-radius:6px; border:1px solid var(--border-color); font-size:12px; ${isStandard ? 'display:none;' : 'display:block;'}">
-      </div>
-    `;
-  };
-
-  openModal(`
-    <div class="modal-head">
-      <h2>✏️ Modificar Horario de Trabajador</h2>
-      <button class="close-button" data-action="close">×</button>
-    </div>
-
-    <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:10px 12px; border-radius:8px; margin-bottom:12px; font-size:13px; color:#0284c7; font-weight:bold;">
-      🗓️ Asignando para: ${escapeHtml(semLabel)} ${curWeek.isCurrent ? '(Semana en Curso)' : ''}
-    </div>
-
-    <div style="background:var(--bg-card); padding:10px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
-      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">⚡ APLICAR PLANTILLA RÁPIDA A TODA LA SEMANA (LUN-SÁB):</p>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('Libre')">⚪ Libre</button>
-      </div>
-    </div>
-
-    <form id="schedule-form" class="form-grid">
-      <input type="hidden" name="semana" value="${escapeHtml(semId)}">
-      <label class="field"><span class="field-label">SELECCIONAR TRABAJADOR</span>
-        <select id="worker-select-modal" name="trabajador" onchange="handleWorkerChangeModal(this.value)" required>
-          ${users.map(u => `<option value="${escapeHtml(u.name)}" ${u.name.toLowerCase() === defaultUser.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
-        </select>
-      </label>
-
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-top:8px;">
-        ${daysList.map(d => renderDayRow(d, initialSched[d.key] || (d.key === 'domingo' ? 'Libre' : '8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM'))).join('')}
-      </div>
-
-      <div class="modal-footer" style="margin-top:16px;">
-        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button">💾 Guardar Horario de esta Semana</button>
-      </div>
-    </form>
-  `);
-
-  window.handleDaySelectChange = function(dayKey, val) {
-    const input = document.getElementById("sched-" + dayKey);
-    if (!input) return;
-    if (val === "__CUSTOM__") {
-      input.style.display = "block";
-      input.focus();
-    } else {
-      input.value = val;
-      input.style.display = "none";
-    }
-  };
-
-  window.handleWorkerChangeModal = function(uName) {
-    const ws = getWorkerSched(uName);
-    daysList.forEach(d => {
-      const val = ws[d.key] || (d.key === 'domingo' ? 'Libre' : '8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM');
-      const sel = document.getElementById("sched-select-" + d.key);
-      const inp = document.getElementById("sched-" + d.key);
-      if (inp) inp.value = val;
-      if (sel) {
-        const isStandard = presets.some(p => p.val === val);
-        sel.value = isStandard ? val : "__CUSTOM__";
-        if (inp) inp.style.display = isStandard ? "none" : "block";
-      }
-    });
-  };
-
-  window.applySchedPreset = function(presetText) {
-    daysList.forEach(d => {
-      if (d.key === "domingo" && presetText !== "Libre") return;
-      const sel = document.getElementById("sched-select-" + d.key);
-      const inp = document.getElementById("sched-" + d.key);
-      if (sel) sel.value = presetText;
-      if (inp) {
-        inp.value = presetText;
-        inp.style.display = "none";
-      }
-    });
-  };
-
-  $("#schedule-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "⏳ Guardando...";
-    try {
-      const data = Object.fromEntries(new FormData(e.target));
-      await api("profile_save_schedule", data);
-      closeModal();
-      await refresh(false);
-      showToast("Horario guardado en Google Sheets para esta semana.");
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "💾 Guardar Horario de esta Semana";
-      alert(err.message);
-    }
-  });
-}
-window.openEditScheduleModal = openEditScheduleModal;
-window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
-
-function schedulesView() {
-  const allSchedules = state.data.schedules || state.data.horarios || [];
-  const offset = state.selectedWeekOffset || 0;
-  const wk = getWeekDetails(offset);
-  
-  // Filtrar horarios que coincidan con la semana seleccionada o los sin semana si estamos en la actual
-  const schedules = allSchedules.filter(s => {
-    if (s.semana) return s.semana === wk.semanaId || s.semana === wk.semanaLabel;
-    return wk.isCurrent;
-  });
-
-  return `
-    <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
-        <div>
-          <h2 style="margin:0;">📅 Horarios y Turnos del Equipo</h2>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Consulta y asigna turnos rotativos por semana para cada trabajador.</p>
-        </div>
-        ${isLead() ? `<button type="button" class="primary-button" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">✏️ Modificar Horario (${wk.isCurrent ? 'Esta Semana' : wk.semanaLabel})</button>` : ''}
-      </div>
-
-      <!-- Selector de semanas e histórico -->
-      <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-main); padding:10px 14px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color); flex-wrap:wrap; gap:8px;">
-        <button type="button" class="secondary-button" onclick="changeScheduleWeek(-1)">◀ Semana Anterior</button>
-        <div style="text-align:center;">
-          <strong style="font-size:14px; color:var(--primary-color);">🗓️ ${escapeHtml(wk.semanaLabel)}</strong>
-          ${wk.isCurrent ? '<span style="background:var(--success-color); color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; margin-left:6px;">EN CURSO</span>' : ''}
-          ${!wk.isCurrent ? '<button type="button" class="secondary-button" style="padding:2px 8px; font-size:11px; margin-left:6px;" onclick="resetScheduleWeek()">Semana Actual</button>' : ''}
-        </div>
-        <button type="button" class="secondary-button" onclick="changeScheduleWeek(1)">Semana Siguiente ▶</button>
-      </div>
-
-      <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
-          <thead>
-            <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
-              <th style="padding:10px;">Trabajador</th>
-              <th style="padding:10px;">Lunes</th>
-              <th style="padding:10px;">Martes</th>
-              <th style="padding:10px;">Miércoles</th>
-              <th style="padding:10px;">Jueves</th>
-              <th style="padding:10px;">Viernes</th>
-              <th style="padding:10px;">Sábado</th>
-              <th style="padding:10px;">Domingo</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${schedules.map(s => `
-              <tr style="border-bottom:1px dashed var(--border-color);">
-                <td style="padding:10px; font-weight:bold; white-space:nowrap;">👤 ${escapeHtml(s.trabajador)}</td>
-                <td style="padding:10px;">${escapeHtml(s.lunes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.martes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.miercoles || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.jueves || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.viernes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.sabado || 'Libre')}</td>
-                <td style="padding:10px; color:var(--text-muted);">${escapeHtml(s.domingo || 'Libre')}</td>
-              </tr>
-            `).join("") || `<tr><td colspan="8" style="padding:26px; text-align:center; color:var(--text-muted);">No hay horarios registrados para ${escapeHtml(wk.semanaLabel)}.<br/>${isLead() ? `<button type="button" class="primary-button" style="margin-top:10px;" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">➕ Cargar Horario para esta semana</button>` : ''}</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-function financesView() {
-  if (!isLead()) {
-    return `<div class="empty"><strong>Acceso Restringido: Este módulo solo está disponible para Jefes y Managers.</strong></div>`;
-  }
-  
-  const finished = state.data.finishedOrders || [];
-  const now = new Date();
-  const todayLocal = getLocalDateStr(now);
-  
-  const todayOrders = finished.filter(o => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal);
-  
-  const day = now.getDay();
-  const diffToMon = (day === 0 ? -6 : 1 - day);
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMon);
-  monday.setHours(0,0,0,0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23,59,59,999);
-  const weekOrders = finished.filter(o => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday);
-  
-  const monthIso = now.toISOString().substring(0, 7);
-  const monthOrders = finished.filter(o => o.finProduccion && String(o.finProduccion).startsWith(monthIso));
-  
-  const sumRev = (arr) => arr.reduce((s, o) => s + Number(o.costo || 0), 0);
-
-  const revToday = sumRev(todayOrders);
-  const revWeek = sumRev(weekOrders);
-  const revMonth = sumRev(monthOrders);
-  const revAll = sumRev(finished);
-
-  return `
-    <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
-      <div style="margin-bottom:16px;">
-        <h2 style="margin:0;">💵 Control Financiero y Registro de Ingresos</h2>
-        <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Panel confidencial de Jefatura para auditar montos cobrados y rendimiento económico.</p>
-      </div>
-
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;">
-        <div style="background:rgba(16,185,129,.1); border:1px solid #059669; padding:16px; border-radius:10px; text-align:center;">
-          <span style="font-size:12px; color:#059669; font-weight:800;">INGRESOS HOY</span>
-          <h2 style="color:#059669; margin:6px 0 0 0;">$${revToday.toFixed(2)}</h2>
-          <small style="color:var(--text-muted);">${todayOrders.length} trabajos</small>
-        </div>
-        <div style="background:rgba(2,132,199,.1); border:1px solid #0284c7; padding:16px; border-radius:10px; text-align:center;">
-          <span style="font-size:12px; color:#0284c7; font-weight:800;">ESTA SEMANA</span>
-          <h2 style="color:#0284c7; margin:6px 0 0 0;">$${revWeek.toFixed(2)}</h2>
-          <small style="color:var(--text-muted);">${weekOrders.length} trabajos</small>
-        </div>
-        <div style="background:rgba(147,51,234,.1); border:1px solid #9333ea; padding:16px; border-radius:10px; text-align:center;">
-          <span style="font-size:12px; color:#9333ea; font-weight:800;">ESTE MES</span>
-          <h2 style="color:#9333ea; margin:6px 0 0 0;">$${revMonth.toFixed(2)}</h2>
-          <small style="color:var(--text-muted);">${monthOrders.length} trabajos</small>
-        </div>
-        <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:16px; border-radius:10px; text-align:center;">
-          <span style="font-size:12px; color:#d97706; font-weight:800;">HISTÓRICO COMPLETO</span>
-          <h2 style="color:#d97706; margin:6px 0 0 0;">$${revAll.toFixed(2)}</h2>
-          <small style="color:var(--text-muted);">${finished.length} trabajos</small>
-        </div>
-      </div>
-
-      <h3 style="font-size:15px; margin-bottom:12px;">DESGLOSE DE PROYECTOS CON COBRO REGISTRADO (${finished.length})</h3>
-      <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
-          <thead>
-            <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
-              <th style="padding:8px;">ID</th>
-              <th style="padding:8px;">Cliente</th>
-              <th style="padding:8px;">Tipo</th>
-              <th style="padding:8px;">Motivo</th>
-              <th style="padding:8px;">Responsable</th>
-              <th style="padding:8px;">Duración</th>
-              <th style="padding:8px;">Monto Cobrado ($)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${finished.map(o => `
-              <tr style="border-bottom:1px solid var(--border-color); cursor:pointer;" data-action="detail" data-id="${escapeHtml(o.id)}" data-scope="finished">
-                <td style="padding:8px; font-weight:bold;">${escapeHtml(o.id)}</td>
-                <td style="padding:8px;">${escapeHtml(o.cliente)}</td>
-                <td style="padding:8px;">${escapeHtml(o.tipo)}</td>
-                <td style="padding:8px;">${escapeHtml(o.motivo || '-')}</td>
-                <td style="padding:8px;">${escapeHtml(o.responsable)}</td>
-                <td style="padding:8px;">${o.duracionRealMin || 0} min</td>
-                <td style="padding:8px; font-weight:bold; color:#059669;">$${Number(o.costo || 0).toFixed(2)}</td>
-              </tr>
-            `).join('') || '<tr><td colspan="7" style="padding:16px; text-align:center; color:var(--text-muted);">No hay trabajos finalizados.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
-
-function exportPerformancePDF(tf) {
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const perfMap = computeWorkerPerformance(tf);
-  const nowStr = new Date().toLocaleDateString('es-VE', { dateStyle: 'long' });
-
-  const printWin = window.open('', '_blank');
-  if (!printWin) {
-    alert("Permite las ventanas emergentes en tu navegador para imprimir el PDF.");
-    return;
-  }
-
-  const activeWorkers = Object.keys(perfMap).filter(uName => perfMap[uName] && perfMap[uName].completed > 0);
-  const rowsHtml = activeWorkers.map(uName => {
-    const data = perfMap[uName];
-    const avgMin = data.completed > 0 ? Math.round(data.totalMin / data.completed) : 0;
-    return `
-      <tr>
-        <td style="padding:10px; border:1px solid #ccc; font-weight:bold;">👤 ${escapeHtml(uName)}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.completed}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.totalMin} min</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${avgMin} min/pedido</td>
-      </tr>
-    `;
-  }).join('') || '<tr><td colspan="4" style="padding:16px; text-align:center; color:#666;">No hay pedidos completados en este período.</td></tr>';
-
-  printWin.document.write(`
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-      <meta charset="UTF-8">
-      <title>Reporte de Rendimiento - Creaciones JJ</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 30px; color: #333; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
-        .header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
-        .header p { margin: 5px 0 0 0; color: #666; font-size: 14px; }
-        .meta { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; color: #555; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-        th { background: #1e3a8a; color: white; padding: 10px; border: 1px solid #1e3a8a; text-align: left; }
-        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
-        .sig-box { width: 45%; text-align: center; border-top: 1px solid #aaa; padding-top: 8px; font-size: 12px; color: #666; }
-        @media print {
-          button { display: none; }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>CREACIONES JJ · OCHOA & RISQUEZ</h1>
-        <p>Reporte Oficial de Rendimiento de Producción por Trabajador</p>
-      </div>
-
-      <div class="meta">
-        <span><strong>Período evaluado:</strong> ${tfLabels[tf] || tf}</span>
-        <span><strong>Fecha de emisión:</strong> ${nowStr}</span>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Trabajador</th>
-            <th style="text-align:center;">Pedidos Completados</th>
-            <th style="text-align:center;">Tiempo Invertido</th>
-            <th style="text-align:center;">Promedio por Pedido</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || '<tr><td colspan="4" style="text-align:center; padding:20px;">No hay datos registrados en este período.</td></tr>'}
-        </tbody>
-      </table>
-
-      <div class="signatures">
-        <div class="sig-box">Firma del Manager / Jefatura</div>
-        <div class="sig-box">Sello del Taller Creaciones JJ</div>
-      </div>
-
-      <div style="text-align:center; margin-top:30px;">
-        <button onclick="window.print()" style="padding:10px 20px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir / Guardar como PDF</button>
-      </div>
-    </body>
-    </html>
-  `);
-  printWin.document.close();
-}
-window.exportPerformancePDF = exportPerformancePDF;
-
-function settingsView() {
-  const session = state.session || {};
-  const customColors = store.get("pp_custom_colors", {});
-  const tf = state.perfTimeframe || "today";
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const perfMap = computeWorkerPerformance(tf);
-  
-  const fcList = state.frequentClients.map((c) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <div><strong>${escapeHtml(c.name)}</strong><br/><small style="color:var(--text-muted);">${escapeHtml(c.phone || "Sin teléfono")}</small></div>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
-    </div>
-  `).join("");
-  
-  const ftList = state.frequentTypes.map((t) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <strong>${escapeHtml(t)}</strong>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
-    </div>
-  `).join("");
-  
-  const usersList = (state.data.users || []).map((u) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <div><strong>${escapeHtml(u.name)}</strong> <small style="color:var(--text-muted);">(${escapeHtml(formatRoleLabel(u.role))})</small><br/><span style="color:${u.active ? 'var(--success-color)' : 'var(--danger-color)'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
-      <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
-    </div>
-  `).join("");
-
-  const perfRows = Object.keys(perfMap).map(uName => `
-    <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}', '${tf}')">
-      <span><strong>👤 ${escapeHtml(uName)}</strong></span>
-      <span>🏆 <strong>${perfMap[uName].completed}</strong> pedidos (${perfMap[uName].totalMin} min) 🔍</span>
-    </div>
-  `).join("");
-
-  return `
-    <div class="card settings-card" style="padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-card); margin-bottom:20px;">
-      <h3 style="margin-bottom:14px;">Mi Perfil y Personalización - Creaciones JJ</h3>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
-        <div><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
-        <div><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
-      </div>
-      
-      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">TEMAS PREESTABLECIDOS:</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-          <button class="secondary-button" onclick="setAccent('blue')">💙 Azul Real</button>
-          <button class="secondary-button" onclick="setAccent('emerald')">💚 Esmeralda</button>
-          <button class="secondary-button" onclick="setAccent('purple')">💜 Púrpura</button>
-          <button class="secondary-button" onclick="setAccent('amber')">🧡 Ámbar</button>
-        </div>
-
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">🎨 GENERADOR DE TEMA PROPIO (PERSONALIZADO EN VIVO):</p>
-        <div class="custom-theme-picker">
-          <div class="color-input-group">
-            <label>Color Principal / Botones:</label>
-            <input type="color" id="color-primary" onchange="saveCustomColor('primary', this.value)" value="${customColors.primary || '#1e3a8a'}">
-          </div>
-          <div class="color-input-group">
-            <label>Fondo de Tarjetas:</label>
-            <input type="color" id="color-card" onchange="saveCustomColor('cardBg', this.value)" value="${customColors.cardBg || '#ffffff'}">
-          </div>
-          <div class="color-input-group">
-            <label>Color del Texto:</label>
-            <input type="color" id="color-text" onchange="saveCustomColor('textMain', this.value)" value="${customColors.textMain || '#0f172a'}">
-          </div>
-          <div class="color-input-group">
-            <label>Fondo de Pantalla:</label>
-            <input type="color" id="color-main" onchange="saveCustomColor('mainBg', this.value)" value="${customColors.mainBg || '#f1f5f9'}">
-          </div>
-        </div>
-        <button class="secondary-button" onclick="resetCustomTheme()" style="margin-top:10px;">🔄 Restablecer Colores por Defecto</button>
-      </div>
-
-      <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color);">
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">📲 PLANTILLA DE MENSAJE WHATSAPP:</p>
-        <textarea id="wa-template-input" class="field" style="width:100%; min-height:80px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main);">${escapeHtml(state.waTemplate)}</textarea>
-        <small style="color:var(--text-muted); display:block; margin-top:4px;">Variables disponibles: {cliente}, {tipo}, {estado}, {id}</small>
-        <button class="primary-button" id="save-wa-template-btn" style="margin-top:8px;">💾 Guardar Plantilla de WhatsApp</button>
-      </div>
-
-      <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
-        <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
-        ${isLead() ? `<button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>` : ''}
-        <button class="secondary-button" data-action="logout">Cerrar sesión</button>
-        <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
-      </div>
-    </div>
-    
-    ${isLead() ? `
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; margin-top:20px;">
-        <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin:0;">📊 RENDIMIENTO DE PRODUCCIÓN POR TRABAJADOR (${tfLabels[tf]})</p>
-        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-          <button type="button" class="secondary-button" style="${tf==='today'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('today')">📅 Hoy</button>
-          <button type="button" class="secondary-button" style="${tf==='week'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('week')">📆 Esta Semana</button>
-          <button type="button" class="secondary-button" style="${tf==='month'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('month')">🗓️ Este Mes</button>
-          <button type="button" class="secondary-button" style="${tf==='all'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('all')">📊 Histórico</button>
-          <button type="button" class="primary-button" style="background:#0284c7; padding:6px 12px; font-size:12px;" onclick="exportPerformancePDF('${tf}')">🖨️ Exportar PDF / Imprimir</button>
-        </div>
-      </div>
-      <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
-        ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos en este período.</div>'}
-      </div>
-
-      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
-      <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
-      <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
-    ` : ''}
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
-    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    <button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>
-    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
-    <button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>
-    <div class="user-list">${(state.frequentMotivos||[]).map(m => `
-      <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-        <strong>🎨 ${escapeHtml(m)}</strong>
-        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-motivo" data-motivo="${escapeHtml(m)}">🗑️</button>` : ''}
-      </div>
-    `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
-  `;
-}
-
-function render() {
-  if (!state.session) {
-    state.session = store.get("pp_profile_session", null);
-  }
-  if (!state.session) return;
-  
-  try {
-    applyTheme();
-    const screenNames = {
-      now: "Ahora", queue: "Mi Bandeja", team: "Equipo",
-      history: "Historial", schedules: "Horarios del Equipo",
-      finances: "Control Financiero (Solo Jefes)", settings: "Ajustes"
-    };
-    
-    const titleEl = $("#screen-title");
-    if (titleEl) titleEl.textContent = screenNames[state.screen] || "Ahora";
-    
-    const roleLabelEl = $("#role-label");
-    if (roleLabelEl && state.session) {
-      const roleStr = formatRoleLabel(state.session.role).toUpperCase();
-      const nameStr = String(state.session.name || "Usuario").toUpperCase();
-      roleLabelEl.textContent = `CREACIONES JJ · ${roleStr} · ${nameStr}`;
-    }
-    
-    const navLeadBtn = document.querySelector(".nav-lead-only");
-    if (navLeadBtn) navLeadBtn.style.display = isLead() ? "inline-flex" : "none";
-
-    const screenEl = $("#screen");
-    if (screenEl) {
-      const views = {
-        now: nowView, queue: queueView, team: teamView,
-        history: historyView, schedules: schedulesView,
-        finances: financesView, settings: settingsView
-      };
-      screenEl.innerHTML = (views[state.screen] || views.now)();
-    }
-    
-    document.querySelectorAll(".nav-button").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.screen === state.screen);
-    });
-
-    const backupBox = document.querySelector(".backup-container");
-    if (backupBox) {
-      backupBox.style.display = isLead() ? "flex" : "none";
-    }
-
-    $("#history-search-input")?.addEventListener("input", (e) => {
-      state.searchQuery = e.target.value;
-      const filtered = filterOrdersBySearch(state.data.finishedOrders || []);
-      const container = $(".order-list");
-      if (container) {
-        container.innerHTML = filtered.map(order => `
-          <article class="order-card">
-            <div class="order-top" data-action="detail" data-id="${escapeHtml(order.id)}">
-              <div><h3>${escapeHtml(order.cliente)} <small style="font-size:12px; color:var(--text-muted);">(${escapeHtml(order.id)})</small></h3><p>${escapeHtml(order.tipo)}</p></div>
-              <span class="priority" style="background:#2e7d32; color:white; padding:4px 8px; border-radius:4px;">${escapeHtml(order.estado)}</span>
-            </div>
-            <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}">
-              Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
-              Responsable: ${escapeHtml(order.responsable)}<br/>
-              ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
-            </div>
-          </article>
-        `).join("");
-      }
-    });
-
-    $("#team-search-input")?.addEventListener("input", (e) => {
-      state.searchQuery = e.target.value;
-      const filtered = filterOrdersBySearch(sortOrdersByUrgency((state.data.allOrders || []).filter(active)));
-      const container = $(".order-list");
-      if (container) container.innerHTML = filtered.map(orderCard).join("");
-    });
-
-    $("#save-wa-template-btn")?.addEventListener("click", () => {
-      const val = $("#wa-template-input")?.value || "";
-      state.waTemplate = val;
-      store.set("pp_wa_template", val);
-      showToast("Plantilla de WhatsApp guardada.");
-    });
-  } catch (err) {
-    console.error("Error durante el renderizado:", err);
-  }
-}
-
-function openModal(content) {
-  const m = $("#modal");
-  if (m) {
-    m.innerHTML = `<div class="modal-content">${content}</div>`;
-    m.showModal();
-  }
-}
-
-function closeModal() {
-  const m = $("#modal");
-  if (m) m.close();
-}
-
-function detail(order) {
-  const rawPhone = cleanPhoneNumber(order.telefono);
-  const whatsappUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(state.waTemplate.replace(/{cliente}/g, order.cliente).replace(/{tipo}/g, order.tipo).replace(/{estado}/g, order.estado).replace(/{id}/g, order.id))}`;
-  const refLinks = String(order.fotoReferencia || "").split("\n").filter(Boolean);
-  const eviLinks = String(order.fotoEvidencia || "").split("\n").filter(Boolean);
-
-  const clientInfo = state.frequentClients.find(
-    c => c.name.toLowerCase() === order.cliente.toLowerCase()
-  ) || {};
-  const hasDelivery = clientInfo.delivery === "Sí";
-
-  openModal(`
-    <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
-    <div class="form-grid" style="gap:12px; margin-bottom:16px;">
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TIPO DE TRABAJO:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(order.tipo)}</strong>
-      </div>
-      
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">MOTIVO / TEMÁTICA:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(order.motivo || "Sin especificar")}</strong>
-      </div>
-      
-      ${(active(order) || isLead()) ? `
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
-          <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-            ${["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"].map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
-          </select>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DEL DISEÑO:</span>
-          <select id="design-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-            <option value="No" ${order.diseno === "No" ? "selected" : ""}>Pendiente por diseñar ❌</option>
-            <option value="En proceso" ${order.diseno === "En proceso" ? "selected" : ""}>En proceso ✏️</option>
-            <option value="Sí" ${(order.diseno === "Sí" || !order.diseno) ? "selected" : ""}>Listo para fabricar ✅</option>
-          </select>
-        </div>
-      ` : `
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ESTADO DE PRODUCCIÓN:</span>
-          <strong style="color:var(--success-color);">${escapeHtml(order.estado)}</strong>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ESTADO DEL DISEÑO:</span>
-          <strong style="color:var(--text-main);">${escapeHtml(order.diseno || "Sí")}</strong>
-        </div>
-      `}
-
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA SOLICITADA POR CLIENTE:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(formatDate(order.entrega))}</strong>
-      </div>
-
-      ${hasDelivery ? `
-        <div style="display:flex; flex-direction:column; gap:4px; border:1px solid #0284c7; background:rgba(2,132,199,.1); padding:10px; border-radius:8px;">
-          <span style="font-weight:800; color:#0284c7; font-size:13px;">🚚 PEDIDO CON DELIVERY A DOMICILIO</span>
-          <span style="font-size:13px;"><strong>Sector / Zona:</strong> ${escapeHtml(clientInfo.zona || 'Norte / No especificada')}</span>
-          <span style="font-size:13px;"><strong>Dirección exacta:</strong> ${escapeHtml(clientInfo.direccion || 'Sin dirección registrada')}</span>
-          <span style="font-size:12px; color:#d97706; font-weight:800; margin-top:4px;">⚠️ El pedido DEBE estar completamente terminado el día anterior para enviarse por la mañana.</span>
-        </div>
-      ` : `
-        <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA EN LOCAL / RETIRO:</span>
-          <strong style="color:var(--text-main);">Cliente retira en tienda</strong>
-        </div>
-      `}
-
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">RESPONSABLE:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(order.responsable)}</strong>
-      </div>
-      
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TELÉFONO WHATSAPP:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(order.telefono || "No registrado")}</strong>
-      </div>
-
-      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">⏱️ TIEMPO INVERTIDO (MIN):</span>
-        ${isLead() ? `
-          <div style="display:flex; gap:6px; align-items:center;">
-            <input type="number" id="order-duration-input" value="${order.duracionRealMin || 0}" style="width:70px; padding:4px 6px; border-radius:6px; border:1px solid var(--border-color);">
-            <button type="button" class="secondary-button" id="save-duration-btn" onclick="saveOrderDuration('${escapeHtml(order.id)}')" data-action="save-duration" data-id="${escapeHtml(order.id)}" style="padding:4px 6px; font-size:11px;">💾 Min</button>
-          </div>
-        ` : `<strong style="color:var(--text-main);">${order.duracionRealMin || 0} min</strong>`}
-      </div>
-
-      ${isLead() ? `
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px; background:rgba(16,185,129,.1); padding:8px; border-radius:6px;">
-          <span style="font-weight:700; color:#059669; font-size:12px;">💵 PRECIO / COSTO COBRADO ($):</span>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <input type="number" step="0.01" id="order-cost-input" value="${order.costo || 0}" style="width:90px; padding:4px 8px; border-radius:6px; border:1px solid #059669; font-weight:bold;">
-            <button type="button" class="primary-button" id="save-cost-btn" onclick="saveOrderCost('${escapeHtml(order.id)}')" data-action="save-cost" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; font-size:11px; background:#059669;">💾 Guardar $</button>
-          </div>
-        </div>
-      ` : ''}
-      
-      <div style="display:flex; flex-direction:column; gap:4px; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
-        <span style="font-weight:700; color:var(--text-muted); font-size:12px;">DESCRIPCIÓN / MEDIDAS:</span>
-        <p style="font-size:14px; background:var(--bg-main); padding:8px; border-radius:6px; color:var(--text-main);">${escapeHtml(order.descripcion || "Sin descripción")}</p>
-      </div>
-      
-      ${refLinks.length ? `
-        <div style="margin-top:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">🖼️ FOTOS DE REFERENCIA DEL CLIENTE:</span>
-          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
-            ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ref ${idx + 1}</a>`).join("")}
-          </div>
-        </div>
-      ` : ''}
-
-      ${eviLinks.length ? `
-        <div style="margin-top:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">📷 FOTOS DE EVIDENCIA DE CIERRE:</span>
-          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
-            ${eviLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--success-color);">📷 Evidencia ${idx + 1}</a>`).join("")}
-          </div>
-        </div>
-      ` : ''}
-
-      <div style="margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">📝 BITÁCORA DE NOTAS Y OBSERVACIONES:</span>
-          <button type="button" class="secondary-button" id="add-note-btn" style="padding:2px 8px; font-size:11px;">＋ Añadir Nota</button>
-        </div>
-        <div style="background:var(--bg-main); padding:8px 12px; border-radius:6px; font-size:12px; max-height:120px; overflow-y:auto; color:var(--text-main); line-height:1.5;">
-          ${order.notas ? escapeHtml(order.notas).replace(/\n/g, '<br/>') : '<em style="color:var(--text-muted);">Sin observaciones o notas registradas.</em>'}
-        </div>
-      </div>
-    </div>
-    ${rawPhone ? `<div class="actions" style="margin-top:16px;"><a href="${whatsappUrl}" target="_blank" rel="noopener" class="secondary-button" style="background:#25D366; color:white; text-align:center; display:block; width:100%;">📲 Notificar por WhatsApp</a></div>` : ""}
-    ${isLead() ? `
-      <div class="actions" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        ${!active(order) ? `<button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>` : ''}
-        ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
-        <button class="secondary-button" style="background:#d32f2f; color:white; width:100%; border:none;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button>
-      </div>
-    ` : ""}
-  `);
-  
-  $("#status-change-select")?.addEventListener("change", async (e) => {
-    const val = e.target.value;
-    if (["Terminado", "Entregado"].includes(val)) {
-      closeModal();
-      openFinishModal(order, val);
-    } else {
-      let pauseNote = "";
-      if (val === "Pausado") {
-        pauseNote = prompt("Motivo de la pausa (ej: Esperando material, respuesta del cliente...):");
-        if (pauseNote === null) return;
-      }
-      try {
-        await api("profile_update_order", {
-          id: order.id,
-          user: state.session?.name || "Usuario",
-          changes: { estado: val, nota: pauseNote }
-        });
-        closeModal();
-        await refresh(false);
-        showToast(`Estado cambiado a ${val}.`);
-      } catch (err) {
-        alert(`Error: ${err.message}`);
-      }
-    }
-  });
-
-  $("#design-change-select")?.addEventListener("change", async (e) => {
-    const val = e.target.value;
-    try {
-      await api("profile_update_order", { id: order.id, changes: { diseno: val } });
-      order.diseno = val;
-      showToast(`Diseño actualizado a: ${val}`);
-      await refresh(false);
-    } catch (err) {
-      alert(`Error al actualizar estado del diseño: ${err.message}`);
-    }
-  });
-
-  $("#add-note-btn")?.addEventListener("click", async () => {
-    const text = prompt("Escribe una nota u observación para este pedido:");
-    if (text && text.trim()) {
-      try {
-        await api("profile_update_order", {
-          id: order.id,
-          user: state.session?.name || "Usuario",
-          changes: { nota: text.trim() }
-        });
-        showToast("Nota añadida a la bitácora.");
-        closeModal();
-        await refresh(false);
-      } catch (err) {
-        alert(`Error al guardar la nota: ${err.message}`);
-      }
-    }
-  });
-}
-
-window.saveOrderCost = async function(orderId) {
-  const input = document.getElementById("order-cost-input");
-  const btn = document.getElementById("save-cost-btn");
-  const val = parseFloat(input?.value || 0);
-  if (isNaN(val) || val < 0) {
-    alert("Por favor ingresa un monto válido en dólares.");
-    return;
-  }
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "⏳ Guardando...";
-  }
-  try {
-    await api("profile_save_cost", { id: orderId, costo: val });
-    const allTarget = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])];
-    allTarget.forEach(o => {
-      if (String(o.id).trim() === String(orderId).trim()) o.costo = val;
-    });
-    showToast(`💵 Precio de $${val.toFixed(2)} guardado.`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "✅ Guardado";
-      setTimeout(() => { if (btn) btn.textContent = "💾 Guardar $"; }, 2000);
-    }
-    await refresh(false);
-  } catch (err) {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "💾 Guardar $";
-    }
-    alert(`Error al guardar costo: ${err.message}`);
-  }
-};
-
-window.saveOrderDuration = async function(orderId) {
-  const input = document.getElementById("order-duration-input");
-  const btn = document.getElementById("save-duration-btn");
-  const val = parseInt(input?.value || 0, 10);
-  if (isNaN(val) || val < 0) {
-    alert("Por favor ingresa una cantidad válida de minutos.");
-    return;
-  }
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "⏳ Guardando...";
-  }
-  try {
-    await api("profile_update_order", { id: orderId, changes: { duracionRealMin: val } });
-    const allTarget = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])];
-    allTarget.forEach(o => {
-      if (String(o.id).trim() === String(orderId).trim()) o.duracionRealMin = val;
-    });
-    showToast(`⏱️ Duración actualizada a ${val} min.`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "✅ Guardado";
-      setTimeout(() => { if (btn) btn.textContent = "💾 Min"; }, 2000);
-    }
-    await refresh(false);
-  } catch (err) {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "💾 Min";
-    }
-    alert(`Error al guardar duración: ${err.message}`);
-  }
-};
-
-function openFinishModal(order, targetStatus) {
-  openModal(`
-    <div class="modal-head"><h2>Completar Trabajo (${targetStatus})</h2><button class="close-button" data-action="close">×</button></div>
-    <form id="finish-form" class="form-grid">
-      <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
-        <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración o imprevistos..."></textarea>
-      </label>
-      <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA DE CIERRE (HASTA 3 FOTOS)</span>
-        <input type="file" id="evidencia-files" accept="image/*" multiple>
-      </label>
-      <div id="file-preview-list" style="font-size:12px; color:var(--text-muted);"></div>
-      <div class="modal-footer"><button type="submit" class="primary-button">Guardar y Finalizar Pedido</button></div>
-    </form>
-  `);
-  
-  $("#finish-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "Guardando e subiendo evidencias...";
-    
-    const filesInput = $("#evidencia-files");
-    const files = filesInput ? Array.from(filesInput.files).slice(0, 3) : [];
-    const imagesData = [];
-    
-    for (const f of files) {
-      const compressed = await compressImageFile(f);
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(compressed);
-      });
-      imagesData.push({ data: base64, mimeType: "image/jpeg" });
-    }
-    
-    try {
-      await api("profile_update_order", {
-        id: order.id,
-        changes: {
-          estado: targetStatus,
-          comentarioCierre: e.target.comentarioCierre.value.trim(),
-          images: imagesData
-        }
-      });
-      closeModal();
-      await refresh(false);
-      showToast("Pedido finalizado con éxito.");
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "Guardar y Finalizar Pedido";
-      alert(`Error: ${err.message}`);
-    }
-  });
-}
-
-function formOrder() {
-  const users = (state.data.users || []).filter(u => u.active);
-  const clients = state.frequentClients;
-  const types = state.frequentTypes;
-  const motivos = state.frequentMotivos || [];
-  
-  openModal(`
-    <div class="modal-head"><h2>Registrar Pedido - Creaciones JJ</h2><button class="close-button" data-action="close">×</button></div>
-    
-    <div class="magic-paste-box">
-      <div class="magic-paste-title">✨ Pegado Mágico (WhatsApp / Plantillas de Reposteras)</div>
-      <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Medida 1kl: 14x14cm, Nombre: Yolber, Entregar: Miércoles')"></textarea>
-      <button type="button" id="magic-paste-btn" class="secondary-button" style="background:var(--primary-color); color:white; border:none;">🪄 Analizar y Llenar Campos</button>
-    </div>
-
-    <form id="order-form" class="form-grid">
-      ${clients.length ? `
-        <label class="field"><span class="field-label">SELECCIONAR CLIENTE GUARDADO</span>
-          <select id="fc-select"><option value="">-- Autocompletar datos --</option>${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone || "Sin tel.")})</option>`).join("")}</select>
-        </label>` : ''}
-      <div id="delivery-warning" class="delivery-warning-box" style="display:none;"></div>
-      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente"></label>
-      <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" type="tel" placeholder="Ingresa o cambia el número"></label>
-      
-      <label class="field"><span class="field-label">TIPO DE TRABAJO</span>
-        ${types.length ? `<select id="ft-select" style="margin-bottom:6px;"><option value="">-- Seleccionar existente --</option>${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}<option value="__CUSTOM__">Escribir otro nuevo...</option></select>` : ''}
-        <input id="input-tipo" name="tipo" required placeholder="Ej. Topper Acrílico, Maqueta...">
-      </label>
-
-      <label class="field"><span class="field-label">🎨 MOTIVO / TEMÁTICA</span>
-        ${motivos.length ? `<select id="motivo-select" style="margin-bottom:6px;"><option value="">-- Seleccionar motivo guardado --</option>${motivos.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}<option value="__CUSTOM__">Escribir nuevo motivo...</option></select>` : ''}
-        <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
-      </label>
-
-      <label class="field"><span class="field-label">🎨 ESTADO DEL DISEÑO</span>
-        <select name="diseno">
-          <option value="No">No ❌ (Pendiente por diseñar)</option>
-          <option value="En proceso">En proceso ✏️</option>
-          <option value="Sí" selected>Sí ✅ (Listo para cortar/armar)</option>
-        </select>
-      </label>
-
-      <label class="field"><span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
-        <input type="file" id="reference-files-input" accept="image/*" multiple>
-      </label>
-
-      <div class="form-inline">
-        <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" id="input-fecha-entrega" name="fechaEntrega" required></label>
-        <label class="field"><span class="field-label">HORA DE ENTREGA (7 AM - 9 PM)</span>
-          <select id="select-hora-entrega" name="horaEntrega" required>
-            ${generateTimeOptions("11:00 AM")}
-          </select>
-        </label>
-      </div>
-      <label class="field"><span class="field-label">RESPONSABLE</span>
-        <select name="responsable"><option value="">Sin asignar</option>${users.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")}</select>
-      </label>
-      <label class="field"><span class="field-label">DESCRIPCIÓN / MEDIDAS</span><textarea id="input-descripcion" name="descripcion" placeholder="Detalles, medidas, edad, posición..."></textarea></label>
-      <div class="modal-footer"><button type="submit" class="primary-button">Guardar Pedido</button></div>
-    </form>
-  `);
-
-  $("#magic-paste-btn")?.addEventListener("click", () => {
-    const raw = $("#magic-paste-input")?.value || "";
-    if (!raw.trim()) {
-      alert("Pega un texto en la caja antes de presionar Pegado Mágico.");
-      return;
-    }
-    const parsed = parseMagicPasteText(raw);
-    
-    if (parsed.cliente) $("#input-cliente").value = parsed.cliente;
-    if (parsed.telefono) $("#input-telefono").value = parsed.telefono;
-    if (parsed.tipo) $("#input-tipo").value = parsed.tipo;
-    if (parsed.motivo) $("#input-motivo").value = parsed.motivo;
-    if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
-    if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
-    if (parsed.descripcion) $("#input-descripcion").value = parsed.descripcion;
-    
-    showToast("✨ Campos llenados con Pegado Mágico.");
-  });
-
-  $("#fc-select")?.addEventListener("change", (e) => {
-    if (e.target.value !== "") {
-      const c = clients[e.target.value];
-      if (c) {
-        $("#input-cliente").value = c.name || "";
-        $("#input-telefono").value = c.phone || "";
-        const deliveryWarn = document.getElementById("delivery-warning");
-        if (deliveryWarn) {
-          if (c.delivery === "Sí") {
-            deliveryWarn.style.display = "block";
-            deliveryWarn.innerHTML = `🚚 <strong>Cliente con DELIVERY A DOMICILIO</strong><br>📍 <strong>Sector / Zona:</strong> ${escapeHtml(c.zona || 'No especificada')}<br>🏠 <strong>Dirección:</strong> ${escapeHtml(c.direccion || 'No especificada')}<br>⚠️ <em>El pedido DEBE quedar listo el día anterior al fin de jornada.</em>`;
-          } else {
-            deliveryWarn.style.display = "none";
+  for (var sIdx = 0; sIdx < sheetNamesToScan.length; sIdx++) {
+    var sh = ss.getSheetByName(sheetNamesToScan[sIdx]);
+    if (sh && sh.getLastRow() > 1) {
+      var d = sh.getDataRange().getValues();
+      for (var rIdx = 1; rIdx < d.length; rIdx++) {
+        var rawIdStr = String(d[rIdx][0] || "").trim();
+        var idMatch = rawIdStr.match(/PED-(\d+)/i);
+        if (idMatch) {
+          var num = parseInt(idMatch[1], 10);
+          if (!isNaN(num) && num > maxIdNum) {
+            maxIdNum = num;
           }
         }
       }
     }
-  });
-
-  $("#motivo-select")?.addEventListener("change", (e) => {
-    if (e.target.value && e.target.value !== "__CUSTOM__") {
-      $("#input-motivo").value = e.target.value;
-    }
-  });
-  
-  $("#ft-select")?.addEventListener("change", (e) => {
-    if (e.target.value && e.target.value !== "__CUSTOM__") {
-      $("#input-tipo").value = e.target.value;
-    }
-  });
-  
-  $("#order-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "Guardando pedido y referencias...";
-
-    const refInput = $("#reference-files-input");
-    const refFiles = refInput ? Array.from(refInput.files).slice(0, 3) : [];
-    const referenceImages = [];
-
-    for (const f of refFiles) {
-      const compressed = await compressImageFile(f);
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(compressed);
-      });
-      referenceImages.push({ data: base64, mimeType: "image/jpeg" });
-    }
-
-    try {
-      await api("profile_create_order", {
-        form: Object.fromEntries(new FormData(e.target)),
-        referenceImages: referenceImages
-      });
-      closeModal();
-      await refresh(false);
-      showToast("Pedido guardado exitosamente.");
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "Guardar Pedido";
-      alert(`Error: ${err.message}`);
-    }
-  });
-}
-
-function formNewUser() {
-  openModal(`
-    <div class="modal-head"><h2>Crear Perfil de Usuario</h2><button class="close-button" data-action="close">×</button></div>
-    <form id="user-form" class="form-grid">
-      <label class="field"><span class="field-label">NOMBRE DEL TRABAJADOR / JEFE</span><input name="name" required placeholder="Ej. Carlos / Valentina"></label>
-      <label class="field"><span class="field-label">PIN DE ACCESO (6 DÍGITOS)</span><input name="pin" type="password" inputmode="numeric" required maxlength="6" placeholder="123456"></label>
-      <label class="field"><span class="field-label">ROL DE USUARIO</span>
-        <select name="role">
-          <option value="trabajador">Trabajador (Hombre)</option>
-          <option value="trabajadora">Trabajadora (Mujer)</option>
-          <option value="jefe">Jefe (Administrador Hombre)</option>
-          <option value="jefa">Jefa (Administradora Mujer)</option>
-          <option value="manager">Manager / Jefatura General</option>
-        </select>
-      </label>
-      <div class="modal-footer">
-        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-        <button type="submit" class="primary-button">Crear Perfil</button>
-      </div>
-    </form>
-  `);
-  
-  $("#user-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    try {
-      await api("profile_create_user", Object.fromEntries(new FormData(e.target)));
-      closeModal();
-      await refresh(false);
-      showToast("Perfil creado.");
-    } catch (err) {
-      btn.disabled = false;
-      alert(`Error: ${err.message}`);
-    }
-  });
-}
-
-// (listeners de login, refresh y nav-button están al final del archivo)
-
-document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
-  const act = btn.dataset.action;
-  
-  if (act === "close") return closeModal();
-  if (act === "detail") {
-    const scope = btn.dataset.scope;
-    const targetId = String(btn.dataset.id || "").trim();
-    let o;
-    if (scope === "finished") {
-      o = (state.data.finishedOrders || []).find(i => String(i.id).trim() === targetId);
-    } else if (scope === "active") {
-      o = [...(state.data.allOrders || []), ...(state.data.myOrders || [])].find(i => String(i.id).trim() === targetId);
-    }
-    if (!o) {
-      o = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])].find(i => String(i.id).trim() === targetId);
-    }
-    if (o) detail(o);
-    return;
   }
-  if (act === "new-order") return formOrder();
-  if (act === "new-user") return formNewUser();
-  if (act === "clear-cache") {
-    store.remove("pp_profile_data");
-    showToast("Caché borrada.");
-    return refresh();
-  }
-  if (act === "logout") {
-    store.remove("pp_profile_session");
-    state.session = null;
-    showLogin();
-    return;
-  }
-  if (act === "toggle-user") {
-    const userName = btn.dataset.name;
-    const currentActive = btn.dataset.active === "true";
-    try {
-      await api("profile_toggle_user", { name: userName, active: !currentActive });
-      await refresh(false);
-      showToast(`Usuario ${!currentActive ? 'activado' : 'desactivado'}.`);
-    } catch (err) { alert(err.message); }
-    return;
-  }
-  if (act === "new-client") {
-    openModal(`
-      <div class="modal-head"><h2>➕ Registrar Cliente Frecuente</h2><button class="close-button" data-action="close">×</button></div>
-      <form id="new-client-form" class="form-grid">
-        <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input name="name" required placeholder="Ej. María González"></label>
-        <label class="field"><span class="field-label">TELÉFONO / WHATSAPP</span><input name="phone" type="tel" placeholder="04XXXXXXXXX"></label>
-        <label class="field"><span class="field-label">¿REQUIERE DELIVERY?</span>
-          <select name="delivery">
-            <option value="No">No – Retira en tienda / local</option>
-            <option value="Sí">Sí – Se le envía a domicilio</option>
-          </select>
-        </label>
-        <label class="field"><span class="field-label">ZONA / SECTOR (Ej: Norte, Los Palos Grandes)</span><input name="zona" placeholder="Ej. Norte, Sur, Este..."></label>
-        <label class="field"><span class="field-label">DIRECCIÓN EXACTA DE ENTREGA</span><input name="direccion" placeholder="Ej. Calle 5 con Av. Principal, Res. Las Flores, Apto 2B"></label>
-        <div class="modal-footer">
-          <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-          <button type="submit" class="primary-button">Guardar Cliente</button>
-        </div>
-      </form>
-    `);
-    document.getElementById("new-client-form")?.addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const b = ev.target.querySelector(".primary-button");
-      b.disabled = true;
-      try {
-        await api("profile_create_client", Object.fromEntries(new FormData(ev.target)));
-        closeModal();
-        await refresh(false);
-        showToast("Cliente guardado con éxito.");
-      } catch (err) {
-        b.disabled = false;
-        alert(`Error: ${err.message}`);
+
+  var nextSeqNum = maxIdNum + 1;
+  var newId = "PED-" + String(nextSeqNum).padStart(4, "0");
+  
+  var nowIso = new Date().toISOString();
+  var cliente = String(f.cliente || f.client || f.nombre || "").trim();
+  var tipo = String(f.tipo || f.type || f.servicio || "").trim();
+  var motivo = String(f.motivo || f.tematica || f.temática || "").trim();
+  var telefono = String(f.telefono || f.phone || f.celular || "").trim();
+  var fechaEntrega = f.fechaEntrega || f.entrega || "";
+  var horaEntrega = f.horaEntrega || f.hora || "18:00";
+  var entregaFull = parseFechaISO_(fechaEntrega, horaEntrega);
+  
+  var linksReferenceDrive = [];
+  var refImages = f.referenceImages || params.referenceImages || [];
+  if (refImages && refImages.length > 0) {
+    var folder;
+    var folders = DriveApp.getFoldersByName("Evidencias_Papeleria");
+    folder = folders.hasNext() ? folders.next() : DriveApp.createFolder("Evidencias_Papeleria");
+    
+    for (var rIdx = 0; rIdx < refImages.length; rIdx++) {
+      var imgObj = refImages[rIdx];
+      var base64Data = imgObj.data || imgObj;
+      if (typeof base64Data === "string") {
+        if (base64Data.indexOf(",") > -1) base64Data = base64Data.split(",")[1];
+        var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), imgObj.mimeType || "image/jpeg", newId + "_referencia_" + (rIdx + 1) + ".jpg");
+        var file = folder.createFile(blob);
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        linksReferenceDrive.push(file.getUrl());
       }
-    });
-    return;
-  }
-  if (act === "delete-client") {
-    if (confirm(`¿Eliminar el cliente "${btn.dataset.name}" de Google Sheets?`)) {
-      try {
-        await api("profile_delete_client", { name: btn.dataset.name });
-        await refresh(false);
-        showToast("Cliente eliminado.");
-      } catch (err) { alert(err.message); }
     }
-    return;
   }
-  if (act === "new-type") {
-    const typeName = prompt("Ingresa el nuevo tipo de trabajo:");
-    if (typeName && typeName.trim()) {
-      try {
-        await api("profile_create_type", { type: typeName.trim() });
-        await refresh(false);
-        showToast("Tipo de trabajo agregado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "delete-type") {
-    if (confirm(`¿Eliminar el tipo de trabajo "${btn.dataset.type}" de Google Sheets?`)) {
-      try {
-        await api("profile_delete_type", { type: btn.dataset.type });
-        await refresh(false);
-        showToast("Tipo de trabajo eliminado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "new-motivo") {
-    openModal(`
-      <div class="modal-head"><h2>🎨 Registrar Motivo / Temática</h2><button class="close-button" data-action="close">×</button></div>
-      <form id="new-motivo-form" class="form-grid">
-        <label class="field"><span class="field-label">NOMBRE DEL MOTIVO / TEMÁTICA</span>
-          <input name="motivo" required placeholder="Ej. Hello Kitty, Tarzán, Spider-Man, Cumpleaños 15...">
-        </label>
-        <div class="modal-footer">
-          <button type="button" class="secondary-button" data-action="close">Cancelar</button>
-          <button type="submit" class="primary-button">Guardar Motivo</button>
-        </div>
-      </form>
-    `);
-    document.getElementById("new-motivo-form")?.addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const bm = ev.target.querySelector(".primary-button");
-      bm.disabled = true;
-      try {
-        const val = ev.target.motivo.value.trim();
-        await api("profile_create_motivo", { motivo: val });
-        closeModal();
-        await refresh(false);
-        showToast("Motivo guardado en el catálogo.");
-      } catch (err) {
-        bm.disabled = false;
-        alert(`Error: ${err.message}`);
-      }
-    });
-    return;
-  }
-  if (act === "delete-motivo") {
-    const targetM = btn.dataset.motivo;
-    if (confirm(`¿Eliminar el motivo "${targetM}" del catálogo?`)) {
-      try {
-        await api("profile_delete_motivo", { motivo: targetM });
-        await refresh(false);
-        showToast("Motivo eliminado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "request-push-perm") {
-    if (!("Notification" in window)) {
-      alert("Este navegador no soporta notificaciones.");
-      return;
-    }
-    const perm = await Notification.requestPermission();
-    if (perm === "granted") {
-      showToast("🔔 ¡Notificaciones activadas con éxito!");
-      checkAndSendPushNotifications();
-    } else {
-      alert("Permiso de notificaciones no concedido. Habilítalo en la configuración del navegador.");
-    }
-    return;
-  }
-  if (act === "delete-order") {
-    if (confirm(`¿Eliminar el pedido "${btn.dataset.id}" del sistema?`)) {
-      try {
-        await api("profile_delete_order", { id: btn.dataset.id });
-        closeModal();
-        await refresh(false);
-        showToast("Pedido eliminado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "archive-old-orders") {
-    if (confirm("¿Deseas mover los proyectos terminados de más de 60 días al libro histórico para acelerar la aplicación?")) {
-      try {
-        const res = await api("profile_archive_old_orders", { days: 60 });
-        await refresh(false);
-        showToast(res.mensaje || "Archivado completado.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "reopen-order") {
-    if (confirm(`¿Deseas reabrir el proyecto "${btn.dataset.id}" y devolverlo a la lista de pedidos activos?`)) {
-      try {
-        await api("profile_reopen_order", { id: btn.dataset.id });
-        closeModal();
-        await refresh(false);
-        showToast("Proyecto reabierto y devuelto a la lista activa.");
-      } catch (err) { alert(err.message); }
-    }
-    return;
-  }
-  if (act === "mark-delivered") {
-    try {
-      await api("profile_update_order", { id: btn.dataset.id, changes: { estado: "Entregado" } });
-      closeModal();
-      await refresh(false);
-      showToast("Proyecto marcado como Entregado.");
-    } catch (err) { alert(err.message); }
-    return;
-  }
-});
+  var linksRefStr = linksReferenceDrive.join("\n");
 
-// ============================================================
-// INICIALIZACIÓN — siempre decide qué vista es visible
-// ============================================================
-function showLogin() {
-  const loginEl     = document.getElementById("login-view");
-  const workspaceEl = document.getElementById("workspace");
-  if (loginEl)     { loginEl.style.display     = "flex"; }
-  if (workspaceEl) { workspaceEl.style.display  = "none"; }
-}
-
-function showWorkspace() {
-  const loginEl     = document.getElementById("login-view");
-  const workspaceEl = document.getElementById("workspace");
-  if (loginEl)     { loginEl.style.display     = "none"; }
-  if (workspaceEl) { workspaceEl.style.display  = "flex"; }
-}
-
-function doLogin(e) {
-  if (e) {
-    try { e.preventDefault(); e.stopPropagation(); } catch (errEv) {}
-  }
-  
-  const nameInput = document.getElementById("login-name");
-  const pinInput  = document.getElementById("login-pin");
-  const errEl     = document.getElementById("login-error");
-  
-  const nameVal = (nameInput?.value || "").trim();
-  const pinVal  = (pinInput?.value || "").trim();
-
-  if (!nameVal || !pinVal) {
-    if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
-    return false;
-  }
-
-  const normName = nameVal.toLowerCase();
-  let userRole = "trabajador";
-  if (normName.includes("mois") || normName.includes("manag") || normName.includes("jef") || normName.includes("admin")) {
-    userRole = "manager";
-  }
-
-  const instantSession = {
-    name: nameVal,
-    nombre: nameVal,
-    role: userRole,
-    rol: userRole,
-    token: "session_instant_" + Date.now()
+  var fieldMap = {
+    "id": newId,
+    "fechaentrada": nowIso,
+    "cliente": cliente,
+    "tipo": tipo,
+    "motivo": motivo,
+    "descripcion": f.descripcion || "",
+    "cantidad": Number(f.cantidad || 1),
+    "entrega": entregaFull,
+    "horaentrega": horaEntrega,
+    "tiempoestimado": Number(f.tiempoEstimado || 1),
+    "responsable": f.responsable || params.user || "Sin asignar",
+    "estado": "Pendiente",
+    "urgente": "No",
+    "diseno": f.diseno || f.disenoListo || f.diseno_listo || "Sí",
+    "material": "Sí",
+    "notas": f.notas || "",
+    "cerrado": "No",
+    "fotosreferencia": linksRefStr,
+    "tiempopausadomin": 0,
+    "telefono": telefono
   };
 
-  state.session = instantSession;
-  store.set("pp_profile_session", instantSession);
-
-  // TRANSICIÓN INSTANTÁNEA A LA PANTALLA DE TRABAJO (0 milisegundos)
-  showWorkspace();
-  render();
-
-  // Sincronización en segundo plano sin bloquear la interfaz
-  api("profile_login", { name: nameVal, pin: pinVal }).then((res) => {
-    if (res && res.session) {
-      state.session = res.session;
-      store.set("pp_profile_session", res.session);
-      render();
+  var newRow = new Array(headers.length).fill("");
+  for (var c = 0; c < headers.length; c++) {
+    var hKey = String(headers[c] || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (fieldMap.hasOwnProperty(hKey)) {
+      newRow[c] = fieldMap[hKey];
     }
-  }).catch((err) => {
-    console.warn("Autenticación en segundo plano diferida:", err);
-  }).finally(() => {
-    refresh(false);
-  });
-
-  return false;
-}
-window.doLogin = doLogin;
-
-document.getElementById("login-btn-manual")?.addEventListener("click", doLogin);
-
-document.getElementById("login-form")?.addEventListener("submit", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  doLogin(e);
-  return false;
-});
-
-document.addEventListener("click", (e) => {
-  const target = e.target;
-  if (target && (target.id === "login-btn-manual" || target.classList.contains("login-submit-btn"))) {
-    e.preventDefault();
-    doLogin(e);
   }
-});
+  
+  sheetPed.appendRow(newRow);
+  
+  // Guardar cliente y teléfono en catálogo automáticamente
+  if (cliente) {
+    var sheetCl = ss.getSheetByName("Clientes") || ss.getSheetByName("Telefonos");
+    if (sheetCl) {
+      var dataC = sheetCl.getDataRange().getValues();
+      var existsC = false;
+      for (var cIdx = 1; cIdx < dataC.length; cIdx++) {
+        if (String(dataC[cIdx][0]).toLowerCase().trim() === cliente.toLowerCase()) {
+          existsC = true;
+          if (telefono && !dataC[cIdx][1]) {
+            sheetCl.getRange(cIdx + 1, 2).setValue(telefono);
+          }
+          break;
+        }
+      }
+      if (!existsC) sheetCl.appendRow([cliente, telefono]);
+    }
+  }
+  
+  if (tipo) {
+    var sheetTp = ss.getSheetByName("Tipos");
+    if (sheetTp) {
+      var dataT = sheetTp.getDataRange().getValues();
+      var existsT = dataT.some(function(r) { return String(r[0]).toLowerCase().trim() === tipo.toLowerCase(); });
+      if (!existsT) sheetTp.appendRow([tipo]);
+    }
+  }
+  
+  return { ok: true, exito: true, id: newId, mensaje: "Pedido " + newId + " creado con éxito." };
+}
 
-document.getElementById("refresh")?.addEventListener("click", () => refresh());
+// ==== 4. ACTUALIZAR PEDIDO ====
+function ppActualizarPedido_(ss, params) {
+  var sheetPed = ss.getSheetByName("Pedidos");
+  if (!sheetPed) throw new Error("No se encontró la hoja Pedidos.");
+  
+  var dataP = sheetPed.getDataRange().getValues();
+  var headers = dataP.length > 0 ? dataP[0] : [];
+  var getCol = makeColumnGetter_(headers);
+  
+  var idxId = getCol(["id"], 0);
+  var idxCliente = getCol(["cliente"], 2);
+  var idxTipo = getCol(["tipo"], 3);
+  var idxMotivo = getCol(["motivo"], 4);
+  var idxEntrega = getCol(["entrega"], 7);
+  var idxResponsable = getCol(["responsable"], 10);
+  var idxEstado = getCol(["estado"], 11);
+  var idxDiseno = getCol(["diseno", "diseño"], 13);
+  var idxNotas = getCol(["notas", "observaciones", "comentarios"], 14);
+  var idxCerrado = getCol(["cerrado"], 20);
+  var idxFechaCierre = getCol(["fechacierre", "fecha_cierre"], 21);
+  var idxInicioProd = getCol(["inicioproduccion", "inicio_produccion"], 22);
+  var idxFinProd = getCol(["finproduccion", "fin_produccion"], 23);
+  var idxDuracionReal = getCol(["duracionrealmin", "duracion_real_min"], 24);
+  var idxComentario = getCol(["comentariocierre", "comentario_cierre"], 25);
+  var idxFotosRef = getCol(["fotosreferencia", "referencias"], 26);
+  var idxFotosEvi = getCol(["fotosevidencia", "evidencias"], 27);
+  var idxUltPausa = getCol(["ultimapausa", "ultima_pausa"], 31);
+  var idxTiempoPausa = getCol(["tiempopausadomin", "tiempo_pausado_min"], 32);
 
-document.querySelectorAll(".nav-button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.screen = btn.dataset.screen || "now";
-    state.searchQuery = ""; // Limpiar filtro de búsqueda al cambiar de vista
-    render();
+  var targetId = String(params.id || "").trim();
+  var changes = params.changes || params;
+  var now = new Date();
+  var nowIso = now.toISOString();
+  var nowMs = now.getTime();
+  
+  for (var i = 1; i < dataP.length; i++) {
+    if (String(dataP[i][idxId]).trim() === targetId) {
+      var rowIdx = i + 1;
+      var estadoActual = String(dataP[i][idxEstado] || "Pendiente").trim();
+      var nuevoEstado = String(changes.estado || estadoActual).trim();
+      
+      if (changes.diseno || changes.diseño) {
+        sheetPed.getRange(rowIdx, idxDiseno + 1).setValue(changes.diseno || changes.diseño);
+      }
+
+      if (changes.nota || changes.notas) {
+        var oldNotas = String(dataP[i][idxNotas] || "").trim();
+        var author = String(params.user || changes.user || "Usuario").trim();
+        var timeStr = Utilities.formatDate(now, ss.getSpreadsheetTimeZone() || "GMT-4", "dd/MM/yyyy hh:mm a");
+        var noteText = String(changes.nota || changes.notas).trim();
+        var newEntry = "📌 [" + timeStr + " - " + author + "]: " + noteText;
+        var updatedNotas = oldNotas ? (oldNotas + "\n" + newEntry) : newEntry;
+        sheetPed.getRange(rowIdx, idxNotas + 1).setValue(updatedNotas);
+      }
+      
+      var inicioProd = dataP[i][idxInicioProd];
+      var ultPausa = dataP[i][idxUltPausa];
+      var acumuladoPausadoMin = Number(dataP[i][idxTiempoPausa] || 0);
+      
+      if (nuevoEstado === "En proceso") {
+        if (!inicioProd) {
+          sheetPed.getRange(rowIdx, idxInicioProd + 1).setValue(nowIso);
+          inicioProd = nowIso;
+        } else if (estadoActual === "Pausado" && ultPausa) {
+          var durPausaMin = (nowMs - new Date(ultPausa).getTime()) / 60000;
+          acumuladoPausadoMin += durPausaMin;
+          sheetPed.getRange(rowIdx, idxTiempoPausa + 1).setValue(acumuladoPausadoMin);
+          sheetPed.getRange(rowIdx, idxUltPausa + 1).setValue("");
+        }
+      }
+      
+      if (nuevoEstado === "Pausado" && estadoActual !== "Pausado") {
+        sheetPed.getRange(rowIdx, idxUltPausa + 1).setValue(nowIso);
+      }
+      
+      if (["Terminado", "Entregado", "Cancelado"].includes(nuevoEstado)) {
+        sheetPed.getRange(rowIdx, idxCerrado + 1).setValue("Sí");
+        sheetPed.getRange(rowIdx, idxFechaCierre + 1).setValue(nowIso);
+        sheetPed.getRange(rowIdx, idxFinProd + 1).setValue(nowIso);
+        
+        if (estadoActual === "Pausado" && ultPausa) {
+          acumuladoPausadoMin += (nowMs - new Date(ultPausa).getTime()) / 60000;
+          sheetPed.getRange(rowIdx, idxTiempoPausa + 1).setValue(acumuladoPausadoMin);
+        }
+        
+        var duracionReal = 0;
+        if (inicioProd) {
+          var totalTranscurridoMin = (nowMs - new Date(inicioProd).getTime()) / 60000;
+          duracionReal = Math.max(0, Math.round(totalTranscurridoMin - acumuladoPausadoMin));
+        }
+        sheetPed.getRange(rowIdx, idxDuracionReal + 1).setValue(duracionReal);
+        
+        var linksEviDrive = [];
+        if (changes.images && changes.images.length > 0) {
+          var folder;
+          var folders = DriveApp.getFoldersByName("Evidencias_Papeleria");
+          folder = folders.hasNext() ? folders.next() : DriveApp.createFolder("Evidencias_Papeleria");
+          
+          for (var imgIdx = 0; imgIdx < changes.images.length; imgIdx++) {
+            var imgObj = changes.images[imgIdx];
+            var base64Data = imgObj.data || imgObj;
+            if (typeof base64Data === "string") {
+              if (base64Data.indexOf(",") > -1) base64Data = base64Data.split(",")[1];
+              var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), imgObj.mimeType || "image/jpeg", targetId + "_evidencia_" + (imgIdx + 1) + ".jpg");
+              var file = folder.createFile(blob);
+              file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+              linksEviDrive.push(file.getUrl());
+            }
+          }
+        }
+        
+        var linksEviStr = linksEviDrive.join("\n");
+        var comentario = changes.comentarioCierre ? String(changes.comentarioCierre).trim() : "";
+        
+        if (comentario) sheetPed.getRange(rowIdx, idxComentario + 1).setValue(comentario);
+        if (linksEviStr) sheetPed.getRange(rowIdx, idxFotosEvi + 1).setValue(linksEviStr);
+        
+        var sheetTerm = ss.getSheetByName("Proyectos_Terminados") || ss.insertSheet("Proyectos_Terminados");
+        var dataTerm = sheetTerm.getDataRange().getValues();
+        var existingTermRow = -1;
+        for (var t = 1; t < dataTerm.length; t++) {
+          if (String(dataTerm[t][0] || "").trim() === targetId) {
+            existingTermRow = t + 1;
+            break;
+          }
+        }
+
+        var currentDiseno = String(changes.diseno || changes.diseño || dataP[i][idxDiseno] || "Sí").trim();
+        var currentNotas = String(dataP[i][idxNotas] || changes.nota || changes.notas || "").trim();
+
+        var rowValues = [
+          targetId,
+          dataP[i][idxCliente] || "",
+          dataP[i][idxTipo] || "",
+          dataP[i][idxMotivo] || "",
+          dataP[i][idxResponsable] || "",
+          nuevoEstado,
+          dataP[i][idxEntrega] || "",
+          inicioProd || nowIso,
+          nowIso,
+          duracionReal,
+          comentario,
+          dataP[i][idxFotosRef] || "",
+          linksEviStr || dataP[i][idxFotosEvi] || "",
+          currentDiseno,
+          currentNotas
+        ];
+
+        if (existingTermRow > 0) {
+          sheetTerm.getRange(existingTermRow, 1, 1, rowValues.length).setValues([rowValues]);
+        } else {
+          sheetTerm.appendRow(rowValues);
+        }
+      }
+      
+      sheetPed.getRange(rowIdx, idxEstado + 1).setValue(nuevoEstado);
+      if (changes.responsable !== undefined) sheetPed.getRange(rowIdx, idxResponsable + 1).setValue(changes.responsable);
+      
+      return { ok: true, exito: true, mensaje: "Pedido actualizado correctamente." };
+    }
+  }
+  
+  // Si no se encontró en Pedidos activos, buscar en Proyectos_Terminados (Historial)
+  var sheetTerm = ss.getSheetByName("Proyectos_Terminados");
+  if (sheetTerm && sheetTerm.getLastRow() > 1) {
+    var dataT = sheetTerm.getDataRange().getValues();
+    for (var j = 1; j < dataT.length; j++) {
+      if (String(dataT[j][0] || "").trim() === targetId) {
+        var rowTIdx = j + 1;
+        if (changes.duracionRealMin !== undefined) {
+          sheetTerm.getRange(rowTIdx, 10).setValue(Number(changes.duracionRealMin || 0));
+        }
+        if (changes.costo !== undefined || changes.precio !== undefined) {
+          sheetTerm.getRange(rowTIdx, 16).setValue(Number(changes.costo || changes.precio || 0));
+        }
+        if (changes.diseno || changes.diseño) {
+          sheetTerm.getRange(rowTIdx, 14).setValue(String(changes.diseno || changes.diseño));
+        }
+        if (changes.responsable !== undefined) {
+          sheetTerm.getRange(rowTIdx, 5).setValue(String(changes.responsable));
+        }
+        if (changes.estado !== undefined) {
+          sheetTerm.getRange(rowTIdx, 6).setValue(String(changes.estado));
+        }
+        if (changes.nota || changes.notas) {
+          var oldNotes = String(dataT[j][14] || "").trim();
+          var authorT = String(params.user || changes.user || "Usuario").trim();
+          var timeStrT = Utilities.formatDate(now, ss.getSpreadsheetTimeZone() || "GMT-4", "dd/MM/yyyy hh:mm a");
+          var noteTextT = String(changes.nota || changes.notas).trim();
+          var newEntryT = "📌 [" + timeStrT + " - " + authorT + "]: " + noteTextT;
+          var updatedNotesT = oldNotes ? (oldNotes + "\n" + newEntryT) : newEntryT;
+          sheetTerm.getRange(rowTIdx, 15).setValue(updatedNotesT);
+        }
+        return { ok: true, exito: true, mensaje: "Proyecto histórico actualizado correctamente." };
+      }
+    }
+  }
+
+  throw new Error("Pedido no encontrado.");
+}
+
+// ==== 5. REABRIR PEDIDO TERMINADO Y ASIGNAR RESPONSABLE ====
+function ppReabrirPedido_(ss, params) {
+  var sheetPed = ss.getSheetByName("Pedidos") || ss.insertSheet("Pedidos");
+  var sheetTerm = ss.getSheetByName("Proyectos_Terminados");
+  var targetId = String(params.id || "").trim();
+  var currentUser = String(params.user || "").trim();
+  
+  var foundInPed = false;
+  var orderDataToRestore = null;
+
+  if (sheetPed) {
+    var dataP = sheetPed.getDataRange().getValues();
+    var headers = dataP.length > 0 ? dataP[0] : [];
+    var getCol = makeColumnGetter_(headers);
+    var idxId = getCol(["id"], 0);
+    var idxEstado = getCol(["estado"], 11);
+    var idxCerrado = getCol(["cerrado"], 20);
+    var idxFechaCierre = getCol(["fechacierre"], 21);
+    var idxFinProd = getCol(["finproduccion"], 23);
+    var idxResponsable = getCol(["responsable"], 10);
+
+    for (var i = 1; i < dataP.length; i++) {
+      if (String(dataP[i][idxId]).trim() === targetId) {
+        var rowIdx = i + 1;
+        foundInPed = true;
+        sheetPed.getRange(rowIdx, idxEstado + 1).setValue("Pendiente");
+        sheetPed.getRange(rowIdx, idxCerrado + 1).setValue("No");
+        sheetPed.getRange(rowIdx, idxFechaCierre + 1).setValue("");
+        sheetPed.getRange(rowIdx, idxFinProd + 1).setValue("");
+        
+        var currentResp = String(dataP[i][idxResponsable] || "").trim();
+        if (!currentResp || currentResp === "1" || !isNaN(currentResp)) {
+          sheetPed.getRange(rowIdx, idxResponsable + 1).setValue(currentUser || "Valentina");
+        }
+        break;
+      }
+    }
+  }
+
+  if (sheetTerm) {
+    var dataT = sheetTerm.getDataRange().getValues();
+    for (var j = 1; j < dataT.length; j++) {
+      if (String(dataT[j][0]).trim() === targetId) {
+        orderDataToRestore = dataT[j];
+        sheetTerm.deleteRow(j + 1);
+        break;
+      }
+    }
+  }
+
+  if (!foundInPed && orderDataToRestore) {
+    var fieldMapRestored = {
+      "id": targetId,
+      "fechaentrada": new Date().toISOString(),
+      "cliente": orderDataToRestore[1],
+      "tipo": orderDataToRestore[2],
+      "motivo": orderDataToRestore[3],
+      "entrega": orderDataToRestore[6],
+      "responsable": orderDataToRestore[4] || currentUser || "Valentina",
+      "estado": "Pendiente",
+      "urgente": "No",
+      "diseno": "Sí",
+      "material": "Sí",
+      "cerrado": "No",
+      "comentariocierre": orderDataToRestore[10],
+      "fotosreferencia": orderDataToRestore[11],
+      "fotosevidencia": orderDataToRestore[12]
+    };
+    
+    var hPed = ensureCanonicalHeaders_(sheetPed);
+    var rRow = new Array(hPed.length).fill("");
+    for (var cRest = 0; cRest < hPed.length; cRest++) {
+      var kRest = String(hPed[cRest] || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (fieldMapRestored.hasOwnProperty(kRest)) {
+        rRow[cRest] = fieldMapRestored[kRest];
+      }
+    }
+    sheetPed.appendRow(rRow);
+  }
+
+  return { ok: true, exito: true, mensaje: "Pedido " + targetId + " reabierto y devuelto a la lista de pedidos activos." };
+}
+
+// ==== 6. ELIMINAR PEDIDO (borra de Pedidos Y Proyectos_Terminados simultáneamente) ====
+function ppEliminarPedido_(ss, params) {
+  var targetId = String(params.id || params.targetId || params.pedidoId || "").trim();
+  if (!targetId) throw new Error("ID de pedido requerido para eliminar.");
+  var targetLower = targetId.toLowerCase();
+  var deletedAny = false;
+
+  // 1. Buscar y eliminar de Pedidos (todas las ocurrencias)
+  var sheetPed = ss.getSheetByName("Pedidos");
+  if (sheetPed && sheetPed.getLastRow() > 1) {
+    var dataP = sheetPed.getDataRange().getValues();
+    for (var i = dataP.length - 1; i >= 1; i--) {
+      var rowP = dataP[i];
+      var matchP = rowP.some(function(val) {
+        return String(val).trim().toLowerCase() === targetLower;
+      });
+      if (matchP) {
+        sheetPed.deleteRow(i + 1);
+        deletedAny = true;
+      }
+    }
+  }
+
+  // 2. Buscar y eliminar de Proyectos_Terminados (todas las ocurrencias)
+  var sheetTerm = ss.getSheetByName("Proyectos_Terminados");
+  if (sheetTerm && sheetTerm.getLastRow() > 1) {
+    var dataT = sheetTerm.getDataRange().getValues();
+    for (var j = dataT.length - 1; j >= 1; j--) {
+      var rowT = dataT[j];
+      var matchT = rowT.some(function(val) {
+        return String(val).trim().toLowerCase() === targetLower;
+      });
+      if (matchT) {
+        sheetTerm.deleteRow(j + 1);
+        deletedAny = true;
+      }
+    }
+  }
+
+  if (deletedAny) {
+    return { ok: true, exito: true, mensaje: "Pedido " + targetId + " eliminado permanentemente de todas las hojas del sistema." };
+  }
+
+  throw new Error("Pedido no encontrado en ninguna hoja: " + targetId);
+}
+
+// ==== 7. GESTIÓN DE USUARIOS ====
+function ppCrearUsuario_(ss, params) {
+  var sheetU = getOrCreateSheetFlexible_(ss, "Usuarios", ["Users"], ["Nombre", "Rol", "PIN", "Activo"]);
+  var uName = String(params.name || params.nombre || "").trim();
+  var uRole = String(params.role || params.rol || "trabajador").trim().toLowerCase();
+  var uPin = String(params.pin || "").trim();
+  if (!uName || !uPin) throw new Error("Nombre y PIN son obligatorios.");
+  
+  sheetU.appendRow([uName, uRole, uPin, "Sí"]);
+  return { ok: true, exito: true, mensaje: "Usuario creado." };
+}
+
+function ppToggleUsuario_(ss, params) {
+  var sheetU = getOrCreateSheetFlexible_(ss, "Usuarios", ["Users"], ["Nombre", "Rol", "PIN", "Activo"]);
+  var targetName = String(params.name || params.nombre || "").trim().toLowerCase();
+  var activeVal = (params.active === true || params.active === "true" || params.activo === "Sí") ? "Sí" : "No";
+  var dataU = sheetU.getDataRange().getValues();
+  
+  for (var i = 1; i < dataU.length; i++) {
+    if (String(dataU[i][0]).trim().toLowerCase() === targetName) {
+      sheetU.getRange(i + 1, 4).setValue(activeVal);
+      return { ok: true, exito: true, mensaje: "Estado de usuario actualizado." };
+    }
+  }
+  throw new Error("Usuario no encontrado.");
+}
+
+// ==== 8. GESTIÓN DE CLIENTES (con Delivery, Zona y Dirección) ====
+function ppGuardarCliente_(ss, params) {
+  var sheetC = getOrCreateSheetFlexible_(ss, "Clientes", ["Telefonos"], ["Nombre", "Telefono", "Delivery", "Zona", "Direccion"]);
+  // Asegurar que la hoja tenga las 5 columnas de encabezado
+  var headers = sheetC.getRange(1, 1, 1, sheetC.getLastColumn()).getValues()[0];
+  var neededCols = ["Nombre", "Telefono", "Delivery", "Zona", "Direccion"];
+  neededCols.forEach(function(col) {
+    var colLower = col.toLowerCase();
+    var found = headers.some(function(h) { return String(h).toLowerCase() === colLower; });
+    if (!found) {
+      sheetC.getRange(1, headers.length + 1).setValue(col);
+      headers.push(col);
+    }
   });
-});
 
-// Aplicar tema y decidir vista inicial
-applyTheme();
-if (state.session) {
-  showWorkspace();
-  render();
-  refresh(false);
-} else {
-  showLogin();
+  var name     = String(params.name     || params.nombre   || params.cliente  || "").trim();
+  var phone    = String(params.phone    || params.telefono || params.celular  || "").trim();
+  var delivery = String(params.delivery || "No").trim();
+  var zona     = String(params.zona     || "").trim();
+  var direccion= String(params.direccion|| "").trim();
+  if (!name) throw new Error("Nombre del cliente no puede estar vacío.");
+
+  // Actualizar si ya existe
+  var dataC = sheetC.getDataRange().getValues();
+  for (var i = 1; i < dataC.length; i++) {
+    if (String(dataC[i][0]).toLowerCase().trim() === name.toLowerCase()) {
+      sheetC.getRange(i + 1, 1, 1, 5).setValues([[name, phone || dataC[i][1], delivery, zona, direccion]]);
+      return { ok: true, exito: true, mensaje: "Cliente actualizado." };
+    }
+  }
+
+  sheetC.appendRow([name, phone, delivery, zona, direccion]);
+  return { ok: true, exito: true, mensaje: "Cliente guardado." };
+}
+
+function ppEliminarCliente_(ss, params) {
+  var sheetC = getOrCreateSheetFlexible_(ss, "Clientes", ["Telefonos"], ["Nombre", "Telefono"]);
+  var target = String(params.name || params.nombre || params.cliente || "").trim().toLowerCase();
+  var dataC = sheetC.getDataRange().getValues();
+  for (var i = 1; i < dataC.length; i++) {
+    if (String(dataC[i][0]).trim().toLowerCase() === target) {
+      sheetC.deleteRow(i + 1);
+      return { ok: true, exito: true, mensaje: "Cliente eliminado." };
+    }
+  }
+  throw new Error("Cliente no encontrado.");
+}
+
+// ==== 9. GESTIÓN DE TIPOS DE TRABAJO ====
+function ppGuardarTipo_(ss, params) {
+  var sheetT = getOrCreateSheetFlexible_(ss, "Tipos", ["Tipos de Trabajo"], ["Tipo", "DiasEstimados"]);
+  var type = String(params.type || params.tipo || params.nombre || "").trim();
+  var dias = Number(params.dias || params.diasEstimados || 1);
+  if (!type) throw new Error("El tipo de trabajo no puede estar vacío.");
+  
+  sheetT.appendRow([type, dias]);
+  return { ok: true, exito: true, mensaje: "Tipo de trabajo guardado." };
+}
+
+function ppEliminarTipo_(ss, params) {
+  var sheetT = getOrCreateSheetFlexible_(ss, "Tipos", ["Tipos de Trabajo"], ["Tipo"]);
+  var target = String(params.type || params.tipo || "").trim().toLowerCase();
+  var dataT = sheetT.getDataRange().getValues();
+  for (var i = 1; i < dataT.length; i++) {
+    if (String(dataT[i][0]).trim().toLowerCase() === target) {
+      sheetT.deleteRow(i + 1);
+      return { ok: true, exito: true, mensaje: "Tipo de trabajo eliminado." };
+    }
+  }
+  throw new Error("Tipo de trabajo no encontrado.");
+}
+
+// ==== 10. GESTIÓN DE MOTIVOS ====
+function ppGuardarMotivo_(ss, params) {
+  var sheetM = getOrCreateSheetFlexible_(ss, "Motivos", ["Tematicas", "Temáticas"], ["Motivo"]);
+  var motivo = String(params.motivo || params.motivo || params.nombre || params.name || "").trim();
+  if (!motivo) throw new Error("El motivo no puede estar vacío.");
+  var dataM = sheetM.getDataRange().getValues();
+  var exists = dataM.some(function(r) { return String(r[0]).toLowerCase().trim() === motivo.toLowerCase(); });
+  if (exists) return { ok: true, exito: true, mensaje: "El motivo ya existe." };
+  sheetM.appendRow([motivo]);
+  return { ok: true, exito: true, mensaje: "Motivo guardado." };
+}
+
+function ppEliminarMotivo_(ss, params) {
+  var sheetM = ss.getSheetByName("Motivos");
+  if (!sheetM) throw new Error("Hoja Motivos no encontrada.");
+  var target = String(params.motivo || params.nombre || params.name || "").trim().toLowerCase();
+  var dataM = sheetM.getDataRange().getValues();
+  for (var i = 1; i < dataM.length; i++) {
+    if (String(dataM[i][0]).trim().toLowerCase() === target) {
+      sheetM.deleteRow(i + 1);
+      return { ok: true, exito: true, mensaje: "Motivo eliminado." };
+    }
+  }
+  throw new Error("Motivo no encontrado.");
+}
+
+// ==== AUXILIARES DE FECHAS Y BÚSQUEDA ====
+function parseFechaISO_(val, horaVal) {
+  if (!val) return "";
+  if (val instanceof Date) return val.toISOString();
+  var str = String(val).trim();
+  
+  var hStr = "18:00";
+  if (horaVal) {
+    var matchH = String(horaVal).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (matchH) {
+      var hNum = parseInt(matchH[1], 10);
+      var mNum = matchH[2];
+      var ap = matchH[3] ? matchH[3].toUpperCase() : "";
+      if (ap === "PM" && hNum < 12) hNum += 12;
+      if (ap === "AM" && hNum === 12) hNum = 0;
+      hStr = (hNum < 10 ? "0" + hNum : hNum) + ":" + mNum;
+    }
+  }
+  
+  if (!str.includes("T")) str += "T" + hStr + ":00";
+  var d = new Date(str);
+  return isNaN(d.getTime()) ? String(val) : d.toISOString();
+}
+
+function ensureCanonicalTerminadosHeaders_(sheetTerm) {
+  var canonical = [
+    "ID", "Cliente", "Tipo", "Motivo", "Responsable", "Estado", "Entrega", 
+    "Inicio_produccion", "Fin_produccion", "Duracion_real_min", "Comentario_cierre", 
+    "Fotos_Referencia", "Fotos_Evidencia", "Diseño", "Notas", "Costo"
+  ];
+  if (!sheetTerm) return canonical;
+  if (sheetTerm.getLastRow() === 0) {
+    sheetTerm.appendRow(canonical);
+    return canonical;
+  }
+  
+  var data = sheetTerm.getDataRange().getValues();
+  var currentHeaders = data[0].map(function(h) { return String(h || "").trim(); });
+  
+  var hasMotivo = currentHeaders.some(function(h) {
+    var k = h.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return k === "motivo" || k === "tematica" || k === "temtica";
+  });
+  
+  if (!hasMotivo) {
+    sheetTerm.getRange(1, 1, 1, canonical.length).setValues([canonical]);
+  } else {
+    sheetTerm.getRange(1, 1, 1, canonical.length).setValues([canonical]);
+  }
+  return canonical;
+}
+
+function getOrCreateSheetFlexible_(ss, preferredName, altNames, headers) {
+  var sheets = ss.getSheets();
+  var candidates = [preferredName].concat(altNames || []);
+  for (var c = 0; c < candidates.length; c++) {
+    var target = candidates[c].toLowerCase().trim();
+    for (var s = 0; s < sheets.length; s++) {
+      if (sheets[s].getName().toLowerCase().trim() === target) {
+        return sheets[s];
+      }
+    }
+  }
+  var newSheet = ss.insertSheet(preferredName);
+  if (headers && headers.length) {
+    newSheet.appendRow(headers);
+  }
+  return newSheet;
+}
+
+function makeColumnGetter_(headers) {
+  var map = {};
+  for (var i = 0; i < headers.length; i++) {
+    var h = String(headers[i] || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (h) map[h] = i;
+  }
+  return function(possibleNames, defaultIdx) {
+    for (var k = 0; k < possibleNames.length; k++) {
+      var name = possibleNames[k].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (map.hasOwnProperty(name)) {
+        return map[name];
+      }
+    }
+    return defaultIdx;
+  };
+}
+
+function ppHash_(val) {
+  var rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(val || ""));
+  return rawHash.map(function(byte) {
+    return (byte < 0 ? byte + 256 : byte).toString(16).padStart(2, "0");
+  }).join("");
+}
+
+// ==== 6b. ARCHIVAR PEDIDOS ANTIGUOS DE PROYECTOS TERMINADOS (> 60 DÍAS) ====
+function ppArchivarPedidosAntiguos_(ss, params) {
+  var sheetTerm = ss.getSheetByName("Proyectos_Terminados");
+  if (!sheetTerm || sheetTerm.getLastRow() <= 1) {
+    return { ok: true, exito: true, mensaje: "No hay proyectos terminados para archivar." };
+  }
+
+  var sheetHist = ss.getSheetByName("Proyectos_Terminados_Historico");
+  if (!sheetHist) {
+    sheetHist = ss.insertSheet("Proyectos_Terminados_Historico");
+    sheetHist.appendRow([
+      "ID", "Cliente", "Tipo", "Motivo", "Responsable", "Estado", "Entrega", "Inicio_produccion", "Fin_produccion", "Duracion_real_min", "Comentario_cierre", "Fotos_Referencia", "Fotos_Evidencia"
+    ]);
+  }
+
+  var dataT = sheetTerm.getDataRange().getValues();
+  var now = new Date();
+  var cutoffDays = Number(params.days || 60);
+  var cutoffMs = cutoffDays * 24 * 60 * 60 * 1000;
+  var archivedCount = 0;
+
+  for (var j = dataT.length - 1; j >= 1; j--) {
+    var row = dataT[j];
+    var finProdStr = row[8] || row[6] || "";
+    var finDate = finProdStr ? new Date(finProdStr) : null;
+
+    if (finDate && !isNaN(finDate.getTime())) {
+      if (now.getTime() - finDate.getTime() > cutoffMs) {
+        sheetHist.appendRow(row);
+        sheetTerm.deleteRow(j + 1);
+        archivedCount++;
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    exito: true,
+    mensaje: "Se archivaron " + archivedCount + " pedidos antiguos (> " + cutoffDays + " días) en Proyectos_Terminados_Historico."
+  };
+}
+
+// ==== 6c. COSTOS E INGRESOS ====
+function ppGuardarCosto_(ss, params) {
+  var targetId = String(params.id || "").trim();
+  var costo = Number(params.costo || 0);
+  if (!targetId) throw new Error("ID de pedido requerido.");
+
+  var updatedAny = false;
+
+  var sheetPed = ss.getSheetByName("Pedidos");
+  if (sheetPed && sheetPed.getLastRow() > 1) {
+    var dataP = sheetPed.getDataRange().getValues();
+    var headersP = dataP[0];
+    var getColP = makeColumnGetter_(headersP);
+    var idxIdP = getColP(["id"], 0);
+    var idxCostoP = getColP(["costo", "precio", "monto"], -1);
+    if (idxCostoP === -1) {
+      idxCostoP = headersP.length;
+      sheetPed.getRange(1, idxCostoP + 1).setValue("Costo");
+    }
+    for (var i = 1; i < dataP.length; i++) {
+      if (String(dataP[i][idxIdP]).trim() === targetId) {
+        sheetPed.getRange(i + 1, idxCostoP + 1).setValue(costo);
+        updatedAny = true;
+        break;
+      }
+    }
+  }
+
+  var sheetTerm = ss.getSheetByName("Proyectos_Terminados");
+  if (sheetTerm && sheetTerm.getLastRow() > 1) {
+    var dataT = sheetTerm.getDataRange().getValues();
+    var headersT = dataT[0];
+    var getColT = makeColumnGetter_(headersT);
+    var idxIdT = getColT(["id"], 0);
+    var idxCostoT = getColT(["costo", "precio", "monto"], -1);
+    if (idxCostoT === -1) {
+      idxCostoT = headersT.length;
+      sheetTerm.getRange(1, idxCostoT + 1).setValue("Costo");
+    }
+    for (var j = 1; j < dataT.length; j++) {
+      if (String(dataT[j][idxIdT]).trim() === targetId) {
+        sheetTerm.getRange(j + 1, idxCostoT + 1).setValue(costo);
+        updatedAny = true;
+        break;
+      }
+    }
+  }
+
+  return { ok: true, exito: true, costo: costo, mensaje: "Costo/Precio de $" + costo.toFixed(2) + " guardado para el pedido " + targetId };
+}
+
+// ==== 6d. HORARIOS Y TURNOS DE TRABAJADORES (CON HISTÓRICO SEMANAL) ====
+function ppObtenerHorarios_(ss) {
+  var sheet = getOrCreateSheetFlexible_(ss, "Horarios", ["Schedules", "Turnos"], [
+    "Semana", "Trabajador", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"
+  ]);
+  var data = sheet.getDataRange().getValues();
+  var schedules = [];
+  if (data.length <= 1) return schedules;
+  
+  var hasSemanaCol = String(data[0][0] || "").toLowerCase().includes("semana");
+  var offset = hasSemanaCol ? 1 : 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var sem = hasSemanaCol ? String(data[i][0] || "").trim() : "";
+    var name = String(data[i][offset] || "").trim();
+    if (!name) continue;
+    schedules.push({
+      semana: sem,
+      trabajador: name,
+      lunes: String(data[i][offset + 1] || "3:00 PM - 7:00 PM").trim(),
+      martes: String(data[i][offset + 2] || "3:00 PM - 7:00 PM").trim(),
+      miercoles: String(data[i][offset + 3] || "3:00 PM - 7:00 PM").trim(),
+      jueves: String(data[i][offset + 4] || "3:00 PM - 7:00 PM").trim(),
+      viernes: String(data[i][offset + 5] || "3:00 PM - 7:00 PM").trim(),
+      sabado: String(data[i][offset + 6] || "Libre").trim(),
+      domingo: String(data[i][offset + 7] || "Libre").trim()
+    });
+  }
+  return schedules;
+}
+
+function ppGuardarHorario_(ss, params) {
+  var sheet = getOrCreateSheetFlexible_(ss, "Horarios", ["Schedules", "Turnos"], [
+    "Semana", "Trabajador", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"
+  ]);
+  
+  var data = sheet.getDataRange().getValues();
+  var hasSemanaCol = String(data[0][0] || "").toLowerCase().includes("semana");
+  
+  if (!hasSemanaCol && data.length > 0) {
+    sheet.insertColumnBefore(1);
+    sheet.getRange(1, 1).setValue("Semana");
+    data = sheet.getDataRange().getValues();
+  }
+
+  var semana = String(params.semana || "").trim();
+  var trabajador = String(params.trabajador || "").trim();
+  if (!trabajador) throw new Error("Nombre del trabajador requerido.");
+
+  var foundRow = -1;
+  for (var i = 1; i < data.length; i++) {
+    var rSem = String(data[i][0] || "").trim();
+    var rTrab = String(data[i][1] || "").trim();
+    if (rTrab.toLowerCase() === trabajador.toLowerCase() && (rSem === semana || (!semana && !rSem))) {
+      foundRow = i + 1;
+      break;
+    }
+  }
+
+  var rowValues = [
+    semana,
+    trabajador,
+    String(params.lunes || "Libre").trim(),
+    String(params.martes || "Libre").trim(),
+    String(params.miercoles || "Libre").trim(),
+    String(params.jueves || "Libre").trim(),
+    String(params.viernes || "Libre").trim(),
+    String(params.sabado || "Libre").trim(),
+    String(params.domingo || "Libre").trim()
+  ];
+
+  if (foundRow > 0) {
+    sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+  } else {
+    sheet.appendRow(rowValues);
+  }
+
+  return { ok: true, exito: true, mensaje: "Horario guardado para " + trabajador + (semana ? " (Semana: " + semana + ")" : "") + "." };
 }
