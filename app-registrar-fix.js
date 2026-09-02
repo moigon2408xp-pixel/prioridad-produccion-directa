@@ -233,7 +233,8 @@ const normalizeOrder = (o) => {
     duracionRealMin: Number(o.duracionRealMin || o.Duracion_real_min || 0),
     ultimaPausa: String(o.ultimaPausa || o.UltimaPausa || "").trim(),
     tiempoPausadoMin: Number(o.tiempoPausadoMin || o.TiempoPausadoMin || 0),
-    cerrado: String(o.cerrado || o.Cerrado || "No").trim()
+    cerrado: String(o.cerrado || o.Cerrado || "No").trim(),
+    costo: Number(o.costo || o.Costo || o.precio || o.monto || 0)
   };
 };
 
@@ -1899,10 +1900,14 @@ function detail(order) {
       <div style="margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span style="font-weight:700; color:var(--text-muted); font-size:12px;">📝 BITÁCORA DE NOTAS Y OBSERVACIONES:</span>
-          <button type="button" class="secondary-button" id="add-note-btn" style="padding:2px 8px; font-size:11px;">＋ Añadir Nota</button>
+          <button type="button" class="secondary-button" id="add-note-btn" style="padding:3px 8px; font-size:11px; background:var(--primary-color); color:white; border:none;">＋ Añadir Nota</button>
         </div>
-        <div style="background:var(--bg-main); padding:8px 12px; border-radius:6px; font-size:12px; max-height:120px; overflow-y:auto; color:var(--text-main); line-height:1.5;">
-          ${order.notas ? escapeHtml(order.notas).replace(/\n/g, '<br/>') : '<em style="color:var(--text-muted);">Sin observaciones o notas registradas.</em>'}
+        <div style="background:var(--bg-main); padding:10px 12px; border-radius:6px; font-size:12px; max-height:140px; overflow-y:auto; color:var(--text-main); line-height:1.6; border:1px solid var(--border-color);">
+          ${order.notas ? order.notas.split('\n').map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return '';
+            return `<div style="margin-bottom:6px; padding-bottom:4px; border-bottom:1px dashed var(--border-color); word-break:break-word;">${escapeHtml(trimmed)}</div>`;
+          }).join('') : '<em style="color:var(--text-muted);">Sin observaciones o notas registradas.</em>'}
         </div>
       </div>
     </div>
