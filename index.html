@@ -113,12 +113,14 @@
 
       <main id="screen" class="screen" aria-live="polite"></main>
 
-      <nav class="bottom-nav">
-        <button data-screen="now"      class="nav-button active"><span>⌁</span>Ahora</button>
-        <button data-screen="queue"    class="nav-button"><span>☷</span>Mi Bandeja</button>
-        <button data-screen="team"     class="nav-button"><span>⚠</span>Equipo</button>
-        <button data-screen="history"  class="nav-button"><span>▣</span>Historial</button>
-        <button data-screen="settings" class="nav-button"><span>⚙</span>Ajustes</button>
+      <nav id="app-nav" class="bottom-nav">
+        <button data-screen="now"       class="nav-button active"><span>⌁</span>Ahora</button>
+        <button data-screen="queue"     class="nav-button"><span>☷</span>Mi Bandeja</button>
+        <button data-screen="team"      class="nav-button"><span>⚠</span>Equipo</button>
+        <button data-screen="history"   class="nav-button"><span>▣</span>Historial</button>
+        <button data-screen="schedules" class="nav-button"><span>📅</span>Horarios</button>
+        <button data-screen="finances"  class="nav-button nav-lead-only" style="display:none;"><span>💵</span>Finanzas</button>
+        <button data-screen="settings"  class="nav-button"><span>⚙</span>Ajustes</button>
       </nav>
     </section>
   </div>
@@ -128,7 +130,7 @@
 
   <script src="./config.js"></script>
   <script src="./firebase-config.js"></script>
-  <script type="module" src="./app-registrar-fix.js?v=43"></script>
+  <script type="module" src="./app-registrar-fix.js?v=44"></script>
 
   <script>
     /* ---- Backup / Restore desde localStorage ---- */
