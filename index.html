@@ -66,6 +66,9 @@
         <button type="button" id="login-btn-manual" class="primary-button login-submit-btn" onclick="if (window.doLogin) window.doLogin(event);">
           Iniciar sesión
         </button>
+        <button type="button" class="secondary-button pwa-install-btn" onclick="if (window.triggerPwaInstall) window.triggerPwaInstall();" style="margin-top:10px; width:100%; border:1px solid #3b82f6; background:rgba(59,130,246,0.12); color:#60a5fa; font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
+          💻 Instalar App en esta Computadora
+        </button>
         <p id="login-error" class="form-error"></p>
       </form>
 
@@ -129,9 +132,47 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script src="./app-registrar-fix.js?v=66"></script>
+  <script src="./app-registrar-fix.js?v=67"></script>
 
   <script>
+    /* ---- PWA y Registro de Service Worker para PC / Móvil ---- */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js?v=2').then(function(reg) {
+          console.log('SW Creaciones JJ registrado:', reg.scope);
+        }).catch(function(err) {
+          console.warn('Error al registrar SW:', err);
+        });
+      });
+    }
+
+    window.deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      window.deferredInstallPrompt = e;
+      document.querySelectorAll('.pwa-install-btn').forEach(function(b) {
+        b.style.display = 'flex';
+      });
+    });
+
+    window.addEventListener('appinstalled', function() {
+      window.deferredInstallPrompt = null;
+      console.log('Creaciones JJ instalada como App.');
+    });
+
+    window.triggerPwaInstall = async function() {
+      if (window.deferredInstallPrompt) {
+        window.deferredInstallPrompt.prompt();
+        const choice = await window.deferredInstallPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          console.log('Instalación aceptada.');
+        }
+        window.deferredInstallPrompt = null;
+      } else {
+        alert('Para instalar Creaciones JJ como App en tu computadora:\n\n1. En Google Chrome o Microsoft Edge, busca el ícono de instalación (una pantalla pequeña con flecha hacia abajo) a la derecha en la barra de direcciones.\n2. O pulsa el menú del navegador (los 3 puntos ⋮ arriba a la derecha) y haz clic en "Instalar Creaciones JJ".');
+      }
+    };
+
     /* ---- Backup / Restore desde localStorage ---- */
     window.exportarBackup = function () {
       const datos = {};
