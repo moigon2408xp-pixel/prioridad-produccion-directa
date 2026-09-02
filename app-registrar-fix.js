@@ -117,35 +117,46 @@ function safeParseDate(value) {
   if (str.includes(" - ")) str = str.split(" - ")[0];
   if (str.includes(" a las ")) str = str.split(" a las ")[0];
   
-  var isoMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  var timeMatch = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-  
-  if (isoMatch) {
-    var year = parseInt(isoMatch[1], 10);
-    var month = parseInt(isoMatch[2], 10) - 1;
-    var day = parseInt(isoMatch[3], 10);
-    var hours = 18;
-    var minutes = 0;
-    
-    if (timeMatch) {
-      hours = parseInt(timeMatch[1], 10);
-      minutes = parseInt(timeMatch[2], 10);
-      var ap = timeMatch[3] ? timeMatch[3].toUpperCase() : "";
-      if (ap === "PM" && hours < 12) hours += 12;
-      if (ap === "AM" && hours === 12) hours = 0;
+  // 1. Si viene como ISO (ej: 2026-09-04T13:00:00 o 2026-09-04T13:00:00.000Z)
+  if (str.includes("T")) {
+    const parts = str.split("T");
+    const dateParts = parts[0].split("-");
+    if (dateParts.length === 3) {
+      const year = parseInt(dateParts[0], 10);
+      const month = parseInt(dateParts[1], 10) - 1;
+      const day = parseInt(dateParts[2], 10);
+      let hours = 18;
+      let minutes = 0;
+      if (parts[1]) {
+        const timeParts = parts[1].split(":");
+        if (timeParts.length >= 2) {
+          hours = parseInt(timeParts[0], 10);
+          minutes = parseInt(timeParts[1], 10);
+        }
+      }
+      const parsed = new Date(year, month, day, hours, minutes);
+      if (!isNaN(parsed.getTime())) return parsed;
     }
-    
-    const parsedISO = new Date(year, month, day, hours, minutes);
-    if (!isNaN(parsedISO.getTime())) return parsedISO;
   }
   
+  // 2. Si viene como DD/MM/YYYY
   if (str.includes("/")) {
     const parts = str.split(" ")[0].split("/");
     if (parts.length === 3) {
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const year = parseInt(parts[2], 10);
-      const parsed = new Date(year, month, day);
+      let hours = 18;
+      let minutes = 0;
+      const timeMatch = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        const ap = timeMatch[3] ? timeMatch[3].toUpperCase() : "";
+        if (ap === "PM" && hours < 12) hours += 12;
+        if (ap === "AM" && hours === 12) hours = 0;
+      }
+      const parsed = new Date(year, month, day, hours, minutes);
       if (!isNaN(parsed.getTime())) return parsed;
     }
   }
@@ -314,8 +325,8 @@ const priority = (order) => {
 const priorityLabel = {
   overdue: "🚨 ¡RETRASADO!",
   now: "Hacer ahora",
-  today: "Hacer hoy",
-  later: "Programar"
+  today: "Hacer próximamente",
+  later: "Programado"
 };
 
 const active = (order) => {
@@ -739,7 +750,7 @@ function orderCard(order, position) {
       <div class="cc-right">
         ${isOverdue ? '<span class="pill-overdue">🚨 RETRASADO</span>' : ''}
         ${isNow && !isOverdue ? '<span class="pill-urgent">⚡ Hacer ahora</span>' : ''}
-        ${isToday && !isOverdue ? '<span class="pill-today">⏰ Hoy</span>' : ''}
+        ${isToday && !isOverdue ? '<span class="pill-today">⏳ Hacer próximamente</span>' : ''}
         ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">📅 Programado</span>' : ''}
       </div>
     </div>
