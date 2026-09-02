@@ -4,9 +4,11 @@
   "description": "Sistema de gestión de producción para Creaciones JJ – Ochoa & Risquez",
   "start_url": "./index.html",
   "display": "standalone",
+  "scope": "./",
   "background_color": "#1a1a2e",
   "theme_color": "#1a1a2e",
-  "orientation": "portrait",
+  "orientation": "any",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "./logo_creaciones_jj.png",
