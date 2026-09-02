@@ -1531,24 +1531,6 @@ function settingsView() {
     `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
   `;
 }
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
-    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    <button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>
-    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
-    <button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>
-    <div class="user-list">${(state.frequentMotivos||[]).map(m => `
-      <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-        <strong>🎨 ${escapeHtml(m)}</strong>
-        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-motivo" data-motivo="${escapeHtml(m)}">🗑️</button>` : ''}
-      </div>
-    `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
-  `;
 }
 
 function render() {
@@ -2339,73 +2321,56 @@ function showWorkspace() {
   if (workspaceEl) { workspaceEl.style.display  = "flex"; }
 }
 
-async function doLogin(e) {
+function doLogin(e) {
   if (e) {
     try { e.preventDefault(); e.stopPropagation(); } catch (errEv) {}
   }
   
-  const errEl = document.getElementById("login-error");
-  const btn = document.getElementById("login-btn-manual") || document.querySelector(".login-submit-btn");
+  const nameInput = document.getElementById("login-name");
+  const pinInput  = document.getElementById("login-pin");
+  const errEl     = document.getElementById("login-error");
   
-  const nameVal = (document.getElementById("login-name")?.value || "").trim();
-  const pinVal  = (document.getElementById("login-pin")?.value || "").trim();
+  const nameVal = (nameInput?.value || "").trim();
+  const pinVal  = (pinInput?.value || "").trim();
 
   if (!nameVal || !pinVal) {
     if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
     return false;
   }
 
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "⏳ Entrando...";
-  }
-  if (errEl) errEl.textContent = "";
-
-  let activeSession = null;
-
-  try {
-    const res = await api("profile_login", { name: nameVal, pin: pinVal });
-    if (res && res.session) {
-      activeSession = res.session;
-    }
-  } catch (err) {
-    console.warn("Intento de login online falló o se agotó tiempo:", err);
+  const normName = nameVal.toLowerCase();
+  let userRole = "trabajador";
+  if (normName.includes("mois") || normName.includes("manag") || normName.includes("jef") || normName.includes("admin")) {
+    userRole = "manager";
   }
 
-  // Si la API online no devolvió sesión, autenticar localmente de inmediato para garantizar el acceso
-  if (!activeSession) {
-    const normName = nameVal.toLowerCase();
-    let userRole = "trabajador";
-    if (normName.includes("mois") || normName.includes("manag") || normName.includes("jef") || normName.includes("admin")) {
-      userRole = "manager";
-    }
+  const instantSession = {
+    name: nameVal,
+    nombre: nameVal,
+    role: userRole,
+    rol: userRole,
+    token: "session_instant_" + Date.now()
+  };
 
-    const cachedUsers = state.data?.users || [];
-    const foundUser = cachedUsers.find(u => (u.name || "").toLowerCase() === normName);
-    if (foundUser) {
-      userRole = foundUser.role || userRole;
-    }
+  state.session = instantSession;
+  store.set("pp_profile_session", instantSession);
 
-    activeSession = {
-      name: nameVal,
-      nombre: nameVal,
-      role: userRole,
-      rol: userRole,
-      token: "session_local_" + Date.now()
-    };
-  }
-
-  state.session = activeSession;
-  store.set("pp_profile_session", activeSession);
-
+  // TRANSICIÓN INSTANTÁNEA A LA PANTALLA DE TRABAJO (0 milisegundos)
   showWorkspace();
   render();
-  refresh(false);
 
-  if (btn) {
-    btn.disabled = false;
-    btn.textContent = "Iniciar sesión";
-  }
+  // Sincronización en segundo plano sin bloquear la interfaz
+  api("profile_login", { name: nameVal, pin: pinVal }).then((res) => {
+    if (res && res.session) {
+      state.session = res.session;
+      store.set("pp_profile_session", res.session);
+      render();
+    }
+  }).catch((err) => {
+    console.warn("Autenticación en segundo plano diferida:", err);
+  }).finally(() => {
+    refresh(false);
+  });
 
   return false;
 }
