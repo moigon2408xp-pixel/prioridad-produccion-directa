@@ -46,7 +46,7 @@
       </div>
 
       <!-- Formulario de inicio de sesión -->
-      <form id="login-form" class="unlock-form" onsubmit="event.preventDefault(); return false;">
+      <form id="login-form" class="unlock-form" onsubmit="event.preventDefault(); if (window.doLogin) window.doLogin(event); return false;">
         <label for="login-name">Tu nombre</label>
         <input
           id="login-name"
@@ -63,7 +63,7 @@
           placeholder="Seis dígitos"
           required
         />
-        <button type="button" id="login-btn-manual" class="primary-button login-submit-btn">
+        <button type="button" id="login-btn-manual" class="primary-button login-submit-btn" onclick="if (window.doLogin) window.doLogin(event);">
           Iniciar sesión
         </button>
         <p id="login-error" class="form-error"></p>
@@ -129,7 +129,7 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script type="module" src="./app-registrar-fix.js?v=50"></script>
+  <script type="module" src="./app-registrar-fix.js?v=51"></script>
 
   <script>
     /* ---- Backup / Restore desde localStorage ---- */
