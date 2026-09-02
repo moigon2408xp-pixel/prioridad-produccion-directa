@@ -1188,13 +1188,15 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
     { label: "🟢 Solo Mañana (8-1 PM)", val: "8:00 AM - 1:00 PM" },
     { label: "🟠 Solo Tarde A (3-7 PM)", val: "3:00 PM - 7:00 PM" },
     { label: "🔴 Solo Tarde B (4-8:30 PM)", val: "4:00 PM - 8:30 PM" },
+    { label: "🏖️ Vacaciones", val: "Vacaciones" },
     { label: "⚪ Día Libre", val: "Libre" }
   ];
 
   const getWorkerSched = (uName) => {
     return schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase() && (s.semana === semId || !s.semana)) || schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase()) || {
       lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
-      jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
+      jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre",
+      horasExtras: 0, notaExtras: ""
     };
   };
 
@@ -1234,6 +1236,7 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B</button>
+        <button type="button" class="secondary-button" style="font-size:11px; background:#f59e0b; color:white; border:none;" onclick="applySchedPreset('Vacaciones')">🏖️ Vacaciones</button>
         <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('Libre')">⚪ Libre</button>
       </div>
     </div>
@@ -1248,6 +1251,18 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-top:8px;">
         ${daysList.map(d => renderDayRow(d, initialSched[d.key] || (d.key === 'domingo' ? 'Libre' : '8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM'))).join('')}
+      </div>
+
+      <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:12px; border-radius:8px; margin-top:14px;">
+        <strong style="color:#d97706; font-size:13px; display:block; margin-bottom:8px;">⏱️ REGISTRO DE HORAS EXTRAS DE LA SEMANA (PAGO ADICIONAL)</strong>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:center;">
+          <label class="field" style="margin:0;"><span class="field-label">HORAS EXTRAS TOTALES</span>
+            <input type="number" step="0.5" min="0" name="horasExtras" id="sched-horas-extras" value="${initialSched.horasExtras || 0}" style="font-weight:bold;">
+          </label>
+          <label class="field" style="margin:0;"><span class="field-label">DETALLE / MOTIVO DE HORAS EXTRAS</span>
+            <input type="text" name="notaExtras" id="sched-nota-extras" placeholder="Ej. 2.5h el jueves por alta demanda de piñatas" value="${escapeHtml(initialSched.notaExtras || '')}">
+          </label>
+        </div>
       </div>
 
       <div class="modal-footer" style="margin-top:16px;">
@@ -1282,11 +1297,15 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
         if (inp) inp.style.display = isStandard ? "none" : "block";
       }
     });
+    const extraInp = document.getElementById("sched-horas-extras");
+    const extraNota = document.getElementById("sched-nota-extras");
+    if (extraInp) extraInp.value = ws.horasExtras || 0;
+    if (extraNota) extraNota.value = ws.notaExtras || "";
   };
 
   window.applySchedPreset = function(presetText) {
     daysList.forEach(d => {
-      if (d.key === "domingo" && presetText !== "Libre") return;
+      if (d.key === "domingo" && presetText !== "Libre" && presetText !== "Vacaciones") return;
       const sel = document.getElementById("sched-select-" + d.key);
       const inp = document.getElementById("sched-" + d.key);
       if (sel) sel.value = presetText;
@@ -1335,6 +1354,19 @@ function schedulesView() {
     return wk.isCurrent;
   });
 
+  const totalHorasExtras = schedules.reduce((acc, s) => acc + Number(s.horasExtras || 0), 0);
+
+  const formatShiftCell = (val) => {
+    const shift = String(val || 'Libre').trim();
+    if (shift.toLowerCase() === 'vacaciones') {
+      return '<span style="background:#fef3c7; color:#d97706; font-weight:800; padding:3px 8px; border-radius:12px; font-size:11px; white-space:nowrap;">🏖️ Vacaciones</span>';
+    }
+    if (shift.toLowerCase() === 'libre') {
+      return '<span style="color:var(--text-muted);">Libre</span>';
+    }
+    return escapeHtml(shift);
+  };
+
   return `
     <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
@@ -1356,6 +1388,13 @@ function schedulesView() {
         <button type="button" class="secondary-button" onclick="changeScheduleWeek(1)">Semana Siguiente ▶</button>
       </div>
 
+      ${totalHorasExtras > 0 ? `
+        <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:13px; color:#d97706; font-weight:bold; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <span>⏱️ CÓMPUTO DE HORAS EXTRAS DE LA SEMANA:</span>
+          <span style="font-size:15px; color:#b45309;">${totalHorasExtras} horas extras acumuladas</span>
+        </div>
+      ` : ''}
+
       <div style="overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
           <thead>
@@ -1368,21 +1407,28 @@ function schedulesView() {
               <th style="padding:10px;">Viernes</th>
               <th style="padding:10px;">Sábado</th>
               <th style="padding:10px;">Domingo</th>
+              <th style="padding:10px; text-align:center;">⏱️ H. Extras</th>
             </tr>
           </thead>
           <tbody>
             ${schedules.map(s => `
               <tr style="border-bottom:1px dashed var(--border-color);">
                 <td style="padding:10px; font-weight:bold; white-space:nowrap;">👤 ${escapeHtml(s.trabajador)}</td>
-                <td style="padding:10px;">${escapeHtml(s.lunes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.martes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.miercoles || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.jueves || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.viernes || 'Libre')}</td>
-                <td style="padding:10px;">${escapeHtml(s.sabado || 'Libre')}</td>
-                <td style="padding:10px; color:var(--text-muted);">${escapeHtml(s.domingo || 'Libre')}</td>
+                <td style="padding:10px;">${formatShiftCell(s.lunes)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.martes)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.miercoles)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.jueves)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.viernes)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.sabado)}</td>
+                <td style="padding:10px;">${formatShiftCell(s.domingo)}</td>
+                <td style="padding:10px; text-align:center;">
+                  ${Number(s.horasExtras || 0) > 0 ? `
+                    <strong style="color:#d97706; background:rgba(217,119,6,.12); padding:3px 8px; border-radius:6px; font-size:12px; display:inline-block;">+${s.horasExtras}h</strong>
+                    ${s.notaExtras ? `<br/><small style="color:var(--text-muted); font-size:10px; display:block; margin-top:2px;">${escapeHtml(s.notaExtras)}</small>` : ''}
+                  ` : '<span style="color:var(--text-muted); font-size:12px;">0h</span>'}
+                </td>
               </tr>
-            `).join("") || `<tr><td colspan="8" style="padding:26px; text-align:center; color:var(--text-muted);">No hay horarios registrados para ${escapeHtml(wk.semanaLabel)}.<br/>${isLead() ? `<button type="button" class="primary-button" style="margin-top:10px;" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">➕ Cargar Horario para esta semana</button>` : ''}</td></tr>`}
+            `).join("") || `<tr><td colspan="9" style="padding:26px; text-align:center; color:var(--text-muted);">No hay horarios registrados para ${escapeHtml(wk.semanaLabel)}.<br/>${isLead() ? `<button type="button" class="primary-button" style="margin-top:10px;" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">➕ Cargar Horario para esta semana</button>` : ''}</td></tr>`}
           </tbody>
         </table>
       </div>
