@@ -924,10 +924,6 @@ function computeWorkerPerformance(timeframe = "today") {
   const filtered = finished.filter(filterFn);
   const perfMap = {};
   
-  users.forEach(u => {
-    perfMap[u.name] = { completed: 0, totalMin: 0, orders: [] };
-  });
-  
   filtered.forEach(o => {
     if (String(o.estado || "").toLowerCase().trim() === "cancelado") return;
     const w = o.responsable || "Sin asignar";
@@ -1148,9 +1144,49 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
   const semLabel = targetSemanaLabel || curWeek.semanaLabel;
 
   const defaultUser = workerName || (users[0]?.name || "");
-  const workerSched = schedules.find(s => s.trabajador.toLowerCase() === defaultUser.toLowerCase() && (s.semana === semId || !s.semana)) || schedules.find(s => s.trabajador.toLowerCase() === defaultUser.toLowerCase()) || {
-    lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
-    jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
+
+  const daysList = [
+    { key: "lunes", label: "Lunes" },
+    { key: "martes", label: "Martes" },
+    { key: "miercoles", label: "Miércoles" },
+    { key: "jueves", label: "Jueves" },
+    { key: "viernes", label: "Viernes" },
+    { key: "sabado", label: "Sábado" },
+    { key: "domingo", label: "Domingo" }
+  ];
+
+  const presets = [
+    { label: "🔵 Completo A (8-1 / 3-7 PM)", val: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM" },
+    { label: "🟣 Completo B (8-1 / 4-8:30 PM)", val: "8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM" },
+    { label: "🟢 Solo Mañana (8-1 PM)", val: "8:00 AM - 1:00 PM" },
+    { label: "🟠 Solo Tarde A (3-7 PM)", val: "3:00 PM - 7:00 PM" },
+    { label: "🔴 Solo Tarde B (4-8:30 PM)", val: "4:00 PM - 8:30 PM" },
+    { label: "⚪ Día Libre", val: "Libre" }
+  ];
+
+  const getWorkerSched = (uName) => {
+    return schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase() && (s.semana === semId || !s.semana)) || schedules.find(s => s.trabajador.toLowerCase() === uName.toLowerCase()) || {
+      lunes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", martes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", miercoles: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM",
+      jueves: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", viernes: "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM", sabado: "8:00 AM - 1:00 PM", domingo: "Libre"
+    };
+  };
+
+  const initialSched = getWorkerSched(defaultUser);
+
+  const renderDayRow = (d, curVal) => {
+    const isStandard = presets.some(p => p.val === curVal);
+    return `
+      <div style="background:var(--bg-main); padding:10px; border-radius:8px; border:1px solid var(--border-color); display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="font-size:13px; text-transform:uppercase;">📅 ${d.label}</strong>
+        </div>
+        <select id="sched-select-${d.key}" onchange="handleDaySelectChange('${d.key}', this.value)" style="padding:6px; border-radius:6px; border:1px solid var(--border-color); font-size:12px; font-weight:600;">
+          ${presets.map(p => `<option value="${escapeHtml(p.val)}" ${p.val === curVal ? 'selected' : ''}>${p.label}</option>`).join('')}
+          <option value="__CUSTOM__" ${!isStandard ? 'selected' : ''}>✏️ Horario Personalizado...</option>
+        </select>
+        <input id="sched-${d.key}" name="${d.key}" value="${escapeHtml(curVal)}" style="padding:6px; border-radius:6px; border:1px solid var(--border-color); font-size:12px; ${isStandard ? 'display:none;' : 'display:block;'}">
+      </div>
+    `;
   };
 
   openModal(`
@@ -1163,42 +1199,74 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
       🗓️ Asignando para: ${escapeHtml(semLabel)} ${curWeek.isCurrent ? '(Semana en Curso)' : ''}
     </div>
 
-    <div style="background:var(--bg-main); padding:10px; border-radius:8px; margin-bottom:12px;">
-      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">PLANTILLAS RÁPIDAS (CLIC PARA APLICAR A TODOS LOS DÍAS):</p>
+    <div style="background:var(--bg-card); padding:10px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
+      <p style="font-weight:700; font-size:12px; margin-bottom:6px;">⚡ APLICAR PLANTILLA RÁPIDA A TODA LA SEMANA (LUN-SÁB):</p>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A (8-1 / 3-7 PM)</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B (8-1 / 4-8:30 PM)</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana (8-1 PM)</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A (3-7 PM)</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B (4-8:30 PM)</button>
-        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('Libre')">⚪ Día Libre</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM')">🔵 Completo A</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM / 4:00 PM - 8:30 PM')">🟣 Completo B</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('8:00 AM - 1:00 PM')">🟢 Solo Mañana</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('3:00 PM - 7:00 PM')">🟠 Solo Tarde A</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('4:00 PM - 8:30 PM')">🔴 Solo Tarde B</button>
+        <button type="button" class="secondary-button" style="font-size:11px;" onclick="applySchedPreset('Libre')">⚪ Libre</button>
       </div>
     </div>
 
     <form id="schedule-form" class="form-grid">
       <input type="hidden" name="semana" value="${escapeHtml(semId)}">
       <label class="field"><span class="field-label">SELECCIONAR TRABAJADOR</span>
-        <select name="trabajador" required>
+        <select id="worker-select-modal" name="trabajador" onchange="handleWorkerChangeModal(this.value)" required>
           ${users.map(u => `<option value="${escapeHtml(u.name)}" ${u.name.toLowerCase() === defaultUser.toLowerCase() ? "selected" : ""}>${escapeHtml(u.name)} (${formatRoleLabel(u.role)})</option>`).join('')}
         </select>
       </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <label class="field"><span class="field-label">LUNES</span><input id="sched-lunes" name="lunes" value="${escapeHtml(workerSched.lunes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
-        <label class="field"><span class="field-label">MARTES</span><input id="sched-martes" name="martes" value="${escapeHtml(workerSched.martes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
-        <label class="field"><span class="field-label">MIÉRCOLES</span><input id="sched-miercoles" name="miercoles" value="${escapeHtml(workerSched.miercoles || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
-        <label class="field"><span class="field-label">JUEVES</span><input id="sched-jueves" name="jueves" value="${escapeHtml(workerSched.jueves || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
-        <label class="field"><span class="field-label">VIERNES</span><input id="sched-viernes" name="viernes" value="${escapeHtml(workerSched.viernes || "8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM")}"></label>
-        <label class="field"><span class="field-label">SÁBADO</span><input id="sched-sabado" name="sabado" value="${escapeHtml(workerSched.sabado || "8:00 AM - 1:00 PM")}"></label>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-top:8px;">
+        ${daysList.map(d => renderDayRow(d, initialSched[d.key] || (d.key === 'domingo' ? 'Libre' : '8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM'))).join('')}
       </div>
-      <label class="field"><span class="field-label">DOMINGO</span><input id="sched-domingo" name="domingo" value="${escapeHtml(workerSched.domingo || "Libre")}"></label>
-      <div class="modal-footer"><button type="submit" class="primary-button">Guardar Horario de esta Semana</button></div>
+
+      <div class="modal-footer" style="margin-top:16px;">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">💾 Guardar Horario de esta Semana</button>
+      </div>
     </form>
   `);
 
+  window.handleDaySelectChange = function(dayKey, val) {
+    const input = document.getElementById("sched-" + dayKey);
+    if (!input) return;
+    if (val === "__CUSTOM__") {
+      input.style.display = "block";
+      input.focus();
+    } else {
+      input.value = val;
+      input.style.display = "none";
+    }
+  };
+
+  window.handleWorkerChangeModal = function(uName) {
+    const ws = getWorkerSched(uName);
+    daysList.forEach(d => {
+      const val = ws[d.key] || (d.key === 'domingo' ? 'Libre' : '8:00 AM - 1:00 PM / 3:00 PM - 7:00 PM');
+      const sel = document.getElementById("sched-select-" + d.key);
+      const inp = document.getElementById("sched-" + d.key);
+      if (inp) inp.value = val;
+      if (sel) {
+        const isStandard = presets.some(p => p.val === val);
+        sel.value = isStandard ? val : "__CUSTOM__";
+        if (inp) inp.style.display = isStandard ? "none" : "block";
+      }
+    });
+  };
+
   window.applySchedPreset = function(presetText) {
-    ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"].forEach(d => {
-      const el = document.getElementById("sched-" + d);
-      if (el) el.value = presetText;
+    daysList.forEach(d => {
+      if (d.key === "domingo" && presetText !== "Libre") return;
+      const sel = document.getElementById("sched-select-" + d.key);
+      const inp = document.getElementById("sched-" + d.key);
+      if (sel) sel.value = presetText;
+      if (inp) {
+        inp.value = presetText;
+        inp.style.display = "none";
+      }
     });
   };
 
@@ -1206,6 +1274,7 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
     try {
       const data = Object.fromEntries(new FormData(e.target));
       await api("profile_save_schedule", data);
@@ -1214,6 +1283,7 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
       showToast("Horario guardado en Google Sheets para esta semana.");
     } catch (err) {
       btn.disabled = false;
+      btn.textContent = "💾 Guardar Horario de esta Semana";
       alert(err.message);
     }
   });
@@ -1393,7 +1463,8 @@ function exportPerformancePDF(tf) {
     return;
   }
 
-  const rowsHtml = Object.keys(perfMap).map(uName => {
+  const activeWorkers = Object.keys(perfMap).filter(uName => perfMap[uName] && perfMap[uName].completed > 0);
+  const rowsHtml = activeWorkers.map(uName => {
     const data = perfMap[uName];
     const avgMin = data.completed > 0 ? Math.round(data.totalMin / data.completed) : 0;
     return `
@@ -1404,7 +1475,7 @@ function exportPerformancePDF(tf) {
         <td style="padding:10px; border:1px solid #ccc; text-align:center;">${avgMin} min/pedido</td>
       </tr>
     `;
-  }).join('');
+  }).join('') || '<tr><td colspan="4" style="padding:16px; text-align:center; color:#666;">No hay pedidos completados en este período.</td></tr>';
 
   printWin.document.write(`
     <!DOCTYPE html>
@@ -1779,7 +1850,7 @@ function detail(order) {
         ${isLead() ? `
           <div style="display:flex; gap:6px; align-items:center;">
             <input type="number" id="order-duration-input" value="${order.duracionRealMin || 0}" style="width:70px; padding:4px 6px; border-radius:6px; border:1px solid var(--border-color);">
-            <button type="button" class="secondary-button" id="save-duration-btn" style="padding:4px 6px; font-size:11px;">💾 Min</button>
+            <button type="button" class="secondary-button" id="save-duration-btn" onclick="saveOrderDuration('${escapeHtml(order.id)}')" data-action="save-duration" data-id="${escapeHtml(order.id)}" style="padding:4px 6px; font-size:11px;">💾 Min</button>
           </div>
         ` : `<strong style="color:var(--text-main);">${order.duracionRealMin || 0} min</strong>`}
       </div>
@@ -1789,7 +1860,7 @@ function detail(order) {
           <span style="font-weight:700; color:#059669; font-size:12px;">💵 PRECIO / COSTO COBRADO ($):</span>
           <div style="display:flex; gap:6px; align-items:center;">
             <input type="number" step="0.01" id="order-cost-input" value="${order.costo || 0}" style="width:90px; padding:4px 8px; border-radius:6px; border:1px solid #059669; font-weight:bold;">
-            <button type="button" class="primary-button" id="save-cost-btn" style="padding:4px 8px; font-size:11px; background:#059669;">💾 Guardar $</button>
+            <button type="button" class="primary-button" id="save-cost-btn" onclick="saveOrderCost('${escapeHtml(order.id)}')" data-action="save-cost" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; font-size:11px; background:#059669;">💾 Guardar $</button>
           </div>
         </div>
       ` : ''}
@@ -1892,27 +1963,75 @@ function detail(order) {
       }
     }
   });
-
-  $("#save-cost-btn")?.addEventListener("click", async () => {
-    const val = parseFloat($("#order-cost-input")?.value || 0);
-    try {
-      await api("profile_save_cost", { id: order.id, costo: val });
-      order.costo = val;
-      showToast(`Costo de $${val.toFixed(2)} guardado.`);
-      await refresh(false);
-    } catch (err) { alert(err.message); }
-  });
-
-  $("#save-duration-btn")?.addEventListener("click", async () => {
-    const val = parseInt($("#order-duration-input")?.value || 0, 10);
-    try {
-      await api("profile_update_order", { id: order.id, changes: { duracionRealMin: val } });
-      order.duracionRealMin = val;
-      showToast(`Duración actualizada a ${val} min.`);
-      await refresh(false);
-    } catch (err) { alert(err.message); }
-  });
 }
+
+window.saveOrderCost = async function(orderId) {
+  const input = document.getElementById("order-cost-input");
+  const btn = document.getElementById("save-cost-btn");
+  const val = parseFloat(input?.value || 0);
+  if (isNaN(val) || val < 0) {
+    alert("Por favor ingresa un monto válido en dólares.");
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
+  }
+  try {
+    await api("profile_save_cost", { id: orderId, costo: val });
+    const allTarget = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])];
+    allTarget.forEach(o => {
+      if (String(o.id).trim() === String(orderId).trim()) o.costo = val;
+    });
+    showToast(`💵 Precio de $${val.toFixed(2)} guardado.`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "✅ Guardado";
+      setTimeout(() => { if (btn) btn.textContent = "💾 Guardar $"; }, 2000);
+    }
+    await refresh(false);
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "💾 Guardar $";
+    }
+    alert(`Error al guardar costo: ${err.message}`);
+  }
+};
+
+window.saveOrderDuration = async function(orderId) {
+  const input = document.getElementById("order-duration-input");
+  const btn = document.getElementById("save-duration-btn");
+  const val = parseInt(input?.value || 0, 10);
+  if (isNaN(val) || val < 0) {
+    alert("Por favor ingresa una cantidad válida de minutos.");
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
+  }
+  try {
+    await api("profile_update_order", { id: orderId, changes: { duracionRealMin: val } });
+    const allTarget = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])];
+    allTarget.forEach(o => {
+      if (String(o.id).trim() === String(orderId).trim()) o.duracionRealMin = val;
+    });
+    showToast(`⏱️ Duración actualizada a ${val} min.`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "✅ Guardado";
+      setTimeout(() => { if (btn) btn.textContent = "💾 Min"; }, 2000);
+    }
+    await refresh(false);
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "💾 Min";
+    }
+    alert(`Error al guardar duración: ${err.message}`);
+  }
+};
 
 function openFinishModal(order, targetStatus) {
   openModal(`
