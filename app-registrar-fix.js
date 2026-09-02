@@ -2339,53 +2339,73 @@ function showWorkspace() {
   if (workspaceEl) { workspaceEl.style.display  = "flex"; }
 }
 
-// Ajustar referencia en login submit
-const loginFormEl = document.getElementById("login-form");
-if (loginFormEl) {
-  loginFormEl.addEventListener("submit", async (e) => {
+async function doLogin(e) {
+  if (e) {
     e.preventDefault();
-    const btn = loginFormEl.querySelector("button[type='submit']");
-    const errEl = document.getElementById("login-error");
-    
-    const nameVal = (document.getElementById("login-name")?.value || "").trim();
-    const pinVal  = (document.getElementById("login-pin")?.value || "").trim();
+    e.stopPropagation();
+  }
+  const errEl = document.getElementById("login-error");
+  const btn = document.getElementById("login-btn-manual") || document.querySelector(".login-submit-btn");
+  
+  const nameVal = (document.getElementById("login-name")?.value || "").trim();
+  const pinVal  = (document.getElementById("login-pin")?.value || "").trim();
 
-    if (!nameVal || !pinVal) {
-      if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
-      return;
-    }
+  if (!nameVal || !pinVal) {
+    if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
+    return false;
+  }
 
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = "⏳ Entrando...";
-    }
-    if (errEl) errEl.textContent = "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Entrando...";
+  }
+  if (errEl) errEl.textContent = "";
 
-    try {
-      const res = await api("profile_login", { name: nameVal, pin: pinVal });
-      state.session = res.session;
-      store.set("pp_profile_session", state.session);
+  try {
+    const res = await api("profile_login", { name: nameVal, pin: pinVal });
+    state.session = res.session;
+    store.set("pp_profile_session", state.session);
+    showWorkspace();
+    render();
+    await refresh(false);
+  } catch (err) {
+    console.warn("Login online falló, verificando sesión local previa:", err);
+    const lastSession = store.get("pp_profile_session", null);
+    if (lastSession && lastSession.name && lastSession.name.toLowerCase() === nameVal.toLowerCase()) {
+      state.session = lastSession;
       showWorkspace();
+      render();
       await refresh(false);
-    } catch (err) {
-      console.warn("Login online falló, verificando sesión local previa:", err);
-      const lastSession = store.get("pp_profile_session", null);
-      if (lastSession && lastSession.name && lastSession.name.toLowerCase() === nameVal.toLowerCase()) {
-        state.session = lastSession;
-        showWorkspace();
-        await refresh(false);
-        showToast("⚠️ Modo fuera de línea: Iniciaste sesión con tus datos guardados.");
-      } else {
-        if (errEl) errEl.textContent = err.message || "Error al iniciar sesión. Revisa tu nombre y PIN.";
-      }
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "Iniciar sesión";
-      }
+      showToast("⚠️ Modo fuera de línea: Iniciaste sesión con datos locales.");
+    } else {
+      if (errEl) errEl.textContent = err.message || "Error al iniciar sesión. Revisa tu nombre y PIN.";
     }
-  });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Iniciar sesión";
+    }
+  }
+  return false;
 }
+window.doLogin = doLogin;
+
+document.getElementById("login-btn-manual")?.addEventListener("click", doLogin);
+
+document.getElementById("login-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  doLogin(e);
+  return false;
+});
+
+document.addEventListener("click", (e) => {
+  const target = e.target;
+  if (target && (target.id === "login-btn-manual" || target.classList.contains("login-submit-btn"))) {
+    e.preventDefault();
+    doLogin(e);
+  }
+});
 
 document.getElementById("refresh")?.addEventListener("click", () => refresh());
 
@@ -2401,6 +2421,7 @@ document.querySelectorAll(".nav-button").forEach((btn) => {
 applyTheme();
 if (state.session) {
   showWorkspace();
+  render();
   refresh(false);
 } else {
   showLogin();
