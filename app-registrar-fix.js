@@ -253,15 +253,16 @@ const normalizeUser = (u) => {
 
 const state = {
   session: store.get("pp_profile_session", null),
-  frequentClients: [],
-  frequentMotivos: [],
-  frequentTypes: [],
+  frequentClients: store.get("pp_profile_clients", []),
+  frequentMotivos: store.get("pp_profile_motivos", []),
+  frequentTypes: store.get("pp_profile_types", []),
+  schedules: store.get("pp_profile_schedules", []),
   waTemplate: store.get("pp_wa_template", "Hola {cliente}, tu pedido de {tipo} ya se encuentra listo para entrega."),
   screen: "now",
   searchQuery: "",
   perfTimeframe: "today",
   offline: false,
-  data: { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} },
+  data: store.get("pp_profile_data", { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} }),
 };
 
 const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
@@ -607,6 +608,13 @@ async function refresh(showMessage = true) {
     state.offline = false;
     
     store.set("pp_profile_data", state.data);
+    store.set("pp_profile_clients", state.frequentClients);
+    store.set("pp_profile_types", state.frequentTypes);
+    store.set("pp_profile_motivos", state.frequentMotivos);
+    if (rawData.schedules || rawData.horarios) {
+      state.schedules = rawData.schedules || rawData.horarios || [];
+      store.set("pp_profile_schedules", state.schedules);
+    }
     render();
     checkAndSendPushNotifications();
     if (showMessage) showToast("Información sincronizada.");
