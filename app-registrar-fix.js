@@ -1675,7 +1675,8 @@ window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 function exportPerformancePDF(tf) {
   const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
   const perfMap = computeWorkerPerformance(tf);
-  const nowStr = new Date().toLocaleDateString('es-VE', { dateStyle: 'long' });
+  const now = new Date();
+  const nowStr = now.toLocaleDateString('es-VE', { dateStyle: 'long' });
 
   const printWin = window.open('', '_blank');
   if (!printWin) {
@@ -1683,52 +1684,107 @@ function exportPerformancePDF(tf) {
     return;
   }
 
+  // Filtrar órdenes completadas en este período para el desglose detallado
+  const finished = state.data.finishedOrders || [];
+  let filterFn = () => true;
+  if (tf === "today") {
+    const todayLocal = getLocalDateStr(now);
+    filterFn = (o) => o.finProduccion && getLocalDateStr(o.finProduccion) === todayLocal;
+  } else if (tf === "week") {
+    const day = now.getDay();
+    const diffToMon = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMon);
+    monday.setHours(0,0,0,0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23,59,59,999);
+    filterFn = (o) => o.finProduccion && new Date(o.finProduccion) >= monday && new Date(o.finProduccion) <= sunday;
+  } else if (tf === "month") {
+    const monthIso = now.toISOString().substring(0, 7);
+    filterFn = (o) => o.finProduccion && String(o.finProduccion).startsWith(monthIso);
+  }
+
+  const periodOrders = finished.filter(filterFn);
+
+  // Conteo de motivos
+  const motivosCount = {};
+  periodOrders.forEach(o => {
+    const m = String(o.motivo || "Sin motivo específico").trim();
+    motivosCount[m] = (motivosCount[m] || 0) + 1;
+  });
+
   const activeWorkers = Object.keys(perfMap).filter(uName => perfMap[uName] && perfMap[uName].completed > 0);
-  const rowsHtml = activeWorkers.map(uName => {
+  const rowsWorkerHtml = activeWorkers.map(uName => {
     const data = perfMap[uName];
     const avgMin = data.completed > 0 ? Math.round(data.totalMin / data.completed) : 0;
     return `
       <tr>
-        <td style="padding:10px; border:1px solid #ccc; font-weight:bold;">👤 ${escapeHtml(uName)}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.completed}</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${data.totalMin} min</td>
-        <td style="padding:10px; border:1px solid #ccc; text-align:center;">${avgMin} min/pedido</td>
+        <td style="padding:8px 12px; border:1px solid #cbd5e1; font-weight:bold;">👤 ${escapeHtml(uName)}</td>
+        <td style="padding:8px 12px; border:1px solid #cbd5e1; text-align:center;">${data.completed}</td>
+        <td style="padding:8px 12px; border:1px solid #cbd5e1; text-align:center;">${data.totalMin} min</td>
+        <td style="padding:8px 12px; border:1px solid #cbd5e1; text-align:center;">${avgMin} min/pedido</td>
       </tr>
     `;
   }).join('') || '<tr><td colspan="4" style="padding:16px; text-align:center; color:#666;">No hay pedidos completados en este período.</td></tr>';
+
+  const rowsOrdersHtml = periodOrders.map(o => `
+    <tr>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0; font-weight:bold;">${escapeHtml(o.id)}</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0;">${escapeHtml(o.cliente)}</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0;">${escapeHtml(o.tipo || '-')}</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0; font-weight:600; color:#1e3a8a;">🎨 ${escapeHtml(o.motivo || 'Sin temática')}</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0;">${escapeHtml(o.responsable)}</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0; text-align:center;">${o.duracionRealMin || 0} min</td>
+      <td style="padding:6px 10px; border:1px solid #e2e8f0; text-align:right; font-weight:bold; color:#059669;">$${Number(o.costo || 0).toFixed(2)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" style="padding:16px; text-align:center; color:#666;">No hay pedidos registrados en este período.</td></tr>';
+
+  const motivosSummaryHtml = Object.keys(motivosCount).map(m => `
+    <span style="display:inline-block; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; padding:3px 8px; border-radius:12px; font-size:11px; margin:2px 4px; font-weight:700;">
+      🎨 ${escapeHtml(m)}: <strong>${motivosCount[m]}</strong>
+    </span>
+  `).join('') || '<span style="color:#666; font-size:12px;">Sin temáticas registradas.</span>';
 
   printWin.document.write(`
     <!DOCTYPE html>
     <html lang="es">
     <head>
       <meta charset="UTF-8">
-      <title>Reporte de Rendimiento - Creaciones JJ</title>
+      <title>Reporte de Producción y Rendimiento - Creaciones JJ</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 30px; color: #333; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
-        .header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
-        .header p { margin: 5px 0 0 0; color: #666; font-size: 14px; }
-        .meta { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; color: #555; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-        th { background: #1e3a8a; color: white; padding: 10px; border: 1px solid #1e3a8a; text-align: left; }
-        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
-        .sig-box { width: 45%; text-align: center; border-top: 1px solid #aaa; padding-top: 8px; font-size: 12px; color: #666; }
+        body { font-family: Arial, sans-serif; padding: 25px; color: #1e293b; font-size: 13px; line-height: 1.4; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 20px; }
+        .logo-box { display: flex; align-items: center; gap: 12px; }
+        .logo-box h1 { margin: 0; color: #1e3a8a; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; }
+        .logo-box p { margin: 2px 0 0 0; color: #64748b; font-size: 12px; font-weight: 600; }
+        .meta-header { text-align: right; font-size: 12px; color: #475569; }
+        h2 { font-size: 15px; color: #1e3a8a; border-left: 4px solid #1e3a8a; padding-left: 8px; margin: 18px 0 8px 0; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }
+        th { background: #1e3a8a; color: white; padding: 8px 10px; border: 1px solid #1e3a8a; text-align: left; }
+        .signatures { margin-top: 40px; display: flex; justify-content: space-between; page-break-inside: avoid; }
+        .sig-box { width: 42%; text-align: center; border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 11px; color: #64748b; font-weight: bold; }
         @media print {
-          button { display: none; }
+          button { display: none !important; }
         }
       </style>
     </head>
     <body>
-      <div class="header">
-        <h1>CREACIONES JJ · OCHOA & RISQUEZ</h1>
-        <p>Reporte Oficial de Rendimiento de Producción por Trabajador</p>
+      <div class="header-container">
+        <div class="logo-box">
+          <div style="background:#1e3a8a; color:#fff; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:900;">JJ</div>
+          <div>
+            <h1>CREACIONES JJ · OCHOA & RISQUEZ</h1>
+            <p>Papelería Creativa, Toppers & Decoración · Reporte Oficial de Producción</p>
+          </div>
+        </div>
+        <div class="meta-header">
+          <div><strong>Período:</strong> ${tfLabels[tf] || tf}</div>
+          <div><strong>Fecha de emisión:</strong> ${nowStr}</div>
+        </div>
       </div>
 
-      <div class="meta">
-        <span><strong>Período evaluado:</strong> ${tfLabels[tf] || tf}</span>
-        <span><strong>Fecha de emisión:</strong> ${nowStr}</span>
-      </div>
-
+      <h2>1. RENDIMIENTO DE PRODUCCIÓN POR TRABAJADOR</h2>
       <table>
         <thead>
           <tr>
@@ -1739,17 +1795,40 @@ function exportPerformancePDF(tf) {
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || '<tr><td colspan="4" style="text-align:center; padding:20px;">No hay datos registrados en este período.</td></tr>'}
+          ${rowsWorkerHtml}
+        </tbody>
+      </table>
+
+      <h2>2. TEMÁTICAS Y MOTIVOS MÁS ELABORADOS EN EL PERÍODO</h2>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:16px;">
+        ${motivosSummaryHtml}
+      </div>
+
+      <h2>3. DESGLOSE DE PROYECTOS CUMPLIDOS (${periodOrders.length})</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Cliente</th>
+            <th>Tipo</th>
+            <th>Motivo / Temática</th>
+            <th>Responsable</th>
+            <th style="text-align:center;">Duración</th>
+            <th style="text-align:right;">Monto ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsOrdersHtml}
         </tbody>
       </table>
 
       <div class="signatures">
-        <div class="sig-box">Firma del Manager / Jefatura</div>
-        <div class="sig-box">Sello del Taller Creaciones JJ</div>
+        <div class="sig-box">Firma del Manager / Jefatura de Taller</div>
+        <div class="sig-box">Sello Oficial Creaciones JJ</div>
       </div>
 
-      <div style="text-align:center; margin-top:30px;">
-        <button onclick="window.print()" style="padding:10px 20px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir / Guardar como PDF</button>
+      <div style="text-align:center; margin-top:25px;">
+        <button onclick="window.print()" style="padding:10px 24px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px; box-shadow:0 2px 8px rgba(30,58,138,0.3);">🖨️ Imprimir / Guardar como PDF</button>
       </div>
     </body>
     </html>
@@ -1766,9 +1845,16 @@ function settingsView() {
   const perfMap = computeWorkerPerformance(tf);
   
   const fcList = state.frequentClients.map((c) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <div><strong>${escapeHtml(c.name)}</strong><br/><small style="color:var(--text-muted);">${escapeHtml(c.phone || "Sin teléfono")}</small></div>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
+    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card); flex-wrap:wrap; gap:8px;">
+      <div>
+        <strong>${escapeHtml(c.name)}</strong> ${c.delivery === 'Sí' ? '<span class="badge-delivery">🚚 Delivery</span>' : ''}<br/>
+        <small style="color:var(--text-muted); font-size:12px;">📞 ${escapeHtml(c.phone || "Sin teléfono")}</small>
+        ${c.direccion ? `<br/><small style="color:var(--text-muted); font-size:11px;">📍 ${escapeHtml(c.zona ? c.zona + ' · ' : '')}${escapeHtml(c.direccion)}</small>` : ''}
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        ${isLead() ? `<button class="secondary-button" style="background:#0284c7; color:white; border:none; padding:4px 8px; font-size:12px;" data-action="edit-client" data-name="${escapeHtml(c.name)}">✏️ Editar</button>` : ''}
+        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none; padding:4px 8px; font-size:12px;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
+      </div>
     </div>
   `).join("");
   
@@ -1848,6 +1934,16 @@ function settingsView() {
         ` : ''}
         <button class="secondary-button" data-action="logout">Cerrar sesión</button>
         <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
+      </div>
+
+      <div style="background:rgba(59,130,246,0.08); border:1px solid #3b82f6; border-radius:var(--radius-md); padding:14px; margin-top:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h4 style="color:#1d4ed8; margin:0 0 4px 0; font-size:14px; font-weight:800;">🎓 Modo de Enseñanza y Manual del Taller</h4>
+          <p style="font-size:12px; color:var(--text-muted); margin:0;">Aprende el flujo de producción, conteo de minutos, diseño vs armado, reasignaciones y fotos directas.</p>
+        </div>
+        <button type="button" class="primary-button" style="background:#2563eb; border:none; font-weight:bold; font-size:13px;" onclick="openLearningGuideModal()">
+          📖 Abrir Manual / Guía
+        </button>
       </div>
     </div>
     
@@ -2041,9 +2137,12 @@ function detail(order) {
         </div>
       `}
 
-      <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">ENTREGA SOLICITADA POR CLIENTE:</span>
-        <strong style="color:var(--text-main);">${escapeHtml(formatDate(order.entrega))}</strong>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <strong style="color:var(--text-main);">${escapeHtml(formatDate(order.entrega))}</strong>
+          ${isLead() ? `<button type="button" class="secondary-button" style="background:#0284c7; color:white; border:none; padding:3px 8px; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer;" onclick="openEditDeliveryDateModal('${escapeHtml(order.id)}')">✏️ Modificar Fecha</button>` : ''}
+        </div>
       </div>
 
       ${hasDelivery ? `
@@ -2116,14 +2215,17 @@ function detail(order) {
         <p style="font-size:14px; background:var(--bg-main); padding:8px; border-radius:6px; color:var(--text-main);">${escapeHtml(order.descripcion || "Sin descripción")}</p>
       </div>
       
-      ${refLinks.length ? `
-        <div style="margin-top:6px;">
-          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">🖼️ FOTOS DE REFERENCIA DEL CLIENTE:</span>
-          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+      <div style="margin-top:6px; border-bottom:1px dashed var(--border-color); padding-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-weight:700; color:var(--text-muted); font-size:12px;">🖼️ FOTOS DE REFERENCIA:</span>
+          <button type="button" class="secondary-button" style="padding:3px 8px; font-size:11px; background:#0284c7; color:white; border:none; border-radius:6px; cursor:pointer;" onclick="openAddRefImagesModal('${escapeHtml(order.id)}')">📷 Añadir Fotos de Referencia</button>
+        </div>
+        ${refLinks.length ? `
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
             ${refLinks.map((link, idx) => `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="secondary-button" style="color:var(--primary-color);">🖼️ Ref ${idx + 1}</a>`).join("")}
           </div>
-        </div>
-      ` : ''}
+        ` : `<p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Sin fotos de referencia adjuntas. Puedes añadirlas ahora.</p>`}
+      </div>
 
       ${eviLinks.length ? `
         <div style="margin-top:6px;">
@@ -2283,48 +2385,173 @@ window.saveOrderDuration = async function(orderId) {
   }
 };
 
+let activeMediaStream = null;
+
+function stopActiveCamera() {
+  if (activeMediaStream) {
+    try {
+      activeMediaStream.getTracks().forEach(t => t.stop());
+    } catch(e) {}
+    activeMediaStream = null;
+  }
+}
+
+function openLiveCameraModal(onCaptureCallback) {
+  openModal(`
+    <div class="modal-head">
+      <h2>📸 Cámara Directa de Producción</h2>
+      <button class="close-button" data-action="close" onclick="stopActiveCamera()">×</button>
+    </div>
+    <div class="live-camera-box">
+      <video id="live-cam-video" class="live-camera-video" autoplay playsinline muted></video>
+      <div class="camera-controls-bar">
+        <button type="button" class="secondary-button" onclick="stopActiveCamera(); closeModal();" style="border:none; background:#475569; color:white;">Cancelar</button>
+        <button type="button" id="cam-snap-btn" class="camera-capture-btn" title="Tomar Foto">📸</button>
+      </div>
+    </div>
+    <p style="text-align:center; font-size:12px; color:var(--text-muted); margin-top:8px;">
+      🔒 <strong>Propiedad Intelectual:</strong> La foto se captura directamente en memoria para subirla a la orden sin guardarse en la galería de tu celular personal.
+    </p>
+  `);
+
+  const video = document.getElementById("live-cam-video");
+  const snapBtn = document.getElementById("cam-snap-btn");
+
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    }).then(stream => {
+      activeMediaStream = stream;
+      if (video) {
+        video.srcObject = stream;
+        video.play();
+      }
+    }).catch(err => {
+      alert("No se pudo acceder a la cámara directa (" + err.message + "). Por favor usa la opción de 'Elegir de Archivos'.");
+      closeModal();
+    });
+  } else {
+    alert("Tu navegador o dispositivo no soporta acceso directo a cámara. Usa la opción de 'Elegir de Archivos'.");
+    closeModal();
+  }
+
+  snapBtn?.addEventListener("click", () => {
+    if (!video || !video.videoWidth) {
+      alert("Esperando señal de video...");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const base64 = dataUrl.split(",")[1];
+    stopActiveCamera();
+    closeModal();
+    if (onCaptureCallback) onCaptureCallback(base64, dataUrl);
+  });
+}
+window.openLiveCameraModal = openLiveCameraModal;
+
 function openFinishModal(order, targetStatus) {
+  let capturedEvidences = [];
+
+  const renderEviThumbs = () => {
+    const listEl = document.getElementById("finish-evi-thumbs");
+    if (!listEl) return;
+    if (!capturedEvidences.length) {
+      listEl.innerHTML = '<span style="color:var(--text-muted); font-size:12px;">Sin fotos adjuntas aún.</span>';
+      return;
+    }
+    listEl.innerHTML = capturedEvidences.map((img, idx) => `
+      <div style="position:relative; display:inline-block; border-radius:6px; overflow:hidden; border:1px solid var(--border-color);">
+        <img src="data:image/jpeg;base64,${img.data}" style="width:65px; height:65px; object-fit:cover; display:block;">
+        <button type="button" onclick="removeFinishEvi(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(220,38,38,0.85); color:white; border:none; border-radius:50%; width:18px; height:18px; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center;">×</button>
+      </div>
+    `).join("");
+  };
+
+  window.removeFinishEvi = function(idx) {
+    capturedEvidences.splice(idx, 1);
+    renderEviThumbs();
+  };
+
   openModal(`
     <div class="modal-head"><h2>Completar Trabajo (${targetStatus})</h2><button class="close-button" data-action="close">×</button></div>
     <form id="finish-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px;">
+        <div>📦 <strong>Pedido:</strong> ${escapeHtml(order.id)} – ${escapeHtml(order.cliente)}</div>
+        <div style="margin-top:2px; font-size:12px; color:var(--text-muted);">Tipo: ${escapeHtml(order.tipo)} ${order.motivo ? `· Motivo: ${escapeHtml(order.motivo)}` : ''}</div>
+      </div>
+
       <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
-        <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración o imprevistos..."></textarea>
+        <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración, materiales usados o imprevistos..."></textarea>
       </label>
-      <label class="field"><span class="field-label">SUBIR EVIDENCIA FOTOGRÁFICA DE CIERRE (HASTA 3 FOTOS)</span>
-        <input type="file" id="evidencia-files" accept="image/*" multiple>
-      </label>
-      <div id="file-preview-list" style="font-size:12px; color:var(--text-muted);"></div>
-      <div class="modal-footer"><button type="submit" class="primary-button">Guardar y Finalizar Pedido</button></div>
+
+      <div style="margin:4px 0;">
+        <span class="field-label" style="display:block; margin-bottom:6px;">📷 FOTOS DE EVIDENCIA (HASTA 3 FOTOS):</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+          <button type="button" class="secondary-button" id="finish-open-cam-btn" style="background:#0284c7; color:white; border:none; display:flex; align-items:center; gap:6px; font-size:12px; padding:8px 12px; font-weight:bold;">
+            📸 Tomar Foto con Cámara Directa
+          </button>
+          <label class="secondary-button" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:8px 12px; margin:0;">
+            📁 Elegir de Archivos
+            <input type="file" id="evidencia-files" accept="image/*" multiple style="display:none;">
+          </label>
+        </div>
+        <div id="finish-evi-thumbs" style="display:flex; gap:8px; flex-wrap:wrap; min-height:40px; align-items:center; background:var(--bg-main); padding:8px; border-radius:6px; border:1px dashed var(--border-color);">
+          <span style="color:var(--text-muted); font-size:12px;">Sin fotos adjuntas aún.</span>
+        </div>
+      </div>
+
+      <div class="modal-footer"><button type="submit" class="primary-button" style="background:#059669; border:none;">Guardar y Finalizar Pedido</button></div>
     </form>
   `);
-  
-  $("#finish-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "Guardando e subiendo evidencias...";
-    
-    const filesInput = $("#evidencia-files");
-    const files = filesInput ? Array.from(filesInput.files).slice(0, 3) : [];
-    const imagesData = [];
-    
+
+  document.getElementById("finish-open-cam-btn")?.addEventListener("click", () => {
+    if (capturedEvidences.length >= 3) {
+      alert("Ya has alcanzado el límite de 3 fotos de evidencia.");
+      return;
+    }
+    openLiveCameraModal((base64) => {
+      capturedEvidences.push({ data: base64, mimeType: "image/jpeg" });
+      openFinishModal(order, targetStatus);
+      renderEviThumbs();
+    });
+  });
+
+  document.getElementById("evidencia-files")?.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
     for (const f of files) {
+      if (capturedEvidences.length >= 3) break;
       const compressed = await compressImageFile(f);
       const base64 = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
         reader.readAsDataURL(compressed);
       });
-      imagesData.push({ data: base64, mimeType: "image/jpeg" });
+      capturedEvidences.push({ data: base64, mimeType: "image/jpeg" });
     }
-    
+    renderEviThumbs();
+  });
+
+  $("#finish-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Guardando y subiendo evidencias...";
+
     try {
       await api("profile_update_order", {
         id: order.id,
+        user: state.session?.name || "Usuario",
+        role: state.session?.role || "trabajador",
         changes: {
           estado: targetStatus,
           comentarioCierre: e.target.comentarioCierre.value.trim(),
-          images: imagesData
+          images: capturedEvidences
         }
       });
       closeModal();
@@ -2337,6 +2564,344 @@ function openFinishModal(order, targetStatus) {
     }
   });
 }
+
+function openEditDeliveryDateModal(orderOrId) {
+  let order = orderOrId;
+  if (typeof order === "string") {
+    order = [...(state.data.allOrders || []), ...(state.data.myOrders || []), ...(state.data.finishedOrders || [])].find(o => String(o.id).trim() === orderOrId.trim());
+  }
+  if (!order) return;
+
+  const curDate = safeParseDate(order.entrega) || new Date();
+  const curDateIso = curDate.toISOString().split("T")[0];
+  let curHour = curDate.getHours();
+  const curMin = curDate.getMinutes().toString().padStart(2, "0");
+  const curAmpm = curHour >= 12 ? "PM" : "AM";
+  curHour = curHour % 12 || 12;
+  const curHourStr = `${curHour.toString().padStart(2, "0")}:${curMin} ${curAmpm}`;
+
+  openModal(`
+    <div class="modal-head">
+      <h2>🗓️ Modificar Fecha de Entrega (${escapeHtml(order.id)})</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="edit-delivery-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px;">
+        <div>📦 <strong>Pedido:</strong> ${escapeHtml(order.id)} – ${escapeHtml(order.cliente)}</div>
+        <div style="margin-top:4px;">⏰ <strong>Fecha actual:</strong> ${escapeHtml(formatDate(order.entrega))}</div>
+      </div>
+
+      <div class="form-inline">
+        <label class="field"><span class="field-label">NUEVA FECHA DE ENTREGA</span>
+          <input type="date" name="fechaEntrega" value="${curDateIso}" required>
+        </label>
+        <label class="field"><span class="field-label">NUEVA HORA DE ENTREGA</span>
+          <select name="horaEntrega" required>
+            ${generateTimeOptions(curHourStr)}
+          </select>
+        </label>
+      </div>
+
+      <label class="field"><span class="field-label">📝 MOTIVO DEL CAMBIO DE FECHA</span>
+        <input type="text" name="motivoCambio" placeholder="Ej: Cliente solicitó aplazar entrega para el lunes" required>
+      </label>
+
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button" style="background:#0284c7; border:none;">💾 Guardar Nueva Fecha</button>
+      </div>
+    </form>
+  `);
+
+  $("#edit-delivery-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Guardando fecha...";
+
+    const formData = new FormData(e.target);
+    const nFecha = formData.get("fechaEntrega");
+    const nHora = formData.get("horaEntrega");
+    const nMotivo = formData.get("motivoCambio") || "Cambio de fecha acordado";
+
+    try {
+      await api("profile_update_order", {
+        id: order.id,
+        user: state.session?.name || "Manager",
+        changes: {
+          fechaEntrega: nFecha,
+          horaEntrega: nHora,
+          entrega: nFecha,
+          nota: `🗓️ Fecha de entrega modificada al ${nFecha} a las ${nHora}. Motivo: ${nMotivo}`
+        }
+      });
+      closeModal();
+      await refresh(false);
+      showToast("✅ Fecha de entrega actualizada.");
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = "💾 Guardar Nueva Fecha";
+      alert(`Error al actualizar fecha: ${err.message}`);
+    }
+  });
+}
+window.openEditDeliveryDateModal = openEditDeliveryDateModal;
+
+function openAddRefImagesModal(orderOrId) {
+  let order = orderOrId;
+  if (typeof order === "string") {
+    order = [...(state.data.allOrders || []), ...(state.data.myOrders || []), ...(state.data.finishedOrders || [])].find(o => String(o.id).trim() === orderOrId.trim());
+  }
+  if (!order) return;
+
+  let capturedImages = [];
+
+  const updateThumbs = () => {
+    const listEl = document.getElementById("ref-thumbs-list");
+    if (!listEl) return;
+    if (!capturedImages.length) {
+      listEl.innerHTML = '<p style="color:var(--text-muted); font-size:12px; margin:4px 0;">No hay fotos seleccionadas todavía.</p>';
+      return;
+    }
+    listEl.innerHTML = capturedImages.map((img, idx) => `
+      <div style="position:relative; display:inline-block; border-radius:6px; overflow:hidden; border:1px solid var(--border-color);">
+        <img src="data:image/jpeg;base64,${img.data}" style="width:70px; height:70px; object-fit:cover; display:block;">
+        <button type="button" onclick="removeRefThumb(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(220,38,38,0.85); color:white; border:none; border-radius:50%; width:18px; height:18px; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center;">×</button>
+      </div>
+    `).join("");
+  };
+
+  window.removeRefThumb = function(idx) {
+    capturedImages.splice(idx, 1);
+    updateThumbs();
+  };
+
+  openModal(`
+    <div class="modal-head">
+      <h2>📷 Añadir Fotos de Referencia (${escapeHtml(order.id)})</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="add-ref-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px;">
+        <div>📦 <strong>Pedido:</strong> ${escapeHtml(order.id)} – ${escapeHtml(order.cliente)}</div>
+        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Adjunta imágenes de referencia recibidas posteriormente por WhatsApp o tomadas en taller.</p>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin:8px 0;">
+        <button type="button" class="secondary-button" id="open-cam-ref-btn" style="background:#0284c7; color:white; border:none; display:flex; align-items:center; gap:6px; padding:8px 12px; font-weight:bold;">
+          📸 Tomar con Cámara Directa
+        </button>
+        <label class="secondary-button" style="cursor:pointer; display:flex; align-items:center; gap:6px; padding:8px 12px; margin:0;">
+          📁 Elegir de Archivos / Galería
+          <input type="file" id="extra-ref-files" accept="image/*" multiple style="display:none;">
+        </label>
+      </div>
+
+      <div id="ref-thumbs-list" style="display:flex; gap:8px; flex-wrap:wrap; min-height:40px; align-items:center; background:var(--bg-card); padding:8px; border-radius:6px; border:1px dashed var(--border-color);">
+        <p style="color:var(--text-muted); font-size:12px; margin:4px 0;">No hay fotos seleccionadas todavía.</p>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button" style="background:#059669; border:none;">💾 Subir Fotos a Google Drive</button>
+      </div>
+    </form>
+  `);
+
+  document.getElementById("open-cam-ref-btn")?.addEventListener("click", () => {
+    openLiveCameraModal((base64) => {
+      capturedImages.push({ data: base64, mimeType: "image/jpeg" });
+      openAddRefImagesModal(order);
+      updateThumbs();
+    });
+  });
+
+  document.getElementById("extra-ref-files")?.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const f of files) {
+      const compressed = await compressImageFile(f);
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+        reader.readAsDataURL(compressed);
+      });
+      capturedImages.push({ data: base64, mimeType: "image/jpeg" });
+    }
+    updateThumbs();
+  });
+
+  $("#add-ref-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!capturedImages.length) {
+      alert("Por favor toma o selecciona al menos una foto de referencia.");
+      return;
+    }
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "Subiendo fotos a Drive...";
+
+    try {
+      await api("profile_add_reference_images", {
+        id: order.id,
+        images: capturedImages
+      });
+      closeModal();
+      await refresh(false);
+      showToast("✅ Fotos de referencia añadidas correctamente.");
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = "💾 Subir Fotos a Google Drive";
+      alert(`Error al subir fotos: ${err.message}`);
+    }
+  });
+}
+window.openAddRefImagesModal = openAddRefImagesModal;
+
+function openEditClientModal(client) {
+  openModal(`
+    <div class="modal-head">
+      <h2>✏️ Editar Cliente Frecuente</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="edit-client-form" class="form-grid">
+      <input type="hidden" name="originalName" value="${escapeHtml(client.name)}">
+      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span>
+        <input name="name" required value="${escapeHtml(client.name)}">
+      </label>
+      <label class="field"><span class="field-label">TELÉFONO / WHATSAPP</span>
+        <input name="phone" type="tel" value="${escapeHtml(client.phone || '')}" placeholder="04XXXXXXXXX">
+      </label>
+      <label class="field"><span class="field-label">¿REQUIERE DELIVERY?</span>
+        <select name="delivery">
+          <option value="No" ${client.delivery !== 'Sí' ? 'selected' : ''}>No – Retira en tienda</option>
+          <option value="Sí" ${client.delivery === 'Sí' ? 'selected' : ''}>Sí – Se le lleva a domicilio</option>
+        </select>
+      </label>
+      <label class="field"><span class="field-label">ZONA / SECTOR (Ej: Norte, Los Palos Grandes)</span>
+        <input name="zona" value="${escapeHtml(client.zona || '')}" placeholder="Ej. Norte, Sur...">
+      </label>
+      <label class="field"><span class="field-label">DIRECCIÓN DE ENTREGA</span>
+        <input name="direccion" value="${escapeHtml(client.direccion || '')}" placeholder="Ej. Calle 5...">
+      </label>
+      <div class="modal-footer">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">💾 Guardar Cambios</button>
+      </div>
+    </form>
+  `);
+
+  $("#edit-client-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    try {
+      await api("profile_edit_client", Object.fromEntries(new FormData(e.target)));
+      closeModal();
+      await refresh(false);
+      showToast("✅ Cliente actualizado con éxito.");
+    } catch(err) {
+      btn.disabled = false;
+      alert(`Error al editar cliente: ${err.message}`);
+    }
+  });
+}
+window.openEditClientModal = openEditClientModal;
+
+function openLearningGuideModal() {
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow" style="color:var(--primary-color); margin:0;">CREACIONES JJ · MANUAL OFICIAL</p>
+        <h2 style="margin:2px 0 0 0;">🎓 Modo de Enseñanza y Guía del Sistema</h2>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      
+      <!-- MÓDULO 1 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">1</span> Flujo de Estados y Conteo de Tiempo Real
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          El sistema mide la productividad del taller automáticamente calculando los minutos que trabajas. Para que tu rendimiento sea exacto:
+        </p>
+        <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px; font-size:12px;">
+          <div><span class="guide-badge-pill" style="background:#fee2e2; color:#dc2626;">🔴 Pendiente</span> Pedido nuevo en cola. Nadie lo está armando aún (Tiempo: 0 min).</div>
+          <div><span class="guide-badge-pill" style="background:#fef3c7; color:#d97706;">🟡 En proceso</span> <strong>¡Aquí empieza a correr el cronómetro!</strong> Pásalo a este estado cuando comiences a cortar, armar o pegar físicamente en la mesa.</div>
+          <div><span class="guide-badge-pill" style="background:#e0f2fe; color:#0284c7;">⏸️ Pausado</span> Si debes detenerte (esperando cartulina, plotter o respuesta del cliente), ponlo en pausa para que no se sume tiempo inactivo.</div>
+          <div><span class="guide-badge-pill" style="background:#dcfce7; color:#15803d;">🟢 Terminado</span> <strong>Completado al 100%.</strong> Te pedirá foto de evidencia y comentario. Tu tiempo se cierra y suma a tus estadísticas del día.</div>
+          <div><span class="guide-badge-pill" style="background:#059669; color:white;">📦 Entregado</span> <strong>Exclusivo de Jefes / Managers.</strong> Cuando el cliente retira o se va con el delivery.</div>
+        </div>
+      </div>
+
+      <!-- MÓDULO 2 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">2</span> Diferencia entre "Diseño" y "Producción"
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Muchos confunden el estado de diseño con la fabricación:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>🎨 <strong>Estado del Diseño (Pendiente / En proceso / Listo):</strong> Solo indica si el archivo digital de Silhouette / Illustrator ya está listo. <em>No cuenta tiempo de taller.</em></li>
+          <li>✂️ <strong>Estado de Producción (En proceso ➔ Terminado):</strong> Es el trabajo manual de taller. <em>Este es el que cuenta tus minutos y pedidos completados.</em></li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 3 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">3</span> Reasignaciones y Trabajo en Equipo
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Si un pedido no se puede terminar hoy porque te vas de vacaciones o finaliza tu turno:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Pulsa el botón morado <strong>👥 Reasignar</strong> en el detalle del pedido.</li>
+          <li>Ingresa los minutos que invertiste (ej: 45 min) y el avance que dejaste.</li>
+          <li>Tus 45 minutos quedarán reconocidos en tu reporte de nómina y tu compañero recibirá el pedido sin perder el avance.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 4 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">4</span> Cámara Directa y Propiedad Intelectual
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Las fotos de evidencia de los toppers pertenecen exclusivamente a Creaciones JJ.
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Usa el botón <strong>📸 Tomar Foto con Cámara Directa</strong> al completar el trabajo.</li>
+          <li>La foto viaja directamente a Google Drive en la nube sin guardarse en la memoria ni en la galería de tu celular personal.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 5 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">5</span> Notificación por WhatsApp Corporativo
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Para avisar a clientes desde el número de la empresa:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>En Historial, los pedidos listos tienen el botón verde <strong>📲 Notificar por WhatsApp</strong>.</li>
+          <li>Ofrece opciones directas para <strong>WhatsApp Web (Opera GX / Chrome)</strong>, <strong>App Móvil</strong> o <strong>Copiar Mensaje</strong>.</li>
+          <li>Al enviar, se marca automáticamente como notificado para que nadie repita el mensaje.</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="modal-footer" style="margin-top:10px;">
+      <button type="button" class="primary-button" data-action="close">¡Entendido!</button>
+    </div>
+  `);
+}
+window.openLearningGuideModal = openLearningGuideModal;
 
 function openReassignModal(orderOrId) {
   let order = orderOrId;
@@ -2558,9 +3123,21 @@ function formOrder() {
         </select>
       </label>
 
-      <label class="field"><span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS)</span>
-        <input type="file" id="reference-files-input" accept="image/*" multiple>
-      </label>
+      <div class="field">
+        <span class="field-label">🖼️ FOTOS DE REFERENCIA DEL CLIENTE (HASTA 3 FOTOS):</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+          <button type="button" class="secondary-button" id="form-cam-ref-btn" style="background:#0284c7; color:white; border:none; display:flex; align-items:center; gap:6px; font-size:12px; padding:6px 10px; font-weight:bold;">
+            📸 Tomar con Cámara Directa
+          </button>
+          <label class="secondary-button" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:6px 10px; margin:0;">
+            📁 Elegir de Archivos
+            <input type="file" id="reference-files-input" accept="image/*" multiple style="display:none;">
+          </label>
+        </div>
+        <div id="form-ref-thumbs" style="display:flex; gap:6px; flex-wrap:wrap; min-height:36px; align-items:center; background:var(--bg-main); padding:6px; border-radius:6px; border:1px dashed var(--border-color);">
+          <span style="color:var(--text-muted); font-size:12px;">Sin fotos de referencia seleccionadas.</span>
+        </div>
+      </div>
 
       <div class="form-inline">
         <label class="field"><span class="field-label">FECHA DE ENTREGA</span><input type="date" id="input-fecha-entrega" name="fechaEntrega" required></label>
@@ -2578,6 +3155,55 @@ function formOrder() {
     </form>
   `);
 
+  let formCapturedImages = [];
+
+  const updateFormRefThumbs = () => {
+    const listEl = document.getElementById("form-ref-thumbs");
+    if (!listEl) return;
+    if (!formCapturedImages.length) {
+      listEl.innerHTML = '<span style="color:var(--text-muted); font-size:12px;">Sin fotos de referencia seleccionadas.</span>';
+      return;
+    }
+    listEl.innerHTML = formCapturedImages.map((img, idx) => `
+      <div style="position:relative; display:inline-block; border-radius:6px; overflow:hidden; border:1px solid var(--border-color);">
+        <img src="data:image/jpeg;base64,${img.data}" style="width:55px; height:55px; object-fit:cover; display:block;">
+        <button type="button" onclick="removeFormRefThumb(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(220,38,38,0.85); color:white; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; cursor:pointer; display:flex; align-items:center; justify-content:center;">×</button>
+      </div>
+    `).join("");
+  };
+
+  window.removeFormRefThumb = function(idx) {
+    formCapturedImages.splice(idx, 1);
+    updateFormRefThumbs();
+  };
+
+  document.getElementById("form-cam-ref-btn")?.addEventListener("click", () => {
+    if (formCapturedImages.length >= 3) {
+      alert("Límite de 3 fotos de referencia alcanzado.");
+      return;
+    }
+    openLiveCameraModal((base64) => {
+      formCapturedImages.push({ data: base64, mimeType: "image/jpeg" });
+      formOrder();
+      updateFormRefThumbs();
+    });
+  });
+
+  document.getElementById("reference-files-input")?.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const f of files) {
+      if (formCapturedImages.length >= 3) break;
+      const compressed = await compressImageFile(f);
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+        reader.readAsDataURL(compressed);
+      });
+      formCapturedImages.push({ data: base64, mimeType: "image/jpeg" });
+    }
+    updateFormRefThumbs();
+  });
+
   $("#magic-paste-btn")?.addEventListener("click", () => {
     const raw = $("#magic-paste-input")?.value || "";
     if (!raw.trim()) {
@@ -2592,7 +3218,7 @@ function formOrder() {
     if (parsed.motivo) $("#input-motivo").value = parsed.motivo;
     if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
     if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
-    if (parsed.descripcion) $("#input-descripcion").value = parsed.descripcion;
+    $("#input-descripcion").value = parsed.descripcion || raw.trim();
     
     showToast("✨ Campos llenados con Pegado Mágico.");
   });
@@ -2634,24 +3260,15 @@ function formOrder() {
     btn.disabled = true;
     btn.textContent = "Guardando pedido y referencias...";
 
-    const refInput = $("#reference-files-input");
-    const refFiles = refInput ? Array.from(refInput.files).slice(0, 3) : [];
-    const referenceImages = [];
-
-    for (const f of refFiles) {
-      const compressed = await compressImageFile(f);
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
-        reader.readAsDataURL(compressed);
-      });
-      referenceImages.push({ data: base64, mimeType: "image/jpeg" });
+    const formDataObj = Object.fromEntries(new FormData(e.target));
+    if (!formDataObj.descripcion && $("#input-descripcion")?.value) {
+      formDataObj.descripcion = $("#input-descripcion").value;
     }
 
     try {
       await api("profile_create_order", {
-        form: Object.fromEntries(new FormData(e.target)),
-        referenceImages: referenceImages
+        form: formDataObj,
+        referenceImages: formCapturedImages
       });
       closeModal();
       await refresh(false);
@@ -2782,6 +3399,14 @@ document.addEventListener("click", async (e) => {
         alert(`Error: ${err.message}`);
       }
     });
+    return;
+  }
+  if (act === "edit-client") {
+    const targetName = btn.dataset.name;
+    const clientObj = state.frequentClients.find(c => c.name.toLowerCase() === (targetName || "").toLowerCase());
+    if (clientObj) {
+      openEditClientModal(clientObj);
+    }
     return;
   }
   if (act === "delete-client") {
