@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest?v=39"/>
   <link rel="icon" type="image/png" href="./logo_creaciones_jj.png"/>
   <link rel="apple-touch-icon" href="./logo_creaciones_jj.png"/>
-  <link rel="stylesheet" href="./styles.css?v=43"/>
+  <link rel="stylesheet" href="./styles.css?v=44"/>
   <title>Creaciones JJ – Prioridad Producción</title>
   <!-- CSS crítico: oculta workspace ANTES de que corra cualquier JS -->
   <style>
@@ -87,6 +87,15 @@
         <div class="topbar-controls">
           <button
             type="button"
+            class="secondary-button"
+            onclick="openLearningGuideModal()"
+            style="padding:4px 10px; font-size:12px; font-weight:700; border-radius:8px; background:rgba(59,130,246,0.12); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); display:flex; align-items:center; gap:4px; cursor:pointer;"
+            title="Guía y Manual de Enseñanza del Taller"
+          >
+            🎓 Guía
+          </button>
+          <button
+            type="button"
             class="theme-toggle-btn"
             onclick="toggleTheme()"
             aria-label="Cambiar modo oscuro / claro"
@@ -132,7 +141,7 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script src="./app-registrar-fix.js?v=70"></script>
+  <script src="./app-registrar-fix.js?v=71"></script>
 
   <script>
     /* ---- PWA y Registro de Service Worker para PC / Móvil ---- */
