@@ -554,12 +554,16 @@ function parseMagicPasteText(rawText) {
 }
 
 // HTTP API Fetch Handler con tiempo límite anti-congelamiento
-async function api(action, extra = {}) {
+async function api(action, extra = {}, timeoutMs = null) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
   const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
   
+  // Timeout extendido para creación, fotos, actualización o eliminación (GAS + Drive suelen tardar 15-30s)
+  const isHeavy = ["profile_create_order", "profile_update_order", "profile_delete_order", "profile_archive_old_orders"].includes(action) || extra.referenceImages || extra.images;
+  const finalTimeout = timeoutMs || (isHeavy ? 60000 : 35000);
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), finalTimeout);
 
   try {
     const response = await fetch(baseUrl, {
@@ -929,6 +933,7 @@ function historyView() {
             </div>
             <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
               Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
+              ${order.finProduccion ? `🏁 <strong>Terminado:</strong> <span style="color:#059669; font-weight:700;">${escapeHtml(formatDate(order.finProduccion))}</span><br/>` : ''}
               Responsable: ${escapeHtml(order.responsable)}<br/>
               ${order.telefono ? `📞 Teléfono: <strong>${escapeHtml(order.telefono)}</strong><br/>` : ''}
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
@@ -2145,6 +2150,13 @@ function detail(order) {
         </div>
       </div>
 
+      ${order.finProduccion ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px; background:rgba(5,150,105,0.08); padding:8px 10px; border-radius:6px; margin:4px 0;">
+          <span style="font-weight:700; color:#059669; font-size:12px;">🏁 FECHA DE FINALIZACIÓN REAL:</span>
+          <strong style="color:#059669;">${escapeHtml(formatDate(order.finProduccion))}</strong>
+        </div>
+      ` : ''}
+
       ${hasDelivery ? `
         <div style="display:flex; flex-direction:column; gap:4px; border:1px solid #0284c7; background:rgba(2,132,199,.1); padding:10px; border-radius:8px;">
           <span style="font-weight:800; color:#0284c7; font-size:13px;">🚚 PEDIDO CON DELIVERY A DOMICILIO</span>
@@ -2541,7 +2553,9 @@ function openFinishModal(order, targetStatus) {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
-    btn.textContent = "Guardando y subiendo evidencias...";
+    btn.textContent = "⏳ Guardando y subiendo evidencias...";
+
+    const commentVal = e.target.comentarioCierre.value.trim() || "Completado sin observaciones adicionales.";
 
     try {
       await api("profile_update_order", {
@@ -2550,10 +2564,10 @@ function openFinishModal(order, targetStatus) {
         role: state.session?.role || "trabajador",
         changes: {
           estado: targetStatus,
-          comentarioCierre: e.target.comentarioCierre.value.trim(),
+          comentarioCierre: commentVal,
           images: capturedEvidences
         }
-      });
+      }, 60000);
       closeModal();
       await refresh(false);
       showToast("Pedido finalizado con éxito.");
@@ -2617,7 +2631,7 @@ function openEditDeliveryDateModal(orderOrId) {
     e.preventDefault();
     const btn = e.target.querySelector(".primary-button");
     btn.disabled = true;
-    btn.textContent = "Guardando fecha...";
+    btn.textContent = "💾 Guardando fecha...";
 
     const formData = new FormData(e.target);
     const nFecha = formData.get("fechaEntrega");
@@ -2634,7 +2648,18 @@ function openEditDeliveryDateModal(orderOrId) {
           entrega: nFecha,
           nota: `🗓️ Fecha de entrega modificada al ${nFecha} a las ${nHora}. Motivo: ${nMotivo}`
         }
-      });
+      }, 45000);
+
+      // Actualización optimista inmediata en memoria
+      const allLists = [state.data.allOrders || [], state.data.myOrders || [], state.data.finishedOrders || []];
+      for (const list of allLists) {
+        const found = list.find(o => String(o.id).trim() === String(order.id).trim());
+        if (found) {
+          found.entrega = `${nFecha}T18:00:00`;
+          found.horaEntrega = nHora;
+        }
+      }
+
       closeModal();
       await refresh(false);
       showToast("✅ Fecha de entrega actualizada.");
@@ -3254,29 +3279,38 @@ function formOrder() {
     }
   });
   
+  let isSubmittingOrder = false;
   $("#order-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (isSubmittingOrder) return;
+    isSubmittingOrder = true;
+
     const btn = e.target.querySelector(".primary-button");
-    btn.disabled = true;
-    btn.textContent = "Guardando pedido y referencias...";
+    const allInputs = e.target.querySelectorAll("input, select, textarea, button");
+    allInputs.forEach(el => el.disabled = true);
+    btn.textContent = "⏳ Guardando pedido y referencias... Por favor espera.";
 
     const formDataObj = Object.fromEntries(new FormData(e.target));
     if (!formDataObj.descripcion && $("#input-descripcion")?.value) {
       formDataObj.descripcion = $("#input-descripcion").value;
     }
+    formDataObj.clientRequestId = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
     try {
       await api("profile_create_order", {
         form: formDataObj,
         referenceImages: formCapturedImages
-      });
+      }, 60000);
       closeModal();
       await refresh(false);
       showToast("Pedido guardado exitosamente.");
     } catch (err) {
-      btn.disabled = false;
+      isSubmittingOrder = false;
+      allInputs.forEach(el => el.disabled = false);
       btn.textContent = "Guardar Pedido";
       alert(`Error: ${err.message}`);
+    } finally {
+      isSubmittingOrder = false;
     }
   });
 }
@@ -3497,12 +3531,19 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "delete-order") {
     if (confirm(`¿Eliminar el pedido "${btn.dataset.id}" del sistema?`)) {
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = "🗑️ Eliminando...";
       try {
-        await api("profile_delete_order", { id: btn.dataset.id });
+        await api("profile_delete_order", { id: btn.dataset.id }, 45000);
         closeModal();
         await refresh(false);
-        showToast("Pedido eliminado.");
-      } catch (err) { alert(err.message); }
+        showToast("Pedido eliminado permanentemente.");
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = oldText;
+        alert(err.message);
+      }
     }
     return;
   }
