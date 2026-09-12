@@ -3285,16 +3285,31 @@ function formOrder() {
     if (isSubmittingOrder) return;
     isSubmittingOrder = true;
 
+    // 1. Extraer los datos del formulario ANTES de deshabilitar los campos
+    // (Nota: new FormData ignora completamente campos deshabilitados)
+    const formDataObj = Object.fromEntries(new FormData(e.target));
+    
+    // Extracción explícita de respaldo para garantizar captura 100% fiel
+    if (!formDataObj.cliente && $("#input-cliente")?.value) formDataObj.cliente = $("#input-cliente").value.trim();
+    if (!formDataObj.telefono && $("#input-telefono")?.value) formDataObj.telefono = $("#input-telefono").value.trim();
+    if (!formDataObj.tipo && $("#input-tipo")?.value) formDataObj.tipo = $("#input-tipo").value.trim();
+    if (!formDataObj.motivo && $("#input-motivo")?.value) formDataObj.motivo = $("#input-motivo").value.trim();
+    if (!formDataObj.fechaEntrega && $("#input-fecha-entrega")?.value) formDataObj.fechaEntrega = $("#input-fecha-entrega").value;
+    if (!formDataObj.horaEntrega && $("#select-hora-entrega")?.value) formDataObj.horaEntrega = $("#select-hora-entrega").value;
+    const respSelect = e.target.querySelector('select[name="responsable"]');
+    if (respSelect) formDataObj.responsable = respSelect.value;
+    const disenoSelect = e.target.querySelector('select[name="diseno"]');
+    if (disenoSelect) formDataObj.diseno = disenoSelect.value;
+    if (!formDataObj.descripcion && $("#input-descripcion")?.value) {
+      formDataObj.descripcion = $("#input-descripcion").value.trim();
+    }
+    formDataObj.clientRequestId = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
+    // 2. Ahora sí deshabilitar el botón y los campos visualmente
     const btn = e.target.querySelector(".primary-button");
     const allInputs = e.target.querySelectorAll("input, select, textarea, button");
     allInputs.forEach(el => el.disabled = true);
     btn.textContent = "⏳ Guardando pedido y referencias... Por favor espera.";
-
-    const formDataObj = Object.fromEntries(new FormData(e.target));
-    if (!formDataObj.descripcion && $("#input-descripcion")?.value) {
-      formDataObj.descripcion = $("#input-descripcion").value;
-    }
-    formDataObj.clientRequestId = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
     try {
       await api("profile_create_order", {
