@@ -8,7 +8,11 @@
   <link rel="manifest" href="./manifest.webmanifest?v=39"/>
   <link rel="icon" type="image/png" href="./logo_creaciones_jj.png"/>
   <link rel="apple-touch-icon" href="./logo_creaciones_jj.png"/>
-  <link rel="stylesheet" href="./styles.css?v=44"/>
+    <!-- FontAwesome 6, SweetAlert2 v11 e Inter Font (SICS 2026 Style) -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link rel="stylesheet" href="./styles.css?v=75"/>
   <title>Creaciones JJ – Prioridad Producción</title>
   <!-- CSS crítico: oculta workspace ANTES de que corra cualquier JS -->
   <style>
@@ -79,30 +83,72 @@
 
     <!-- ========== ÁREA DE TRABAJO ========== -->
     <section id="workspace" class="workspace">
-      <header class="topbar">
-        <div>
-          <p id="role-label" class="eyebrow">CREACIONES JJ · PRODUCCIÓN</p>
-          <h1 id="screen-title">Ahora</h1>
-        </div>
-        <div class="topbar-controls">
-          <button
-            type="button"
-            class="secondary-button"
-            onclick="openLearningGuideModal()"
-            style="padding:4px 10px; font-size:12px; font-weight:700; border-radius:8px; background:rgba(59,130,246,0.12); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); display:flex; align-items:center; gap:4px; cursor:pointer;"
-            title="Guía y Manual de Enseñanza del Taller"
-          >
-            🎓 Guía
+      <!-- HEADER FLOTANTE STICKY (ESTILO SICS 2026) -->
+      <header class="jj-main-header">
+        <a class="jj-header-brand" onclick="navigate('now')">
+          <i class="fas fa-crown jj-brand-icon"></i>
+          <div>
+            <div class="jj-brand-title">Creaciones JJ</div>
+            <div class="jj-brand-sub">Ochoa &amp; Risquez · Taller</div>
+          </div>
+        </a>
+
+        <div class="jj-header-controls">
+          <!-- Botón Pedido Rápido Mostrador -->
+          <button type="button" id="btn-fast-order" class="secondary-button" onclick="openExpressOrderModal()" style="background:#f59e0b; color:white; border:none; padding:7px 14px; border-radius:30px; font-weight:800; font-size:12px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; box-shadow:0 3px 10px rgba(245,158,11,0.35);">
+            <i class="fas fa-bolt"></i> <span>Mostrador Rápido</span>
           </button>
-          <button
-            type="button"
-            class="theme-toggle-btn"
-            onclick="toggleTheme()"
-            aria-label="Cambiar modo oscuro / claro"
-          >
-            <span id="theme-icon">🌙</span> Modo
+
+          <!-- Campanita de Alertas y Monitoreo Remoto -->
+          <div class="bell-container" id="bellContainer">
+            <button type="button" class="control-btn-circle" id="bellIconBtn" title="Alertas de Taller y Sincronización">
+              <i class="fas fa-bell bell-icon" id="bellIcon"></i>
+              <span class="bell-badge" id="bellBadge">0</span>
+            </button>
+            <div class="dropdown-notif" id="notifDropdown">
+              <div class="dropdown-notif-header">
+                <span><i class="fas fa-exclamation-circle"></i> Alertas y Monitoreo</span>
+                <span id="notif-count-text" style="font-weight:700; font-size:11px;">0 activas</span>
+              </div>
+              <div class="notif-list" id="notifList">
+                <div style="padding:20px; text-align:center; color:var(--text-muted); font-size:12px;">
+                  <i class="fas fa-check-circle" style="color:#10b981; font-size:2rem; margin-bottom:8px;"></i><br/>
+                  Todo al día. No hay alertas críticas en el taller.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buscador Inteligente Spotlight (Ctrl + K) -->
+          <button type="button" id="searchToggleBtn" class="control-btn-circle" title="Buscador Spotlight (Ctrl + K)">
+            <i class="fas fa-search"></i>
           </button>
-          <button id="refresh" class="icon-button" aria-label="Actualizar">↻</button>
+
+          <!-- Botón Modo Oscuro / Claro -->
+          <button type="button" id="themeToggleBtn" class="control-btn-circle" onclick="toggleTheme()" title="Cambiar Tema (Oscuro / Claro)">
+            <i class="fas fa-moon" id="themeIcon"></i>
+          </button>
+
+          <!-- Botón Guía -->
+          <button type="button" class="control-btn-circle" onclick="openLearningGuideModal()" title="Guía y Manual de Enseñanza">
+            <i class="fas fa-graduation-cap" style="color:#3b82f6;"></i>
+          </button>
+
+          <!-- Botón Refrescar -->
+          <button type="button" id="refresh" class="control-btn-circle" title="Actualizar datos">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+
+          <!-- Perfil Usuario -->
+          <button type="button" class="user-pill" id="userPillBtn" title="Perfil y Sesión Activa">
+            <i class="fas fa-user"></i>
+            <span id="userPillName">Usuario</span>
+          </button>
+
+          <!-- Botón Salir -->
+          <button type="button" class="logout-btn-new" onclick="doLogout()" title="Cerrar sesión">
+            <i class="fas fa-power-off"></i>
+          </button>
         </div>
       </header>
 
@@ -141,7 +187,7 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script src="./app-registrar-fix.js?v=73"></script>
+  <script src="./app-registrar-fix.js?v=75"></script>
 
   <script>
     /* ---- PWA y Registro de Service Worker para PC / Móvil ---- */
@@ -221,5 +267,67 @@
       lector.readAsText(archivo);
     };
   </script>
+
+  <!-- =========================================================
+       SICS COMMAND PALETTE (SPOTLIGHT GLOBAL) HTML
+       ========================================================= -->
+  <div id="sics-spotlight-overlay">
+    <div class="spotlight-box">
+      <div class="spotlight-header">
+        <i class="fas fa-search"></i>
+        <input type="text" id="spotlight-search" class="spotlight-input" placeholder="¿Qué deseas buscar o hacer? (pedidos, clientes, acciones)..." autocomplete="off" spellcheck="false">
+      </div>
+      <div class="spotlight-results" id="spotlight-list">
+        <!-- Inyectado dinámicamente -->
+      </div>
+      <div class="spotlight-footer">
+        <span><span class="kbd-btn"><i class="fas fa-arrow-up"></i></span> <span class="kbd-btn"><i class="fas fa-arrow-down"></i></span> Navegar</span>
+        <span><span class="kbd-btn">Enter</span> Seleccionar</span>
+        <span><span class="kbd-btn">Esc</span> Cerrar</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       ASISTENTE VIRTUAL POR VOZ & CHAT FLOTANTE (JJ-BOT)
+       ========================================================= -->
+  <div id="jj-bot-button" onclick="toggleJJBot()" title="Asistente de Voz y Ayuda Inteligente">
+    <i class="fas fa-robot" style="font-size: 1.4rem;"></i>
+  </div>
+
+  <div id="jj-bot-window" class="chat-hidden">
+    <div class="jj-bot-header">
+      <div class="jj-bot-info">
+        <div style="width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center;">
+          <i class="fas fa-robot"></i>
+        </div>
+        <div>
+          <h4>JJ-Bot Asistente</h4>
+          <p>• Dictado por Voz &amp; Ayuda Operativa</p>
+        </div>
+      </div>
+      <button class="close-button" style="color:white; font-size:22px; background:none; border:none; cursor:pointer;" onclick="toggleJJBot()">×</button>
+    </div>
+
+    <div class="jj-bot-body" id="jj-bot-body">
+      <div style="background:rgba(14,165,233,0.08); padding:12px; border-radius:12px; font-size:12.5px; line-height:1.4;">
+        👋 <strong>¡Hola! Soy JJ-Bot.</strong> Puedes dictarme un pedido por voz o escribirlo como prefieras.
+        <br/><br/>
+        🎙️ <em>Ejemplo:</em> "Pedido para María, 2 toppers de Barbie y 15 stickers para hoy a las 5 de la tarde".
+      </div>
+      <div id="jj-bot-confirm-area"></div>
+    </div>
+
+    <div class="jj-bot-footer">
+      <button type="button" id="jj-mic-btn" class="mic-action-btn" onclick="toggleSpeechRecognition()" title="Presiona para dictar por voz">
+        <i class="fas fa-microphone"></i>
+      </button>
+      <input type="text" id="jj-bot-input" class="jj-bot-input" placeholder="Escribe o presiona el micrófono..." onkeypress="if(event.key==='Enter') processBotMessage()">
+      <button type="button" class="primary-button" style="padding:8px 14px; border-radius:20px; font-size:12px;" onclick="processBotMessage()">
+        Enviar
+      </button>
+    </div>
+  </div>
+
 </body>
 </html>
