@@ -276,6 +276,8 @@ const state = {
   searchQuery: "",
   perfTimeframe: "today",
   offline: false,
+  systemErrors: [],
+  activeAlerts: [],
   data: store.get("pp_profile_data", { myOrders: [], teamCritical: [], allOrders: [], finishedOrders: [], users: [], dailyPerformance: {} }),
 };
 
@@ -578,6 +580,14 @@ async function api(action, extra = {}, timeoutMs = null) {
     throw new Error(data?.error || data?.mensaje || "Error al procesar la solicitud.");
   } catch (err) {
     clearTimeout(timeoutId);
+    state.systemErrors = state.systemErrors || [];
+    state.systemErrors.unshift({
+      action: action,
+      error: err.message || String(err),
+      time: new Date().toLocaleTimeString()
+    });
+    if (state.systemErrors.length > 20) state.systemErrors.pop();
+    if (window.checkTallerAlertas) setTimeout(window.checkTallerAlertas, 100);
     if (err.name === 'AbortError') {
       throw new Error("La conexión con Google Sheets tardó demasiado. Revisa tu internet o vuelve a intentar.");
     }
@@ -782,6 +792,31 @@ function orderCard(order, position) {
         <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
           ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
           ${disenoBadge}
+          ${(() => {
+            // Badge de Cronómetro en Vivo para órdenes en proceso
+            if (order.estado === 'En proceso' && order.inicioProduccion) {
+              const startMs = new Date(order.inicioProduccion).getTime();
+              if (!isNaN(startMs)) {
+                const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
+                return `<span class="live-stopwatch-badge"><i class="fas fa-stopwatch"></i> ${elMin} min en mesa</span>`;
+              }
+            } else if (order.estado === 'Pausado') {
+              return `<span style="background:rgba(245,158,11,0.15); color:#d97706; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-pause-circle"></i> Pausado</span>`;
+            }
+            return '';
+          })()}
+          ${(() => {
+            // Badge Multi-Ítem si tiene sub-trabajos
+            let subs = [];
+            try {
+              subs = Array.isArray(order.subItems) ? order.subItems : (typeof order.subItems === 'string' && order.subItems ? JSON.parse(order.subItems) : []);
+            } catch(e) {}
+            if (Array.isArray(subs) && subs.length > 0) {
+              const doneCount = subs.filter(s => s.completado || s.done).length;
+              return `<span style="background:rgba(14,165,233,0.12); color:#0284c7; font-size:10px; font-weight:800; padding:2px 7px; border-radius:20px;"><i class="fas fa-layer-group"></i> ${subs.length} trabajos (${doneCount}/${subs.length})</span>`;
+            }
+            return '';
+          })()}
           ${hasDelivery ? `<span class="badge-delivery">🚚 ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
           ${(() => {
             let colabs = [];
@@ -2071,6 +2106,13 @@ function render() {
       store.set("pp_wa_template", val);
       showToast("Plantilla de WhatsApp guardada.");
     });
+
+    // Actualizar User Pill y Alertas estilo SICS 2026
+    const userPill = document.getElementById("userPillName");
+    if (userPill && state.session) {
+      userPill.textContent = `${state.session.name || 'Usuario'} (${formatRoleLabel(state.session.role)})`;
+    }
+    if (window.checkTallerAlertas) window.checkTallerAlertas();
   } catch (err) {
     console.error("Error durante el renderizado:", err);
   }
@@ -2101,8 +2143,97 @@ function detail(order) {
   ) || {};
   const hasDelivery = clientInfo.delivery === "Sí";
 
+  // Cálculo de tiempo transcurrido en vivo si está en proceso
+  let liveTimerNotice = '';
+  if (order.estado === 'En proceso' && order.inicioProduccion) {
+    const startMs = new Date(order.inicioProduccion).getTime();
+    if (!isNaN(startMs)) {
+      const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
+      liveTimerNotice = `
+        <div style="background:rgba(16,185,129,0.12); border:1.5px solid #10b981; border-radius:12px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong style="color:#059669; font-size:13px; display:block;"><i class="fas fa-stopwatch fa-spin" style="--fa-animation-duration:3s;"></i> CRONÓMETRO EN VIVO:</strong>
+            <span style="font-size:12px; color:var(--text-main);">Llevas <strong>${elMin} minutos</strong> de trabajo físico en mesa.</span>
+          </div>
+          <span class="live-stopwatch-badge" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
+        </div>
+      `;
+    }
+  }
+
+  // AVISO / MODAL LIMITANTE DE PRIMERA APERTURA (Para TODOS los trabajadores y Managers como Sra. Julieta)
+  let gatekeeperBanner = '';
+  if (active(order) && (order.estado === 'Pendiente' || !order.inicioProduccion)) {
+    gatekeeperBanner = `
+      <div style="background:linear-gradient(135deg, rgba(14,165,233,0.1), rgba(139,92,246,0.1)); border:2px solid #0ea5e9; border-radius:14px; padding:14px; margin-bottom:16px;">
+        <div style="font-weight:900; color:#0284c7; font-size:14px; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-bolt" style="color:#0ea5e9;"></i> PASO OBLIGATORIO: ¿EN QUÉ FASE COMENZARÁS ESTE PEDIDO?
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin:6px 0 12px 0;">
+          Para registrar las métricas exactas de tiempo y evitar confusiones en el taller, indica la etapa en que iniciarás:
+        </p>
+        <div class="gatekeeper-card-grid">
+          <div class="gatekeeper-choice-card diseno" onclick="setOrderPhase('${escapeHtml(order.id)}', 'diseno')">
+            <i class="fas fa-palette" style="font-size:1.8rem; color:#8b5cf6;"></i>
+            <strong style="color:#7c3aed; font-size:13px;">Fase de Diseño Gráfico</strong>
+            <span style="font-size:11px; color:var(--text-muted);">Elaboración previa en PC. No consume tiempo de mesa de producción.</span>
+          </div>
+          <div class="gatekeeper-choice-card produccion" onclick="setOrderPhase('${escapeHtml(order.id)}', 'produccion')">
+            <i class="fas fa-tools" style="font-size:1.8rem; color:#10b981;"></i>
+            <strong style="color:#059669; font-size:13px;">Fase de Producción en Mesa</strong>
+            <span style="font-size:11px; color:var(--text-muted);">Corte, armado, sublimación, stickers. ⏱️ <strong>Inicia cronómetro en vivo</strong>.</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Renderizado de Sub-Ítems / Lista de Trabajos dentro del Pedido
+  let subItems = [];
+  try {
+    subItems = Array.isArray(order.subItems) ? order.subItems : (typeof order.subItems === 'string' && order.subItems ? JSON.parse(order.subItems) : []);
+  } catch(e) {}
+
+  let subItemsChecklistHtml = '';
+  if (Array.isArray(subItems) && subItems.length > 0) {
+    subItemsChecklistHtml = `
+      <div style="border:1.5px solid rgba(14,165,233,0.4); background:rgba(14,165,233,0.03); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <strong style="color:#0284c7; font-size:13px; display:flex; align-items:center; gap:6px;">
+            <i class="fas fa-tasks"></i> TRABAJOS DE ESTE PEDIDO (${subItems.length} ÍTEMS):
+          </strong>
+          <button type="button" class="secondary-button" style="padding:2px 8px; font-size:11px; border-radius:6px;" onclick="addSubItemToOrder('${escapeHtml(order.id)}')">
+            ➕ Agregar Otro
+          </button>
+        </div>
+        <div class="subitems-checklist">
+          ${subItems.map((item, sIdx) => {
+            const isDone = Boolean(item.completado || item.done);
+            return `
+              <div class="subitem-check-item ${isDone ? 'completed' : ''}">
+                <label class="subitem-check-left" onclick="toggleSubItemDone('${escapeHtml(order.id)}', ${sIdx})">
+                  <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px;">
+                  <span class="item-name" style="font-weight:700; color:var(--text-main);">
+                    ${item.cantidad ? `(${item.cantidad}) ` : ''}${escapeHtml(item.tipo || item.name || 'Trabajo')}
+                  </span>
+                  ${item.detalles ? `<small style="color:var(--text-muted); font-size:11px;">- ${escapeHtml(item.detalles)}</small>` : ''}
+                </label>
+                <span style="font-size:11px; font-weight:800; padding:2px 6px; border-radius:10px; ${isDone ? 'background:#dcfce7; color:#15803d;' : 'background:#fef3c7; color:#d97706;'}">
+                  ${isDone ? '✅ Listo' : '⏳ Pendiente'}
+                </span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${escapeHtml(order.id)}</p><h2>${escapeHtml(order.cliente)}</h2></div><button class="close-button" data-action="close">×</button></div>
+    ${gatekeeperBanner}
+    ${liveTimerNotice}
+    ${subItemsChecklistHtml}
     <div class="form-grid" style="gap:12px; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">TIPO DE TRABAJO:</span>
@@ -2498,6 +2629,30 @@ function openFinishModal(order, targetStatus) {
         <div style="margin-top:2px; font-size:12px; color:var(--text-muted);">Tipo: ${escapeHtml(order.tipo)} ${order.motivo ? `· Motivo: ${escapeHtml(order.motivo)}` : ''}</div>
       </div>
 
+      ${(() => {
+        let calcElapsed = 0;
+        if (order.inicioProduccion) {
+          const sMs = new Date(order.inicioProduccion).getTime();
+          if (!isNaN(sMs)) {
+            calcElapsed = Math.max(0, Math.round((Date.now() - sMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
+          }
+        }
+        if (calcElapsed <= 0 && Number(order.duracionRealMin) > 0) {
+          calcElapsed = Number(order.duracionRealMin);
+        }
+        return `
+          <div style="background:rgba(16,185,129,0.08); border:1.5px solid #10b981; border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <span style="font-size:12.5px; font-weight:800; color:#059669; display:block;">⏱️ TIEMPO REAL INVERTIDO EN MESA (MINUTOS):</span>
+              <span style="font-size:11px; color:var(--text-muted);">
+                ${calcElapsed > 0 ? `Calculado por el cronómetro del pedido.` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
+              </span>
+            </div>
+            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : 45}" min="1" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+          </div>
+        `;
+      })()}
+
       <label class="field"><span class="field-label">COMENTARIO DE CIERRE / OBSERVACIÓN</span>
         <textarea name="comentarioCierre" required placeholder="Escribe un comentario sobre la elaboración, materiales usados o imprevistos..."></textarea>
       </label>
@@ -2565,6 +2720,8 @@ function openFinishModal(order, targetStatus) {
         changes: {
           estado: targetStatus,
           comentarioCierre: commentVal,
+          duracionManualMin: Number(e.target.duracionManualMin?.value || 0),
+          duracionRealMin: Number(e.target.duracionManualMin?.value || 0),
           images: capturedEvidences
         }
       }, 60000);
@@ -3115,6 +3272,16 @@ function formOrder() {
   openModal(`
     <div class="modal-head"><h2>Registrar Pedido - Creaciones JJ</h2><button class="close-button" data-action="close">×</button></div>
     
+    <!-- Atajo Mostrador Rápido -->
+    <div style="background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(14,165,233,0.12)); border:1px solid #f59e0b; border-radius:12px; padding:10px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:12.5px; font-weight:800; color:#d97706; display:flex; align-items:center; gap:8px;">
+        <i class="fas fa-bolt"></i> ¿CLIENTE EN MOSTRADOR?
+      </div>
+      <button type="button" class="primary-button" style="background:#f59e0b; border:none; padding:5px 12px; font-size:11px; border-radius:20px; font-weight:800; cursor:pointer;" onclick="closeModal(); openExpressOrderModal();">
+        ⚡ Abrir Pedido Rápido Mostrador
+      </button>
+    </div>
+
     <div class="magic-paste-box">
       <div class="magic-paste-title">✨ Pegado Mágico (WhatsApp / Plantillas de Reposteras)</div>
       <textarea id="magic-paste-input" class="magic-paste-textarea" placeholder="Pega aquí el mensaje del cliente (Ej: 'Medida 1kl: 14x14cm, Nombre: Yolber, Entregar: Miércoles')"></textarea>
@@ -3139,6 +3306,27 @@ function formOrder() {
         ${motivos.length ? `<select id="motivo-select" style="margin-bottom:6px;"><option value="">-- Seleccionar motivo guardado --</option>${motivos.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}<option value="__CUSTOM__">Escribir nuevo motivo...</option></select>` : ''}
         <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
       </label>
+
+      <!-- SECCIÓN MULTI-TRABAJO (Cualquier combinación de ítems libre) -->
+      <div class="subitems-builder-box">
+        <div class="subitems-builder-title">
+          <span><i class="fas fa-cubes"></i> TRABAJOS / ARTÍCULOS DE ESTE PEDIDO</span>
+          <button type="button" class="secondary-button" id="form-add-subitem-btn" style="padding:4px 10px; font-size:11px; font-weight:bold; border-radius:6px; background:#0ea5e9; color:white; border:none; cursor:pointer;">
+            ➕ Agregar Otro Trabajo
+          </button>
+        </div>
+        <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
+          Puedes combinar libremente varios trabajos en esta misma orden (ej: Topper + Stickers + Taza + Invitación).
+        </p>
+        <div id="subitems-form-list">
+          <div class="subitem-row">
+            <input type="text" class="subitem-form-tipo" placeholder="Tipo (ej: Topper 3D, Stickers)" value="Topper 3D">
+            <input type="number" class="subitem-form-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
+            <input type="text" class="subitem-form-det" placeholder="Detalles / Medidas">
+            <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+          </div>
+        </div>
+      </div>
 
       <label class="field"><span class="field-label">🎨 ESTADO DEL DISEÑO</span>
         <select name="diseno">
@@ -3280,14 +3468,48 @@ function formOrder() {
   });
   
   let isSubmittingOrder = false;
+  // Botón agregar sub-ítem dinámico
+  $("#form-add-subitem-btn")?.addEventListener("click", () => {
+    const list = document.getElementById("subitems-form-list");
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "subitem-row";
+    row.innerHTML = `
+      <input type="text" class="subitem-form-tipo" placeholder="Tipo (ej: Stickers)" required>
+      <input type="number" class="subitem-form-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
+      <input type="text" class="subitem-form-det" placeholder="Detalles / Medidas">
+      <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+    `;
+    list.appendChild(row);
+  });
+
   $("#order-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (isSubmittingOrder) return;
     isSubmittingOrder = true;
 
     // 1. Extraer los datos del formulario ANTES de deshabilitar los campos
-    // (Nota: new FormData ignora completamente campos deshabilitados)
     const formDataObj = Object.fromEntries(new FormData(e.target));
+
+    // Recolectar Sub-Ítems dinámicos
+    const subItemsList = [];
+    document.querySelectorAll("#subitems-form-list .subitem-row").forEach(row => {
+      const sTipo = row.querySelector(".subitem-form-tipo")?.value.trim();
+      const sCant = parseInt(row.querySelector(".subitem-form-cant")?.value || "1", 10);
+      const sDet = row.querySelector(".subitem-form-det")?.value.trim();
+      if (sTipo) {
+        subItemsList.push({ tipo: sTipo, cantidad: sCant, detalles: sDet, completado: false });
+      }
+    });
+
+    if (subItemsList.length > 0) {
+      formDataObj.subItems = subItemsList;
+      if (!formDataObj.tipo || formDataObj.tipo === "Topper 3D") {
+        formDataObj.tipo = subItemsList.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ");
+      }
+      const breakdownText = `[TRABAJOS DEL PEDIDO]:\n` + subItemsList.map((s, idx) => `${idx+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n');
+      formDataObj.descripcion = formDataObj.descripcion ? `${breakdownText}\n\n${formDataObj.descripcion}` : breakdownText;
+    }
     
     // Extracción explícita de respaldo para garantizar captura 100% fiel
     if (!formDataObj.cliente && $("#input-cliente")?.value) formDataObj.cliente = $("#input-cliente").value.trim();
@@ -3743,3 +3965,956 @@ setInterval(() => {
     refresh(false);
   }
 }, 45000);
+
+
+/* =========================================================
+   SICS 2026 - MÓDULOS DE CONTROL, VOZ, ALERTAS Y SPOTLIGHT
+   CREACIONES JJ · OCHOA & RISQUEZ
+   ========================================================= */
+
+// =========================================================
+// 1. AVISO / MODAL LIMITANTE DE PRIMERA APERTURA (GATEKEEPER)
+// =========================================================
+window.setOrderPhase = async function(orderId, phase) {
+  try {
+    const isDark = document.body.getAttribute("data-theme") === "dark";
+    if (phase === "diseno") {
+      await api("profile_update_order", {
+        id: orderId,
+        user: state.session?.name || "Usuario",
+        changes: {
+          diseno: "En proceso",
+          estado: "Pendiente",
+          nota: "🎨 Inició fase de diseño gráfico en computadora."
+        }
+      });
+      showToast("🎨 Orden marcada en fase de Diseño. El tiempo de mesa no se computa.");
+    } else if (phase === "produccion") {
+      const nowIso = new Date().toISOString();
+      await api("profile_update_order", {
+        id: orderId,
+        user: state.session?.name || "Usuario",
+        changes: {
+          estado: "En proceso",
+          inicioProduccion: nowIso,
+          nota: "✂️ Inició fase de producción física en mesa de trabajo."
+        }
+      });
+      showToast("⚡ Fase de Producción iniciada. ⏱️ Cronómetro en vivo activado.");
+    }
+    closeModal();
+    await refresh(false);
+  } catch (err) {
+    if (window.Swal) {
+      Swal.fire({
+        title: "Error",
+        text: err.message || String(err),
+        icon: "error"
+      });
+    } else {
+      alert(`Error: ${err.message}`);
+    }
+  }
+};
+
+// =========================================================
+// 2. CHECKLIST INTERACTIVO DE SUB-TRABAJOS
+// =========================================================
+window.toggleSubItemDone = async function(orderId, subIndex) {
+  const allTarget = [...(state.data.allOrders || []), ...(state.data.myOrders || []), ...(state.data.finishedOrders || [])];
+  const order = allTarget.find(o => String(o.id).trim() === String(orderId).trim());
+  if (!order) return;
+
+  let subs = [];
+  try {
+    subs = Array.isArray(order.subItems) ? order.subItems : JSON.parse(order.subItems || "[]");
+  } catch(e) { subs = []; }
+
+  if (!subs[subIndex]) return;
+  subs[subIndex].completado = !subs[subIndex].completado;
+  order.subItems = subs;
+
+  try {
+    await api("profile_update_order", {
+      id: orderId,
+      user: state.session?.name || "Usuario",
+      changes: { subItems: subs }
+    });
+    showToast(`Ítem "${subs[subIndex].tipo || 'Trabajo'}" actualizado: ${subs[subIndex].completado ? '✅ Listo' : '⏳ Pendiente'}`);
+    detail(order);
+  } catch(err) {
+    console.error("Error actualizando sub-ítem:", err);
+  }
+};
+
+window.addSubItemToOrder = async function(orderId) {
+  const allTarget = [...(state.data.allOrders || []), ...(state.data.myOrders || [])];
+  const order = allTarget.find(o => String(o.id).trim() === String(orderId).trim());
+  if (!order) return;
+
+  if (window.Swal) {
+    const isDark = document.body.getAttribute("data-theme") === "dark";
+    const { value: formValues } = await Swal.fire({
+      title: "Añadir Trabajo a esta Orden",
+      background: isDark ? '#1e293b' : '#ffffff',
+      color: isDark ? '#f8fafc' : '#0f172a',
+      html: `
+        <div style="text-align:left;">
+          <label style="font-size:12px; font-weight:bold;">Tipo de Trabajo:</label>
+          <input id="swal-sub-tipo" class="swal2-input" placeholder="Ej: Stickers circulares, Topper shaker, etc." style="margin-top:4px; margin-bottom:12px;">
+          <label style="font-size:12px; font-weight:bold;">Cantidad:</label>
+          <input id="swal-sub-cant" type="number" class="swal2-input" value="1" min="1" style="margin-top:4px; margin-bottom:12px;">
+          <label style="font-size:12px; font-weight:bold;">Detalles / Medidas:</label>
+          <input id="swal-sub-det" class="swal2-input" placeholder="Ej: 5cm diámetro, vinil mate" style="margin-top:4px;">
+        </div>
+      `,
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: "➕ Agregar",
+      cancelButtonText: "Cancelar",
+      confirmButtonColor: "#0ea5e9",
+      preConfirm: () => {
+        const tipo = document.getElementById("swal-sub-tipo").value.trim();
+        const cant = parseInt(document.getElementById("swal-sub-cant").value || "1", 10);
+        const det = document.getElementById("swal-sub-det").value.trim();
+        if (!tipo) {
+          Swal.showValidationMessage("Debes ingresar el tipo de trabajo");
+          return false;
+        }
+        return { tipo, cantidad: cant, detalles: det, completado: false };
+      }
+    });
+
+    if (formValues) {
+      let subs = [];
+      try {
+        subs = Array.isArray(order.subItems) ? order.subItems : JSON.parse(order.subItems || "[]");
+      } catch(e) { subs = []; }
+      subs.push(formValues);
+      order.subItems = subs;
+
+      try {
+        await api("profile_update_order", {
+          id: orderId,
+          user: state.session?.name || "Usuario",
+          changes: { subItems: subs }
+        });
+        showToast("Trabajo añadido a la orden exitosamente.");
+        detail(order);
+        refresh(false);
+      } catch(err) {
+        Swal.fire("Error", err.message, "error");
+      }
+    }
+  }
+};
+
+// =========================================================
+// 3. DASHBOARD DE ALERTAS & MONITOREO REMOTO (ESTILO SICS)
+// =========================================================
+window.checkTallerAlertas = function() {
+  const bellBadge = document.getElementById("bellBadge");
+  const bellIcon = document.getElementById("bellIcon");
+  const notifDropdown = document.getElementById("notifDropdown");
+  const notifList = document.getElementById("notifList");
+  const notifCountText = document.getElementById("notifCountText");
+
+  if (!bellBadge || !notifList) return;
+
+  const allOrders = state.data.allOrders || [];
+  const now = new Date();
+  const nowMs = now.getTime();
+  const alerts = [];
+
+  // A. Errores de API / Sistema registrados
+  (state.systemErrors || []).forEach(errItem => {
+    alerts.push({
+      tipo: "error_tecnico",
+      icono: '<i class="fas fa-exclamation-triangle" style="color:#ef4444; width:16px;"></i>',
+      titulo: `Falla técnica: ${errItem.action}`,
+      desc: errItem.error,
+      meta: `Hora: ${errItem.time}`,
+      urgencia: "alta"
+    });
+  });
+
+  // B. Detección de anomalías en pedidos activos
+  allOrders.forEach(o => {
+    if (o.cerrado === "Sí" || ["Terminado", "Entregado", "Cancelado"].includes(o.estado)) return;
+
+    const entregaDate = safeParseDate(o.entrega);
+    if (entregaDate) {
+      const diffMs = entregaDate.getTime() - nowMs;
+      // 1. Pedido Retrasado
+      if (diffMs < 0) {
+        const retrasoHoras = Math.abs(Math.round(diffMs / 3600000));
+        alerts.push({
+          tipo: "retrasado",
+          icono: '<i class="fas fa-skull-crossbones" style="color:#ef4444; width:16px;"></i>',
+          titulo: `🚨 RETRASADO: ${o.id} – ${o.cliente}`,
+          desc: `${o.tipo} · Responsable: ${o.responsable}`,
+          meta: `Venció hace ${retrasoHoras > 0 ? retrasoHoras + ' hora(s)' : 'minutos'}`,
+          orderId: o.id,
+          urgencia: "alta"
+        });
+      }
+      // 2. Pedido en Riesgo Inminente (Menos de 2 horas)
+      else if (diffMs <= 2 * 3600000 && o.estado !== "En proceso") {
+        const minsLeft = Math.round(diffMs / 60000);
+        alerts.push({
+          tipo: "en_riesgo",
+          icono: '<i class="fas fa-clock" style="color:#f59e0b; width:16px;"></i>',
+          titulo: `⚠️ ENTREGA EN RIESGO: ${o.id} (${minsLeft} min)`,
+          desc: `Cliente: ${o.cliente} · Aún en estado: ${o.estado}`,
+          meta: `Entrega solicitada: ${formatDate(o.entrega)}`,
+          orderId: o.id,
+          urgencia: "media"
+        });
+      }
+    }
+
+    // 3. Anomalía Operativa: Pedido en proceso por más de 4 horas continuas
+    if (o.estado === "En proceso" && o.inicioProduccion) {
+      const startMs = new Date(o.inicioProduccion).getTime();
+      if (!isNaN(startMs)) {
+        const elapsedHoras = (nowMs - startMs) / 3600000;
+        if (elapsedHoras >= 4) {
+          alerts.push({
+            tipo: "tiempo_excesivo",
+            icono: '<i class="fas fa-stopwatch" style="color:#8b5cf6; width:16px;"></i>',
+            titulo: `⏱️ TIEMPO PROLONGADO: ${o.id}`,
+            desc: `Lleva más de ${Math.round(elapsedHoras)} horas continuas en mesa de trabajo sin pausa.`,
+            meta: `Responsable: ${o.responsable}`,
+            orderId: o.id,
+            urgencia: "baja"
+          });
+        }
+      }
+    }
+  });
+
+  state.activeAlerts = alerts;
+  const count = alerts.length;
+
+  if (count > 0) {
+    bellBadge.innerText = count > 99 ? "99+" : count;
+    bellBadge.style.display = "block";
+    if (bellIcon) bellIcon.classList.add("ringing");
+    if (notifCountText) notifCountText.innerText = `${count} activas`;
+
+    let html = "";
+    alerts.forEach(al => {
+      html += `
+        <div class="notif-item" onclick="${al.orderId ? `detailById('${al.orderId}')` : ''}">
+          ${al.orderId ? `<button class="notif-btn-action"><i class="fas fa-eye"></i> Atender</button>` : ''}
+          <div style="font-weight:800; margin-bottom:4px; color:var(--text-main); font-size:12.5px;">
+            ${al.icono} ${escapeHtml(al.titulo)}
+          </div>
+          <div style="color:var(--text-muted); font-size:11.5px; margin-bottom:3px;">
+            ${escapeHtml(al.desc)}
+          </div>
+          <div style="color:#64748b; font-size:10.5px; font-weight:600;">
+            ${escapeHtml(al.meta)}
+          </div>
+        </div>
+      `;
+    });
+    notifList.innerHTML = html;
+  } else {
+    bellBadge.style.display = "none";
+    if (bellIcon) bellIcon.classList.remove("ringing");
+    if (notifCountText) notifCountText.innerText = `0 activas`;
+    notifList.innerHTML = `
+      <div style="padding:22px; text-align:center; color:var(--text-muted); font-size:12px;">
+        <i class="fas fa-check-circle" style="color:#10b981; font-size:2.2rem; margin-bottom:8px;"></i><br/>
+        <strong>Bandeja en calma.</strong> No hay alertas de retraso ni fallas técnicas en este momento.
+      </div>
+    `;
+  }
+};
+
+window.detailById = function(orderId) {
+  const allTarget = [...(state.data.allOrders || []), ...(state.data.myOrders || []), ...(state.data.finishedOrders || [])];
+  const order = allTarget.find(o => String(o.id).trim() === String(orderId).trim());
+  if (order) detail(order);
+  const notifDropdown = document.getElementById("notifDropdown");
+  if (notifDropdown) notifDropdown.style.display = "none";
+};
+
+// Manejo del click de la campanita
+document.addEventListener("DOMContentLoaded", () => {
+  const bellContainer = document.getElementById("bellContainer");
+  const bellIconBtn = document.getElementById("bellIconBtn");
+  const notifDropdown = document.getElementById("notifDropdown");
+
+  if (bellIconBtn && notifDropdown) {
+    bellIconBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      notifDropdown.style.display = (notifDropdown.style.display === "block" ? "none" : "block");
+      window.checkTallerAlertas();
+    });
+
+    window.addEventListener("click", () => {
+      if (notifDropdown) notifDropdown.style.display = "none";
+    });
+
+    notifDropdown.addEventListener("click", (e) => e.stopPropagation());
+  }
+});
+
+// =========================================================
+// 4. MODO MOSTRADOR RÁPIDO / PEDIDO EXPRESS
+// =========================================================
+window.openExpressOrderModal = function() {
+  const clients = state.frequentClients || [];
+  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Cuadro Selfie", "Banderines"];
+  const motivos = state.frequentMotivos || [];
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <span class="pill-urgent" style="font-size:11px;">⚡ ATENCIÓN INMEDIATA</span>
+        <h2>Pedido Rápido de Mostrador</h2>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <div style="background:rgba(245,158,11,0.08); border-left:4px solid #f59e0b; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:12.5px;">
+      ⚡ Diseñado para clientes presenciales en tienda. Llena los datos esenciales en segundos o dicta con voz.
+    </div>
+
+    <form id="express-order-form" class="form-grid">
+      <label class="field">
+        <span class="field-label">CLIENTE DEL LOCAL:</span>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="express-cliente" name="cliente" required placeholder="Nombre del cliente en mostrador" style="flex:1;">
+          <button type="button" class="mic-action-btn" onclick="startVoiceDictationForExpress()" title="Dictar por voz">
+            <i class="fas fa-microphone"></i>
+          </button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="field-label">TELÉFONO / WHATSAPP:</span>
+        <input type="tel" id="express-telefono" name="telefono" placeholder="Ej. 04141234567">
+      </label>
+
+      <!-- Sub-Ítems dinámicos para el mostrador -->
+      <div class="subitems-builder-box">
+        <div class="subitems-builder-title">
+          <span><i class="fas fa-cubes"></i> TRABAJOS SOLICITADOS</span>
+          <button type="button" class="secondary-button" id="express-add-item-btn" style="padding:3px 8px; font-size:11px; background:#0ea5e9; color:white; border:none; border-radius:6px;">
+            ➕ Otro Trabajo
+          </button>
+        </div>
+        <div id="express-items-list">
+          <div class="subitem-row">
+            <input type="text" class="swal-item-tipo" placeholder="Tipo (ej: Topper 3D)" value="Topper 3D" required>
+            <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
+            <input type="text" class="swal-item-det" placeholder="Detalles (medida, motivo)">
+            <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Selección Rápida de Entrega -->
+      <div class="field">
+        <span class="field-label">TIEMPO DE ENTREGA REQUERIDO:</span>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+          <button type="button" class="secondary-button express-time-btn" data-hours="1" style="font-size:11px; padding:4px 10px;">⚡ En 1 Hora</button>
+          <button type="button" class="secondary-button express-time-btn" data-hours="3" style="font-size:11px; padding:4px 10px;">⚡ En 3 Horas</button>
+          <button type="button" class="secondary-button express-time-btn" data-target="today-afternoon" style="font-size:11px; padding:4px 10px;">📅 Hoy al final de la tarde (5:30pm)</button>
+          <button type="button" class="secondary-button express-time-btn" data-target="tomorrow" style="font-size:11px; padding:4px 10px;">📅 Mañana por la mañana</button>
+        </div>
+        <div class="form-inline">
+          <input type="date" id="express-fecha-entrega" name="fechaEntrega" required>
+          <input type="time" id="express-hora-entrega" name="horaEntrega" value="17:30" required>
+        </div>
+      </div>
+
+      <div class="form-inline">
+        <label class="field">
+          <span class="field-label">RESPONSABLE ASIGNADO:</span>
+          <select id="express-responsable" name="responsable">
+            ${(state.data.users || []).filter(u => u.active).map(u => `<option value="${escapeHtml(u.name)}" ${u.name === state.session?.name ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+            <option value="Sin asignar">Sin asignar</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">PRECIO / COSTO ($):</span>
+          <input type="number" step="0.01" id="express-costo" name="costo" placeholder="0.00" style="font-weight:bold; color:#059669;">
+        </label>
+      </div>
+
+      <!-- Aviso de Confirmación Visual en Pantalla -->
+      <div id="express-visual-confirm" class="visual-confirm-box" style="display:none;">
+        <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Todo lo que indicaste ya está listo para revisar!</div>
+        <div id="express-confirm-summary" style="font-size:12px; color:var(--text-main); line-height:1.4;"></div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" id="express-submit-btn" style="flex:2; background:#f59e0b; color:white;">
+          ⚡ Guardar Pedido Mostrador
+        </button>
+      </div>
+    </form>
+  `);
+
+  // Default fecha hoy
+  const todayIso = new Date().toISOString().split('T')[0];
+  const fechaInput = document.getElementById("express-fecha-entrega");
+  if (fechaInput) fechaInput.value = todayIso;
+
+  // Manejo de botones de tiempo rápido
+  document.querySelectorAll(".express-time-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const now = new Date();
+      const fIn = document.getElementById("express-fecha-entrega");
+      const hIn = document.getElementById("express-hora-entrega");
+      if (!fIn || !hIn) return;
+
+      if (btn.dataset.hours) {
+        now.setHours(now.getHours() + parseInt(btn.dataset.hours, 10));
+        fIn.value = now.toISOString().split('T')[0];
+        hIn.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      } else if (btn.dataset.target === "today-afternoon") {
+        fIn.value = now.toISOString().split('T')[0];
+        hIn.value = "17:30";
+      } else if (btn.dataset.target === "tomorrow") {
+        now.setDate(now.getDate() + 1);
+        fIn.value = now.toISOString().split('T')[0];
+        hIn.value = "11:00";
+      }
+      showToast(`Hora fijada: ${fIn.value} a las ${hIn.value}`);
+    });
+  });
+
+  // Botón agregar ítem en el express
+  document.getElementById("express-add-item-btn")?.addEventListener("click", () => {
+    const list = document.getElementById("express-items-list");
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "subitem-row";
+    row.innerHTML = `
+      <input type="text" class="swal-item-tipo" placeholder="Tipo (ej: Stickers)" required>
+      <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
+      <input type="text" class="swal-item-det" placeholder="Detalles (medida, motivo)">
+      <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+    `;
+    list.appendChild(row);
+  });
+
+  // Submit del Express Form
+  document.getElementById("express-order-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("express-submit-btn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Creando pedido...";
+
+    // Recolectar subItems
+    const subItems = [];
+    document.querySelectorAll("#express-items-list .subitem-row").forEach(row => {
+      const tipo = row.querySelector(".swal-item-tipo")?.value.trim();
+      const cant = parseInt(row.querySelector(".swal-item-cant")?.value || "1", 10);
+      const det = row.querySelector(".swal-item-det")?.value.trim();
+      if (tipo) {
+        subItems.push({ tipo, cantidad: cant, detalles: det, completado: false });
+      }
+    });
+
+    const clienteVal = document.getElementById("express-cliente")?.value.trim();
+    const telVal = document.getElementById("express-telefono")?.value.trim();
+    const fechaVal = document.getElementById("express-fecha-entrega")?.value;
+    const horaVal = document.getElementById("express-hora-entrega")?.value || "17:30";
+    const respVal = document.getElementById("express-responsable")?.value || "Sin asignar";
+    const costoVal = parseFloat(document.getElementById("express-costo")?.value || "0");
+
+    const tipoResumen = subItems.length > 0 ? subItems.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ") : "Trabajo Express";
+
+    const payload = {
+      cliente: clienteVal,
+      telefono: telVal,
+      tipo: tipoResumen,
+      motivo: "Mostrador Directo",
+      descripcion: `[PEDIDO MOSTRADOR RÁPIDO]:
+${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('
+')}`,
+      fechaEntrega: fechaVal,
+      horaEntrega: horaVal,
+      responsable: respVal,
+      costo: costoVal,
+      diseno: "Sí",
+      subItems: subItems
+    };
+
+    try {
+      await api("profile_create_order", { form: payload });
+      closeModal();
+      await refresh(false);
+      if (window.Swal) {
+        Swal.fire({
+          title: "¡Pedido Registrado!",
+          text: `El pedido de ${clienteVal} se creó con éxito y ya está disponible en bandeja.`,
+          icon: "success",
+          timer: 2500,
+          showConfirmButton: false
+        });
+      } else {
+        showToast("¡Pedido de mostrador creado con éxito!");
+      }
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = "⚡ Guardar Pedido Mostrador";
+      alert(`Error creando pedido: ${err.message}`);
+    }
+  });
+};
+
+// =========================================================
+// 5. ASISTENTE DE VOZ & PARSER EN LENGUAJE NATURAL
+// =========================================================
+let speechRecognitionInstance = null;
+let isRecognizingSpeech = false;
+
+window.initVoiceAssistant = function() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    console.warn("SpeechRecognition no disponible en este navegador.");
+    return null;
+  }
+  const recognizer = new SpeechRecognition();
+  recognizer.lang = "es-VE";
+  recognizer.continuous = false;
+  recognizer.interimResults = false;
+  return recognizer;
+};
+
+window.toggleSpeechRecognition = function() {
+  const micBtn = document.getElementById("jj-mic-btn");
+  if (!speechRecognitionInstance) {
+    speechRecognitionInstance = window.initVoiceAssistant();
+  }
+
+  if (!speechRecognitionInstance) {
+    alert("El dictado por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge.");
+    return;
+  }
+
+  if (isRecognizingSpeech) {
+    speechRecognitionInstance.stop();
+    isRecognizingSpeech = false;
+    if (micBtn) micBtn.classList.remove("listening");
+    return;
+  }
+
+  speechRecognitionInstance.onstart = () => {
+    isRecognizingSpeech = true;
+    if (micBtn) micBtn.classList.add("listening");
+    showToast("🎙️ Escuchando... Dicta el pedido claramente.");
+  };
+
+  speechRecognitionInstance.onresult = (event) => {
+    isRecognizingSpeech = false;
+    if (micBtn) micBtn.classList.remove("listening");
+    const transcript = event.results[0][0].transcript;
+    const input = document.getElementById("jj-bot-input");
+    if (input) input.value = transcript;
+    window.processVoiceTranscript(transcript);
+  };
+
+  speechRecognitionInstance.onerror = (event) => {
+    isRecognizingSpeech = false;
+    if (micBtn) micBtn.classList.remove("listening");
+    console.error("Speech recognition error:", event.error);
+    showToast(`Error de micrófono: ${event.error}`);
+  };
+
+  speechRecognitionInstance.onend = () => {
+    isRecognizingSpeech = false;
+    if (micBtn) micBtn.classList.remove("listening");
+  };
+
+  try {
+    speechRecognitionInstance.start();
+  } catch(e) {
+    console.error(e);
+  }
+};
+
+window.startVoiceDictationForExpress = function() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Dictado por voz no disponible en este navegador.");
+    return;
+  }
+  const rec = new SpeechRecognition();
+  rec.lang = "es-VE";
+  rec.start();
+  showToast("🎙️ Escuchando... Dicta nombre y qué necesita.");
+
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    showToast(`Capturado: "${text}"`);
+    window.parseAndFillExpressForm(text);
+  };
+};
+
+// Parser en Lenguaje Natural para estructurar pedidos hablados
+window.parseOrderNaturalLanguage = function(text) {
+  const result = {
+    cliente: "",
+    items: [],
+    motivo: "",
+    entregaHora: "17:30",
+    fechaEntrega: new Date().toISOString().split('T')[0]
+  };
+
+  const lower = text.toLowerCase();
+
+  // 1. Extraer cliente (ej: "pedido para Maria", "para Maria", "cliente Maria")
+  const clientMatch = lower.match(/(?:pedido para|para|cliente)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)/i);
+  if (clientMatch) {
+    result.cliente = clientMatch[1].trim().replace(/\w/g, l => l.toUpperCase());
+  }
+
+  // 2. Extraer motivo / temática (ej: "de Hello Kitty", "motivo Frozen", "tematica Paw Patrol")
+  const motivoMatch = lower.match(/(?:motivo|tematica|temática|de)\s+([a-záéíóúñ0-9\s]+?)(?:para|con|\d|$)/i);
+  if (motivoMatch && !["hoy", "mañana", "las", "un", "una"].includes(motivoMatch[1].trim())) {
+    result.motivo = motivoMatch[1].trim();
+  }
+
+  // 3. Extraer fecha / hora
+  if (lower.includes("para hoy") || lower.includes("hoy")) {
+    result.fechaEntrega = new Date().toISOString().split('T')[0];
+  } else if (lower.includes("para mañana") || lower.includes("mañana")) {
+    const tm = new Date();
+    tm.setDate(tm.getDate() + 1);
+    result.fechaEntrega = tm.toISOString().split('T')[0];
+  }
+
+  const horaMatch = lower.match(/(?:a las|para las)\s+(\d{1,2})(?::(\d{2}))?\s*(de la tarde|de la mañana|am|pm)?/i);
+  if (horaMatch) {
+    let hh = parseInt(horaMatch[1], 10);
+    const mm = horaMatch[2] || "00";
+    const mod = horaMatch[3] || "";
+    if ((mod.includes("tarde") || mod.includes("pm")) && hh < 12) hh += 12;
+    result.entregaHora = `${String(hh).padStart(2,'0')}:${mm}`;
+  }
+
+  // 4. Extraer ítems / trabajos (ej: "2 toppers", "20 stickers", "1 taza", "1 letrero")
+  const itemKeywords = ["topper", "stickers", "taza", "sublimado", "sublimable", "invitacion", "invitación", "cuadro", "letrero", "caja", "recuerdo"];
+  const words = lower.split(/[\s,]+/);
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    itemKeywords.forEach(k => {
+      if (w.includes(k)) {
+        let qty = 1;
+        if (i > 0 && !isNaN(parseInt(words[i-1], 10))) {
+          qty = parseInt(words[i-1], 10);
+        }
+        result.items.push({
+          tipo: k.charAt(0).toUpperCase() + k.slice(1),
+          cantidad: qty,
+          detalles: result.motivo || "",
+          completado: false
+        });
+      }
+    });
+  }
+
+  if (result.items.length === 0) {
+    result.items.push({ tipo: "Trabajo Personalizado", cantidad: 1, detalles: text, completado: false });
+  }
+
+  return result;
+};
+
+window.parseAndFillExpressForm = function(text) {
+  const parsed = window.parseOrderNaturalLanguage(text);
+
+  const cliInput = document.getElementById("express-cliente");
+  if (cliInput && parsed.cliente) cliInput.value = parsed.cliente;
+
+  const fInput = document.getElementById("express-fecha-entrega");
+  if (fInput && parsed.fechaEntrega) fInput.value = parsed.fechaEntrega;
+
+  const hInput = document.getElementById("express-hora-entrega");
+  if (hInput && parsed.entregaHora) hInput.value = parsed.entregaHora;
+
+  // Llenar lista de ítems
+  const list = document.getElementById("express-items-list");
+  if (list && parsed.items.length > 0) {
+    list.innerHTML = "";
+    parsed.items.forEach(it => {
+      const row = document.createElement("div");
+      row.className = "subitem-row";
+      row.innerHTML = `
+        <input type="text" class="swal-item-tipo" value="${escapeHtml(it.tipo)}" required>
+        <input type="number" class="swal-item-cant" value="${it.cantidad || 1}" min="1" style="text-align:center;">
+        <input type="text" class="swal-item-det" value="${escapeHtml(it.detalles || '')}" placeholder="Detalles">
+        <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  // Mostrar el AVISO DE CONFIRMACIÓN VISUAL EN PANTALLA
+  const confirmBox = document.getElementById("express-visual-confirm");
+  const confirmSummary = document.getElementById("express-confirm-summary");
+  if (confirmBox && confirmSummary) {
+    confirmBox.style.display = "block";
+    confirmSummary.innerHTML = `
+      <strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Detectado')}<br/>
+      <strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad}x ${it.tipo}`).join(", ")}<br/>
+      <strong>Entrega:</strong> ${parsed.fechaEntrega} a las ${parsed.entregaHora}
+    `;
+  }
+};
+
+window.processVoiceTranscript = function(text) {
+  const parsed = window.parseOrderNaturalLanguage(text);
+  const confirmArea = document.getElementById("jj-bot-confirm-area");
+  if (!confirmArea) return;
+
+  confirmArea.innerHTML = `
+    <div class="visual-confirm-box">
+      <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Todo lo que indicaste ya está listo para revisar!</div>
+      <div style="font-size:12px; margin-bottom:8px; line-height:1.4;">
+        👤 <strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Cliente nuevo')}<br/>
+        📦 <strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad}x ${it.tipo} ${it.detalles ? '('+it.detalles+')' : ''}`).join(', ')}<br/>
+        📅 <strong>Entrega:</strong> ${parsed.fechaEntrega} a las ${parsed.entregaHora}
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="primary-button" style="padding:6px 10px; font-size:11px; background:#10b981;" onclick="confirmBotOrder(${JSON.stringify(parsed).replace(/"/g, '&quot;')})">
+          💾 Guardar de Inmediato
+        </button>
+        <button type="button" class="secondary-button" style="padding:6px 10px; font-size:11px;" onclick="closeModal(); openExpressOrderModal(); setTimeout(() => parseAndFillExpressForm('${text.replace(/'/g, "\'")}'), 200);">
+          ✏️ Ajustar en Pantalla
+        </button>
+      </div>
+    </div>
+  `;
+};
+
+window.confirmBotOrder = async function(parsed) {
+  const subItems = parsed.items || [];
+  const tipoResumen = subItems.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ") || "Trabajo Dictado";
+
+  const payload = {
+    cliente: parsed.cliente || "Cliente Dictado",
+    tipo: tipoResumen,
+    motivo: parsed.motivo || "General",
+    descripcion: `[DICTADO POR VOZ]:
+${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('
+')}`,
+    fechaEntrega: parsed.fechaEntrega,
+    horaEntrega: parsed.entregaHora || "17:30",
+    responsable: state.session?.name || "Sin asignar",
+    diseno: "Sí",
+    subItems: subItems
+  };
+
+  try {
+    await api("profile_create_order", { form: payload });
+    const confirmArea = document.getElementById("jj-bot-confirm-area");
+    if (confirmArea) {
+      confirmArea.innerHTML = `<div style="background:#dcfce7; color:#15803d; padding:10px; border-radius:8px; font-size:12px; font-weight:bold;">✅ ¡Pedido guardado exitosamente en el sistema!</div>`;
+    }
+    await refresh(false);
+    showToast("¡Pedido guardado!");
+  } catch(err) {
+    alert(`Error: ${err.message}`);
+  }
+};
+
+window.toggleJJBot = function() {
+  const w = document.getElementById("jj-bot-window");
+  if (w) w.classList.toggle("chat-hidden");
+};
+
+window.processBotMessage = function() {
+  const input = document.getElementById("jj-bot-input");
+  if (!input || !input.value.trim()) return;
+  const text = input.value.trim();
+  input.value = "";
+  window.processVoiceTranscript(text);
+};
+
+// =========================================================
+// 6. COMMAND PALETTE SPOTLIGHT GLOBAL (Ctrl + K)
+// =========================================================
+let spotlightIndex = 0;
+
+window.openSpotlight = function() {
+  const overlay = document.getElementById("sics-spotlight-overlay");
+  const input = document.getElementById("spotlight-search");
+  if (!overlay || !input) return;
+
+  overlay.classList.add("active");
+  input.value = "";
+  window.renderSpotlightList("");
+  setTimeout(() => input.focus(), 80);
+};
+
+window.closeSpotlight = function() {
+  const overlay = document.getElementById("sics-spotlight-overlay");
+  if (overlay) overlay.classList.remove("active");
+};
+
+window.renderSpotlightList = function(query) {
+  const listEl = document.getElementById("spotlight-list");
+  if (!listEl) return;
+
+  const q = String(query || "").toLowerCase().trim();
+  spotlightIndex = 0;
+
+  // Acciones Rápidas Disponibles
+  const quickActions = [
+    { title: "Crear Nuevo Pedido Completo", icon: "fa-plus-circle", action: () => { window.closeSpotlight(); formOrder(); } },
+    { title: "Abrir Modo Mostrador Rápido", icon: "fa-bolt", action: () => { window.closeSpotlight(); openExpressOrderModal(); } },
+    { title: "Ver Mi Bandeja de Órdenes", icon: "fa-inbox", action: () => { window.closeSpotlight(); navigate("queue"); } },
+    { title: "Ver Casos y Estadísticas del Equipo", icon: "fa-users", action: () => { window.closeSpotlight(); navigate("team"); } },
+    { title: "Consultar Historial de Proyectos", icon: "fa-archive", action: () => { window.closeSpotlight(); navigate("history"); } },
+    { title: "Cambiar Tema (Oscuro / Claro)", icon: "fa-adjust", action: () => { window.closeSpotlight(); toggleTheme(); } },
+    { title: "Ver Alertas y Monitoreo del Taller", icon: "fa-bell", action: () => { window.closeSpotlight(); document.getElementById("bellIconBtn")?.click(); } },
+    { title: "Abrir Asistente JJ-Bot de Voz", icon: "fa-robot", action: () => { window.closeSpotlight(); window.toggleJJBot(); } }
+  ];
+
+  // Búsqueda en órdenes activas y clientes
+  const matchingOrders = (state.data.allOrders || []).filter(o => 
+    !q || o.id.toLowerCase().includes(q) || o.cliente.toLowerCase().includes(q) || o.tipo.toLowerCase().includes(q)
+  ).slice(0, 5);
+
+  let items = [];
+
+  // Filtrar acciones
+  quickActions.forEach(a => {
+    if (!q || a.title.toLowerCase().includes(q)) {
+      items.push({ type: "action", ...a });
+    }
+  });
+
+  // Agregar órdenes encontradas
+  matchingOrders.forEach(o => {
+    items.push({
+      type: "order",
+      title: `${o.id} – ${o.cliente} (${o.tipo})`,
+      icon: "fa-file-invoice",
+      action: () => { window.closeSpotlight(); detail(o); }
+    });
+  });
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div style="padding:26px; text-align:center; color:var(--text-muted); font-size:13px;"><i class="fas fa-ghost" style="font-size:2rem; opacity:0.3; margin-bottom:8px;"></i><br/>No se encontraron resultados para "${escapeHtml(q)}".</div>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map((it, idx) => `
+    <div class="spotlight-item ${idx === 0 ? 'selected' : ''}" data-idx="${idx}">
+      <div class="s-icon"><i class="fas ${it.icon}"></i></div>
+      <div class="s-title">${escapeHtml(it.title)}</div>
+    </div>
+  `).join("");
+
+  listEl.querySelectorAll(".spotlight-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      if (items[idx] && items[idx].action) items[idx].action();
+    });
+  });
+
+  window.spotlightCurrentItems = items;
+};
+
+// Eventos de teclado para Spotlight
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    window.openSpotlight();
+  }
+  const overlay = document.getElementById("sics-spotlight-overlay");
+  if (e.key === "Escape" && overlay && overlay.classList.contains("active")) {
+    window.closeSpotlight();
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const searchBtn = document.getElementById("searchToggleBtn");
+  const overlay = document.getElementById("sics-spotlight-overlay");
+  const input = document.getElementById("spotlight-search");
+
+  if (searchBtn) searchBtn.addEventListener("click", window.openSpotlight);
+
+  if (overlay) {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) window.closeSpotlight();
+    });
+  }
+
+  if (input) {
+    input.addEventListener("input", (e) => {
+      window.renderSpotlightList(e.target.value);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      const listEl = document.getElementById("spotlight-list");
+      if (!listEl) return;
+      const itemsEls = listEl.querySelectorAll(".spotlight-item");
+      if (itemsEls.length === 0) return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        itemsEls[spotlightIndex]?.classList.remove("selected");
+        spotlightIndex = (spotlightIndex + 1) % itemsEls.length;
+        itemsEls[spotlightIndex]?.classList.add("selected");
+        itemsEls[spotlightIndex]?.scrollIntoView({ block: "nearest" });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        itemsEls[spotlightIndex]?.classList.remove("selected");
+        spotlightIndex = (spotlightIndex - 1 + itemsEls.length) % itemsEls.length;
+        itemsEls[spotlightIndex]?.classList.add("selected");
+        itemsEls[spotlightIndex]?.scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (window.spotlightCurrentItems && window.spotlightCurrentItems[spotlightIndex]) {
+          window.spotlightCurrentItems[spotlightIndex].action();
+        }
+      }
+    });
+  }
+});
+
+// =========================================================
+// 7. CIERRE DE SESIÓN SEGURO CON SWEETALERT2
+// =========================================================
+window.doLogout = function() {
+  const isDark = document.body.getAttribute("data-theme") === "dark";
+  if (window.Swal) {
+    Swal.fire({
+      title: "¿Cerrar Sesión?",
+      text: "Tendrás que ingresar tu PIN para acceder nuevamente al sistema.",
+      icon: "warning",
+      background: isDark ? "#1e293b" : "#ffffff",
+      color: isDark ? "#f8fafc" : "#0f172a",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: isDark ? "#334155" : "#94a3b8",
+      confirmButtonText: '<i class="fas fa-power-off"></i> Sí, salir',
+      cancelButtonText: "Cancelar"
+    }).then((res) => {
+      if (res.isConfirmed) {
+        store.remove("pp_profile_session");
+        state.session = null;
+        showLogin();
+      }
+    });
+  } else {
+    if (confirm("¿Deseas cerrar sesión?")) {
+      store.remove("pp_profile_session");
+      state.session = null;
+      showLogin();
+    }
+  }
+};
