@@ -4438,8 +4438,7 @@ window.openExpressOrderModal = function() {
       tipo: tipoResumen,
       motivo: "Mostrador Directo",
       descripcion: `[PEDIDO MOSTRADOR RÁPIDO]:
-${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('
-')}`,
+${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
       fechaEntrega: fechaVal,
       horaEntrega: horaVal,
       responsable: respVal,
@@ -4707,8 +4706,7 @@ window.confirmBotOrder = async function(parsed) {
     tipo: tipoResumen,
     motivo: parsed.motivo || "General",
     descripcion: `[DICTADO POR VOZ]:
-${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('
-')}`,
+${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
     fechaEntrega: parsed.fechaEntrega,
     horaEntrega: parsed.entregaHora || "17:30",
     responsable: state.session?.name || "Sin asignar",
