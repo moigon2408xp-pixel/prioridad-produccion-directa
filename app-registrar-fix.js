@@ -784,16 +784,20 @@ function orderCard(order, position) {
     disenoBadge = `<span style="background:#dcfce7; color:#15803d; font-size:10px; font-weight:800; padding:1px 6px; border-radius:20px;">🎨 Diseño: Listo ✅</span>`;
   }
 
-  return `<button class="${cardClass}" data-action="detail" data-id="${escapeHtml(order.id)}">
-    <div class="cc-top">
-      <div class="cc-left">
-        <span class="cc-id">${escapeHtml(order.id)}</span>
-        <span class="cc-client">${escapeHtml(order.cliente)}</span>
-        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
+  // Detectar si tiene foto/factura física adjunta
+  const hasPhysicalInvoice = !!(order.fotoReferencia || order.referencias || order.fotoEvidencia || order.evidenciasDrive);
+
+  return `<button class="${cardClass}" data-action="detail" data-id="${escapeHtml(order.id)}" style="display:flex; flex-direction:column; text-align:left; width:100%; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word; white-space:normal;">
+    <div class="cc-top" style="width:100%; box-sizing:border-box;">
+      <div class="cc-left" style="flex:1; min-width:0;">
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <span class="cc-id" style="font-family:monospace; font-weight:800; color:var(--text-muted);">${escapeHtml(order.id)}</span>
+          <span class="cc-client" style="font-weight:800; font-size:14px; color:var(--text-main);">${escapeHtml(order.cliente)}</span>
+        </div>
+        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:3px;">
           ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
           ${disenoBadge}
           ${(() => {
-            // Badge de Cronómetro en Vivo para órdenes en proceso
             if (order.estado === 'En proceso' && order.inicioProduccion) {
               const startMs = new Date(order.inicioProduccion).getTime();
               if (!isNaN(startMs)) {
@@ -806,7 +810,6 @@ function orderCard(order, position) {
             return '';
           })()}
           ${(() => {
-            // Badge Multi-Ítem si tiene sub-trabajos
             let subs = [];
             try {
               subs = Array.isArray(order.subItems) ? order.subItems : (typeof order.subItems === 'string' && order.subItems ? JSON.parse(order.subItems) : []);
@@ -817,6 +820,7 @@ function orderCard(order, position) {
             }
             return '';
           })()}
+          ${hasPhysicalInvoice ? `<span style="background:rgba(245,158,11,0.15); color:#d97706; font-size:10px; font-weight:800; padding:2px 7px; border-radius:12px;"><i class="fas fa-file-invoice"></i> Nota/Factura</span>` : ''}
           ${hasDelivery ? `<span class="badge-delivery">🚚 ${escapeHtml(deliveryInfo.zona || 'Delivery')}</span>` : ''}
           ${(() => {
             let colabs = [];
@@ -829,14 +833,14 @@ function orderCard(order, position) {
           })()}
         </div>
       </div>
-      <div class="cc-right">
+      <div class="cc-right" style="flex-shrink:0;">
         ${isOverdue ? '<span class="pill-overdue">🚨 RETRASADO</span>' : ''}
         ${isNow && !isOverdue ? '<span class="pill-urgent">⚡ Hacer ahora</span>' : ''}
         ${isToday && !isOverdue ? '<span class="pill-today">⏳ Hacer próximamente</span>' : ''}
         ${!isOverdue && !isNow && !isToday ? '<span class="pill-later">📅 Programado</span>' : ''}
       </div>
     </div>
-    <div class="cc-meta">
+    <div class="cc-meta" style="width:100%; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word; white-space:normal; margin-top:4px;">
       <span>${escapeHtml(order.tipo || 'Sin tipo')}</span>
       <span>·</span>
       <span>${escapeHtml(formatDate(order.entrega))}</span>
@@ -845,7 +849,11 @@ function orderCard(order, position) {
       ${order.telefono ? `<span>·</span><span>📞 ${escapeHtml(order.telefono)}</span>` : ''}
     </div>
     ${deadlineInterno ? `<div class="cc-delivery-warning">${deadlineInterno}</div>` : ''}
-    ${order.notas ? `<div style="font-size:11px; color:#d97706; background:rgba(217,119,6,.1); border:1px solid rgba(217,119,6,.3); border-radius:4px; padding:3px 8px; margin-top:2px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📝 ${escapeHtml(order.notas.split('\n').pop() || order.notas)}</div>` : ''}
+    ${order.notas ? `
+      <div style="font-size:11px; color:#d97706; background:rgba(217,119,6,.1); border:1px solid rgba(217,119,6,.3); border-radius:6px; padding:4px 8px; margin-top:4px; font-weight:600; line-height:1.4; overflow-wrap:anywhere; word-break:break-word; width:100%; box-sizing:border-box;">
+        📝 ${escapeHtml(order.notas.split('\n').pop() || order.notas)}
+      </div>
+    ` : ''}
   </button>`;
 }
 
@@ -1518,13 +1526,347 @@ function openEditScheduleModal(workerName = "", targetSemanaId = "", targetSeman
 window.openEditScheduleModal = openEditScheduleModal;
 window.setPerfTimeframe = function(tf) { state.perfTimeframe = tf; render(); };
 
+
+// =========================================================
+// SICS 2026: HUB PRINCIPAL DE MÓDULOS (BENTO GRID)
+// =========================================================
+function getGreetingTime() {
+  const h = new Date().getHours();
+  if (h < 12) return "días";
+  if (h < 19) return "tardes";
+  return "noches";
+}
+
+function modulesView() {
+  const allOrders = state.data?.allOrders || [];
+  const activeOrders = allOrders.filter(active);
+  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
+  const finishedOrders = state.data?.finishedOrders || [];
+  const myActiveOrders = (state.data?.myOrders || []).filter(active);
+  const userName = state.session?.nombre || state.session?.username || 'Colaborador';
+
+  return `
+    <div class="sics-hub-container">
+      <div class="sics-hub-hero">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h1>Buenas ${getGreetingTime()}, ${escapeHtml(userName)} ⛅</h1>
+            <p>Seleccione un módulo operativo para gestionar la producción de hoy en Creaciones JJ.</p>
+          </div>
+          <button type="button" class="primary-button" onclick="openExpressOrderModal()" style="background:#f59e0b; border:none; padding:10px 18px; border-radius:30px; font-weight:800; font-size:13px; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 14px rgba(245,158,11,0.35);">
+            <i class="fas fa-bolt"></i> + Pedido Rápido Mostrador
+          </button>
+        </div>
+
+        <div class="sics-hub-metrics">
+          <div class="sics-metric-chip">
+            <i class="fas fa-inbox" style="color:#0ea5e9;"></i>
+            <span>Bandeja Activa: <strong>${activeOrders.length}</strong></span>
+          </div>
+          <div class="sics-metric-chip" style="${overdueOrders.length ? 'border-color:#ef4444; color:#ef4444;' : ''}">
+            <i class="fas fa-exclamation-triangle" style="color:${overdueOrders.length ? '#ef4444' : '#10b981'};"></i>
+            <span>${overdueOrders.length ? `Casos Rezagados: <strong>${overdueOrders.length}</strong>` : 'Cero Rezagados (Al Día)'}</span>
+          </div>
+          <div class="sics-metric-chip">
+            <i class="fas fa-stopwatch" style="color:#f59e0b;"></i>
+            <span>En Mi Mesa: <strong>${myActiveOrders.length}</strong></span>
+          </div>
+          <div class="sics-metric-chip">
+            <i class="fas fa-check-circle" style="color:#10b981;"></i>
+            <span>Entregados: <strong>${finishedOrders.length}</strong></span>
+          </div>
+          <div class="sics-metric-chip">
+            <i class="fas fa-circle" style="color:#10b981; font-size:8px;"></i>
+            <span>Sistema Operativo</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sics-bento-grid">
+        <!-- Tarjeta 1: Operaciones y Mostrador -->
+        <div class="sics-bento-card" onclick="navigate('team')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(14,165,233,0.12); color:#0ea5e9;">
+              <i class="fas fa-clipboard-list"></i>
+            </div>
+            <div class="sics-bento-title">Bandeja de Operaciones</div>
+            <div class="sics-bento-desc">
+              Control de pedidos activos, filtrado por cliente o urgencia y gestión de cola de órdenes en taller.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Entrar al Área</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta 2: Mesa de Producción (Ahora) -->
+        <div class="sics-bento-card" onclick="navigate('now')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(245,158,11,0.12); color:#f59e0b;">
+              <i class="fas fa-stopwatch"></i>
+            </div>
+            <div class="sics-bento-title">Mesa de Trabajo &amp; Cronómetro</div>
+            <div class="sics-bento-desc">
+              Órdenes asignadas en proceso, medición de tiempos en vivo, pausas justificadas y traspaso de equipo.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Entrar al Taller</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta 3: Reportes y Avance (SICS) -->
+        <div class="sics-bento-card" onclick="navigate('reports')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(139,92,246,0.12); color:#8b5cf6;">
+              <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="sics-bento-title">Reportes, Avance &amp; Rezagados</div>
+            <div class="sics-bento-desc">
+              Detección de casos rezagados, métricas operativas por trabajador y balance de entregas a tiempo.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Ver Métricas</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta 4: Horarios y Guardias -->
+        <div class="sics-bento-card" onclick="navigate('schedules')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(16,185,129,0.12); color:#10b981;">
+              <i class="fas fa-calendar-alt"></i>
+            </div>
+            <div class="sics-bento-title">Horarios &amp; Guardias del Equipo</div>
+            <div class="sics-bento-desc">
+              Turnos rotativos por semana, descansos programados y horas extras filtradas por cargo del taller.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Consultar Turnos</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta 5: Historial y Archivo -->
+        <div class="sics-bento-card" onclick="navigate('history')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(99,102,241,0.12); color:#6366f1;">
+              <i class="fas fa-history"></i>
+            </div>
+            <div class="sics-bento-title">Historial &amp; Archivo de Cierres</div>
+            <div class="sics-bento-desc">
+              Búsqueda de pedidos completados, fotos de evidencia, notas fiscales asociadas y bitácoras de entrega.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Ver Archivo</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta 6: Ajustes y Sistema -->
+        <div class="sics-bento-card" onclick="navigate('settings')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(100,116,139,0.15); color:#94a3b8;">
+              <i class="fas fa-sliders-h"></i>
+            </div>
+            <div class="sics-bento-title">Ajustes del Sistema</div>
+            <div class="sics-bento-desc">
+              Plantillas de WhatsApp para clientes, tema visual, configuración de personal y respaldos locales.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Configuración</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================
+// SICS 2026: PANEL DE REPORTES & AVANCE OPERATIVO
+// =========================================================
+function reportsView() {
+  const allOrders = state.data?.allOrders || [];
+  const activeOrders = allOrders.filter(active);
+  const finishedOrders = state.data?.finishedOrders || [];
+  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
+  
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  const monthOrders = [...activeOrders, ...finishedOrders].filter(o => {
+    const d = safeParseDate(o.fechaIngreso || o.fecha);
+    return d && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const onTimeFinished = finishedOrders.filter(o => {
+    if (!o.entrega || !o.fechaCierre) return true;
+    const ent = safeParseDate(o.entrega);
+    const cie = safeParseDate(o.fechaCierre);
+    return ent && cie ? cie <= ent : true;
+  });
+  const complianceRate = finishedOrders.length ? Math.round((onTimeFinished.length / finishedOrders.length) * 100) : 100;
+
+  const durations = finishedOrders.map(o => Number(o.duracionRealMin || 0)).filter(d => d > 0);
+  const avgMins = durations.length ? Math.round(durations.reduce((a,b)=>a+b, 0) / durations.length) : 0;
+
+  const workerStats = {};
+  const teamMembers = state.team || ["Moises", "Nelson", "Yolber", "Yenny", "Andreina"];
+  teamMembers.forEach(w => {
+    workerStats[w] = { name: w, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
+  });
+
+  activeOrders.forEach(o => {
+    const resp = o.responsable || "Sin asignar";
+    if (!workerStats[resp]) workerStats[resp] = { name: resp, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
+    workerStats[resp].active++;
+    if (priority(o) === 'overdue') workerStats[resp].overdue++;
+  });
+
+  finishedOrders.forEach(o => {
+    const resp = o.responsable || "Sin asignar";
+    if (!workerStats[resp]) workerStats[resp] = { name: resp, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
+    workerStats[resp].finished++;
+    if (o.duracionRealMin) {
+      workerStats[resp].totalMins += Number(o.duracionRealMin);
+      workerStats[resp].finishedCount++;
+    }
+  });
+
+  return `
+    <div style="max-width:1200px; margin:0 auto; padding:20px 16px; animation:sicsFadeIn 0.3s ease-out;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px;">
+        <div>
+          <button type="button" class="secondary-button" onclick="navigate('modules')" style="padding:5px 12px; font-size:12px; margin-bottom:8px; border-radius:20px;">
+            <i class="fas fa-arrow-left"></i> Volver a Módulos
+          </button>
+          <h2 style="margin:0; font-size:22px;">📊 Panel de Reportes &amp; Avance SICS</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Métricas de avance operativo, detección de casos rezagados y rendimiento del equipo.
+          </p>
+        </div>
+        <button type="button" class="primary-button" onclick="refresh()" style="font-size:12px; padding:8px 16px;">
+          <i class="fas fa-sync-alt"></i> Actualizar Métricas
+        </button>
+      </div>
+
+      <!-- KPIs Superiores -->
+      <div class="reports-kpi-grid">
+        <div class="reports-kpi-card">
+          <div class="reports-kpi-label"><i class="fas fa-calendar-check" style="color:#0ea5e9;"></i> Casos del Mes</div>
+          <div class="reports-kpi-val">${monthOrders.length}</div>
+          <div class="reports-kpi-sub">Total registrados en ${now.toLocaleString('es-ES', { month: 'long' })}</div>
+        </div>
+
+        <div class="reports-kpi-card">
+          <div class="reports-kpi-label"><i class="fas fa-tachometer-alt" style="color:#10b981;"></i> Cumplimiento a Tiempo</div>
+          <div class="reports-kpi-val" style="color:#10b981;">${complianceRate}%</div>
+          <div class="reports-kpi-sub">${onTimeFinished.length} de ${finishedOrders.length} entregados en fecha</div>
+        </div>
+
+        <div class="reports-kpi-card" style="${overdueOrders.length ? 'border:1.5px solid #ef4444;' : ''}">
+          <div class="reports-kpi-label" style="${overdueOrders.length ? 'color:#ef4444;' : ''}">
+            <i class="fas fa-exclamation-circle" style="color:${overdueOrders.length ? '#ef4444' : '#10b981'};"></i> Casos Rezagados
+          </div>
+          <div class="reports-kpi-val" style="color:${overdueOrders.length ? '#ef4444' : 'var(--text-main)'};">${overdueOrders.length}</div>
+          <div class="reports-kpi-sub">${overdueOrders.length ? '⚠️ Requieren atención prioritaria' : '✨ Sin retrasos actualmente'}</div>
+        </div>
+
+        <div class="reports-kpi-card">
+          <div class="reports-kpi-label"><i class="fas fa-stopwatch" style="color:#f59e0b;"></i> Promedio en Mesa</div>
+          <div class="reports-kpi-val">${avgMins} <span style="font-size:14px; font-weight:normal; color:var(--text-muted);">min</span></div>
+          <div class="reports-kpi-sub">Por orden finalizada</div>
+        </div>
+      </div>
+
+      <!-- Sección Casos Rezagados -->
+      <div style="background:var(--bg-card); border:1px solid ${overdueOrders.length ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}; border-radius:14px; padding:18px; margin-bottom:24px; box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:15px; color:${overdueOrders.length ? '#ef4444' : 'var(--text-main)'};">
+            <i class="fas fa-bell"></i> ${overdueOrders.length ? `Casos Rezagados que Requieren Atención (${overdueOrders.length})` : 'Casos Rezagados'}
+          </h3>
+          ${overdueOrders.length ? `<span style="background:rgba(239,68,68,0.15); color:#ef4444; font-size:11px; font-weight:800; padding:2px 8px; border-radius:12px;">ALERTA OPERATIVA</span>` : ''}
+        </div>
+
+        ${overdueOrders.length ? `
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px;">
+            ${overdueOrders.map(o => `
+              <div style="background:var(--bg-main); border:1px solid rgba(239,68,68,0.3); border-left:4px solid #ef4444; border-radius:8px; padding:10px 12px;">
+                <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:800;">
+                  <span>${escapeHtml(o.id)} · ${escapeHtml(o.cliente)}</span>
+                  <span style="color:#ef4444;">🚨 Vencido</span>
+                </div>
+                <div style="font-size:11.5px; color:var(--text-muted); margin:4px 0;">
+                  ${escapeHtml(o.tipo || 'Sin tipo')} | Entrega: ${escapeHtml(formatDate(o.entrega))}
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                  <span style="font-size:11px;">👤 ${escapeHtml(o.responsable)}</span>
+                  <button type="button" class="primary-button" onclick="detail('${escapeHtml(o.id)}')" style="font-size:11px; padding:3px 8px; background:#ef4444;">
+                    ⚡ Atender Caso
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : `
+          <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">
+            <i class="fas fa-check-circle" style="color:#10b981; font-size:24px; margin-bottom:6px;"></i><br/>
+            ¡Excelente! No hay casos rezagados en el taller en este momento.
+          </div>
+        `}
+      </div>
+
+      <!-- Tabla de Rendimiento por Colaborador -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; box-shadow:var(--shadow-sm); overflow-x:auto;">
+        <h3 style="margin:0 0 14px 0; font-size:15px;">👥 Métricas Operativas por Trabajador</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border-color); text-align:left; color:var(--text-muted);">
+              <th style="padding:10px 8px;">Colaborador</th>
+              <th style="padding:10px 8px; text-align:center;">Órdenes Activas</th>
+              <th style="padding:10px 8px; text-align:center;">Rezagados</th>
+              <th style="padding:10px 8px; text-align:center;">Completados</th>
+              <th style="padding:10px 8px; text-align:center;">Promedio en Mesa</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Object.values(workerStats).map(w => {
+              const avg = w.finishedCount ? Math.round(w.totalMins / w.finishedCount) : 0;
+              return `
+                <tr style="border-bottom:1px solid var(--border-color);">
+                  <td style="padding:10px 8px; font-weight:700;">👤 ${escapeHtml(w.name)}</td>
+                  <td style="padding:10px 8px; text-align:center;">
+                    <span style="background:rgba(14,165,233,0.12); color:#0284c7; padding:2px 8px; border-radius:12px; font-weight:800;">${w.active}</span>
+                  </td>
+                  <td style="padding:10px 8px; text-align:center;">
+                    ${w.overdue ? `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:12px; font-weight:800;">${w.overdue}</span>` : '<span style="color:var(--text-muted);">-</span>'}
+                  </td>
+                  <td style="padding:10px 8px; text-align:center; font-weight:700; color:#10b981;">${w.finished}</td>
+                  <td style="padding:10px 8px; text-align:center; color:var(--text-muted);">${avg ? `${avg} min` : '-'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================
+// SICS 2026: HORARIOS Y GUARDIAS FILTRADOS POR CARGO
+// =========================================================
 function schedulesView() {
   const allSchedules = state.data.schedules || state.schedules || state.data.horarios || [];
   const offset = state.selectedWeekOffset || 0;
   const wk = getWeekDetails(offset);
-  
-  // Filtrar horarios que coincidan con la semana seleccionada o los sin semana si estamos en la actual
-  const schedules = allSchedules.filter(s => {
+  const selectedRole = state.selectedScheduleRole || "todos";
+  const onlyMySchedule = state.onlyMySchedule || false;
+  const currentUserName = (state.session?.nombre || state.session?.username || "").toLowerCase().trim();
+
+  let schedules = allSchedules.filter(s => {
     if (s.semana) {
       const sSem = String(s.semana).trim().toLowerCase();
       return sSem === wk.semanaId.toLowerCase() || 
@@ -1535,88 +1877,133 @@ function schedulesView() {
     return wk.isCurrent;
   });
 
-  const totalHorasExtras = schedules.reduce((acc, s) => acc + Number(s.horasExtras || 0), 0);
+  if (onlyMySchedule && currentUserName) {
+    schedules = schedules.filter(s => String(s.colaborador || s.nombre || '').toLowerCase().includes(currentUserName));
+  }
+
+  if (selectedRole !== "todos") {
+    schedules = schedules.filter(s => {
+      const cargo = String(s.cargo || s.rol || '').toLowerCase();
+      return cargo.includes(selectedRole.toLowerCase());
+    });
+  }
 
   const formatShiftCell = (val) => {
-    const shift = String(val || 'Libre').trim();
-    if (shift.toLowerCase() === 'vacaciones') {
-      return '<span style="background:#fef3c7; color:#d97706; font-weight:800; padding:3px 8px; border-radius:12px; font-size:11px; white-space:nowrap;">🏖️ Vacaciones</span>';
+    const shift = String(val || 'Descanso').trim();
+    const sLower = shift.toLowerCase();
+    if (sLower === 'vacaciones') {
+      return '<span class="sics-shift-pill shift-vacaciones">🏖️ Vacaciones</span>';
     }
-    if (shift.toLowerCase() === 'libre') {
-      return '<span style="color:var(--text-muted);">Libre</span>';
+    if (sLower === 'descanso' || sLower === 'libre') {
+      return '<span class="sics-shift-pill shift-descanso">Descanso</span>';
     }
-    return escapeHtml(shift);
+    return `<span class="sics-shift-pill shift-operativo">${escapeHtml(shift)}</span>`;
   };
 
+  const roles = [
+    { id: "todos", label: "Todos los Cargos" },
+    { id: "diseño", label: "Diseño Gráfico" },
+    { id: "corte", label: "Corte / Plotter" },
+    { id: "armado", label: "Armado / Taller" },
+    { id: "mostrador", label: "Mostrador / Atención" }
+  ];
+
   return `
-    <div style="background:var(--bg-card); padding:20px; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+    <div style="max-width:1200px; margin:0 auto; padding:20px 16px; animation:sicsFadeIn 0.3s ease-out;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
         <div>
-          <h2 style="margin:0;">📅 Horarios y Turnos del Equipo</h2>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Consulta y asigna turnos rotativos por semana para cada trabajador.</p>
+          <button type="button" class="secondary-button" onclick="navigate('modules')" style="padding:5px 12px; font-size:12px; margin-bottom:8px; border-radius:20px;">
+            <i class="fas fa-arrow-left"></i> Volver a Módulos
+          </button>
+          <h2 style="margin:0; font-size:22px;">📅 Horarios y Guardias del Equipo (SICS)</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Turnos rotativos semanales filtrados por cargo y asignación personal.
+          </p>
         </div>
-        ${isLead() ? `<button type="button" class="primary-button" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">✏️ Modificar Horario (${wk.isCurrent ? 'Esta Semana' : wk.semanaLabel})</button>` : ''}
+        ${isLead() ? `
+          <button type="button" class="primary-button" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')" style="font-size:12px;">
+            ✏️ Modificar Horario (${wk.isCurrent ? 'Esta Semana' : wk.semanaLabel})
+          </button>
+        ` : ''}
       </div>
 
-      <!-- Selector de semanas e histórico -->
-      <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-main); padding:10px 14px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color); flex-wrap:wrap; gap:8px;">
-        <button type="button" class="secondary-button" onclick="changeScheduleWeek(-1)">◀ Semana Anterior</button>
-        <div style="text-align:center;">
-          <strong style="font-size:14px; color:var(--primary-color);">🗓️ ${escapeHtml(wk.semanaLabel)}</strong>
-          ${wk.isCurrent ? '<span style="background:var(--success-color); color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; margin-left:6px;">EN CURSO</span>' : ''}
-          ${!wk.isCurrent ? '<button type="button" class="secondary-button" style="padding:2px 8px; font-size:11px; margin-left:6px;" onclick="resetScheduleWeek()">Semana Actual</button>' : ''}
+      <!-- Filtros SICS: Cargo y Mi Horario -->
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:12px; font-weight:700; color:var(--text-muted);">Filtrar Cargo:</span>
+          <select id="sics-role-filter" onchange="state.selectedScheduleRole = this.value; render();" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px; padding:5px 10px; font-size:12px;">
+            ${roles.map(r => `<option value="${r.id}" ${selectedRole === r.id ? 'selected' : ''}>${r.label}</option>`).join('')}
+          </select>
         </div>
-        <button type="button" class="secondary-button" onclick="changeScheduleWeek(1)">Semana Siguiente ▶</button>
+
+        <button type="button" class="secondary-button" onclick="state.onlyMySchedule = !state.onlyMySchedule; render();" style="font-size:12px; padding:5px 12px; border-radius:20px; background:${onlyMySchedule ? '#0ea5e9' : 'transparent'}; color:${onlyMySchedule ? '#fff' : 'var(--text-main)'}; border:1px solid var(--border-color);">
+          ${onlyMySchedule ? '👤 Viendo Mi Horario' : '👥 Ver Solo Mi Horario'}
+        </button>
+
+        <div style="margin-left:auto; display:flex; gap:6px;">
+          <button type="button" class="secondary-button" onclick="changeWeekOffset(-1)" style="font-size:11.5px; padding:4px 10px;">◀ Anterior</button>
+          <button type="button" class="secondary-button" onclick="changeWeekOffset(0)" style="font-size:11.5px; padding:4px 10px; font-weight:700;">Semana Actual</button>
+          <button type="button" class="secondary-button" onclick="changeWeekOffset(1)" style="font-size:11.5px; padding:4px 10px;">Siguiente ▶</button>
+        </div>
       </div>
 
-      ${totalHorasExtras > 0 ? `
-        <div style="background:rgba(217,119,6,.1); border:1px solid #d97706; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:13px; color:#d97706; font-weight:bold; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-          <span>⏱️ CÓMPUTO DE HORAS EXTRAS DE LA SEMANA:</span>
-          <span style="font-size:15px; color:#b45309;">${totalHorasExtras} horas extras acumuladas</span>
+      <!-- Tabla de Horarios -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:16px; box-shadow:var(--shadow-sm); overflow-x:auto;">
+        <div style="font-size:13px; font-weight:800; margin-bottom:10px; color:#0284c7;">
+          <i class="fas fa-calendar-week"></i> ${wk.semanaLabel}
         </div>
-      ` : ''}
-
-      <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
+        <table class="sics-schedule-table">
           <thead>
-            <tr style="border-bottom:2px solid var(--border-color); color:var(--text-muted);">
-              <th style="padding:10px;">Trabajador</th>
-              <th style="padding:10px;">Lunes</th>
-              <th style="padding:10px;">Martes</th>
-              <th style="padding:10px;">Miércoles</th>
-              <th style="padding:10px;">Jueves</th>
-              <th style="padding:10px;">Viernes</th>
-              <th style="padding:10px;">Sábado</th>
-              <th style="padding:10px;">Domingo</th>
-              <th style="padding:10px; text-align:center;">⏱️ H. Extras</th>
+            <tr>
+              <th style="text-align:left; min-width:140px;">Colaborador</th>
+              <th>Lunes</th>
+              <th>Martes</th>
+              <th>Miércoles</th>
+              <th>Jueves</th>
+              <th>Viernes</th>
+              <th>Sábado</th>
+              <th>Domingo</th>
+              ${isLead() ? '<th>Acciones</th>' : ''}
             </tr>
           </thead>
           <tbody>
-            ${schedules.map(s => `
-              <tr style="border-bottom:1px dashed var(--border-color);">
-                <td style="padding:10px; font-weight:bold; white-space:nowrap;">👤 ${escapeHtml(s.trabajador)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.lunes)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.martes)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.miercoles)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.jueves)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.viernes)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.sabado)}</td>
-                <td style="padding:10px;">${formatShiftCell(s.domingo)}</td>
-                <td style="padding:10px; text-align:center;">
-                  ${Number(s.horasExtras || 0) > 0 ? `
-                    <strong style="color:#d97706; background:rgba(217,119,6,.12); padding:3px 8px; border-radius:6px; font-size:12px; display:inline-block;">+${s.horasExtras}h</strong>
-                    ${s.notaExtras ? `<br/><small style="color:var(--text-muted); font-size:10px; display:block; margin-top:2px;">${escapeHtml(s.notaExtras)}</small>` : ''}
-                  ` : '<span style="color:var(--text-muted); font-size:12px;">0h</span>'}
+            ${schedules.length ? schedules.map(s => {
+              const cargo = s.cargo || 'Taller';
+              return `
+                <tr>
+                  <td style="text-align:left; font-weight:700;">
+                    <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(cargo)}</div>
+                    <div style="font-size:13px;">👤 ${escapeHtml(s.colaborador || s.nombre)}</div>
+                  </td>
+                  <td>${formatShiftCell(s.lunes)}</td>
+                  <td>${formatShiftCell(s.martes)}</td>
+                  <td>${formatShiftCell(s.miercoles)}</td>
+                  <td>${formatShiftCell(s.jueves)}</td>
+                  <td>${formatShiftCell(s.viernes)}</td>
+                  <td>${formatShiftCell(s.sabado)}</td>
+                  <td>${formatShiftCell(s.domingo)}</td>
+                  ${isLead() ? `
+                    <td>
+                      <button type="button" class="secondary-button" onclick="openEditScheduleModal('${escapeHtml(s.colaborador || s.nombre)}', '${wk.semanaId}', '${wk.semanaLabel}')" style="padding:3px 7px; font-size:11px;">
+                        ✏️
+                      </button>
+                    </td>
+                  ` : ''}
+                </tr>
+              `;
+            }).join('') : `
+              <tr>
+                <td colspan="9" style="padding:24px; color:var(--text-muted);">
+                  No hay turnos registrados para el filtro seleccionado en esta semana.
                 </td>
               </tr>
-            `).join("") || `<tr><td colspan="9" style="padding:26px; text-align:center; color:var(--text-muted);">No hay horarios registrados para ${escapeHtml(wk.semanaLabel)}.<br/>${isLead() ? `<button type="button" class="primary-button" style="margin-top:10px;" onclick="openEditScheduleModal('', '${wk.semanaId}', '${wk.semanaLabel}')">➕ Cargar Horario para esta semana</button>` : ''}</td></tr>`}
+            `}
           </tbody>
         </table>
       </div>
     </div>
   `;
 }
-
 function financesView() {
   if (!isLead()) {
     return `<div class="empty"><strong>Acceso Restringido: Este módulo solo está disponible para Jefes y Managers.</strong></div>`;
@@ -2056,11 +2443,24 @@ function render() {
     const screenEl = $("#screen");
     if (screenEl) {
       const views = {
+        modules: modulesView,
         now: nowView, queue: queueView, team: teamView,
+        reports: reportsView,
         history: historyView, schedules: schedulesView,
         finances: financesView, settings: settingsView
       };
-      screenEl.innerHTML = (views[state.screen] || views.now)();
+      screenEl.innerHTML = (views[state.screen] || views.modules)();
+
+      // Sincronizar fichas de navegación SICS y contadores en vivo
+      document.querySelectorAll(".sics-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.screen === state.screen);
+      });
+      const nowCount = (state.data?.myOrders || []).filter(active).length;
+      const teamCount = (state.data?.allOrders || []).filter(active).length;
+      const bNow = document.getElementById("tabBadgeNow");
+      if (bNow) bNow.textContent = nowCount;
+      const bTeam = document.getElementById("tabBadgeTeam");
+      if (bTeam) bTeam.textContent = teamCount;
     }
     
     document.querySelectorAll(".nav-button").forEach((btn) => {
@@ -3318,11 +3718,20 @@ function formOrder() {
         <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
           Puedes combinar libremente varios trabajos en esta misma orden (ej: Topper + Stickers + Taza + Invitación).
         </p>
-        <div id="subitems-form-list">
+        <!-- Chips rápidos para formulario estándar -->
+        <div class="subitems-chips-bar">
+          <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
+          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Topper 3D', 1, '')">+ Topper 3D</button>
+          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Stickers', 1, 'Pliego')">+ Stickers</button>
+          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Taza Sublimada', 1, '')">+ Taza</button>
+          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Invitación Digital', 1, '')">+ Invitación</button>
+          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Letras 3D', 1, '')">+ Letras 3D</button>
+        </div>
+        <div id="subitems-form-list" style="width:100%; box-sizing:border-box;">
           <div class="subitem-row">
-            <input type="text" class="subitem-form-tipo" placeholder="Tipo (ej: Topper 3D, Stickers)" value="Topper 3D">
+            <input type="text" list="subitem-tipos-list" class="subitem-form-tipo" placeholder="Tipo (ej: Topper 3D, Stickers)" value="Topper 3D">
             <input type="number" class="subitem-form-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
-            <input type="text" class="subitem-form-det" placeholder="Detalles / Medidas">
+            <input type="text" class="subitem-form-det subitem-det-col" placeholder="Detalles / Medidas">
             <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
           </div>
         </div>
@@ -4269,49 +4678,94 @@ window.openExpressOrderModal = function() {
   const clients = state.frequentClients || [];
   const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Cuadro Selfie", "Banderines"];
   const motivos = state.frequentMotivos || [];
+  let expressInvoiceBase64 = "";
 
   openModal(`
     <div class="modal-head">
       <div>
         <span class="pill-urgent" style="font-size:11px;">⚡ ATENCIÓN INMEDIATA</span>
-        <h2>Pedido Rápido de Mostrador</h2>
+        <h2 style="margin:4px 0 0 0;">Pedido Rápido de Mostrador (SICS Express)</h2>
       </div>
       <button class="close-button" data-action="close">×</button>
     </div>
 
-    <div style="background:rgba(245,158,11,0.08); border-left:4px solid #f59e0b; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:12.5px;">
-      ⚡ Diseñado para clientes presenciales en tienda. Llena los datos esenciales en segundos o dicta con voz.
+    <div style="background:rgba(245,158,11,0.08); border-left:4px solid #f59e0b; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:12px; line-height:1.4;">
+      ⚡ Diseñado para clientes presenciales en mostrador. Selecciona cliente frecuente o dicta por voz para llenar en segundos.
     </div>
 
-    <form id="express-order-form" class="form-grid">
+    <form id="express-order-form" class="form-grid" style="max-width:100%; box-sizing:border-box; overflow-x:hidden;">
+      <!-- Cliente -->
       <label class="field">
         <span class="field-label">CLIENTE DEL LOCAL:</span>
+        ${clients.length ? `
+          <select id="express-client-select" style="margin-bottom:6px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:6px 8px;">
+            <option value="">-- Seleccionar cliente guardado o tipear abajo --</option>
+            ${clients.map(c => `<option value="${escapeHtml(c.name)}" data-phone="${escapeHtml(c.phone || '')}">${escapeHtml(c.name)} ${c.phone ? `(${escapeHtml(c.phone)})` : ''}</option>`).join('')}
+          </select>
+        ` : ''}
         <div style="display:flex; gap:6px;">
           <input type="text" id="express-cliente" name="cliente" required placeholder="Nombre del cliente en mostrador" style="flex:1;">
-          <button type="button" class="mic-action-btn" onclick="startVoiceDictationForExpress()" title="Dictar por voz">
+          <button type="button" class="mic-action-btn" id="express-mic-btn" onclick="startVoiceDictationForExpress()" title="Dictar por voz">
             <i class="fas fa-microphone"></i>
           </button>
         </div>
       </label>
 
+      <!-- Teléfono -->
       <label class="field">
         <span class="field-label">TELÉFONO / WHATSAPP:</span>
         <input type="tel" id="express-telefono" name="telefono" placeholder="Ej. 04141234567">
       </label>
 
+      <!-- Factura Física / Nota Manuscrita -->
+      <div class="physical-invoice-box" id="express-invoice-box">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#d97706; text-transform:uppercase;">
+            🧾 Factura / Nota Física Manuscrita:
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="secondary-button" id="express-cam-invoice-btn" style="background:#f59e0b; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📸 Tomar Foto
+            </button>
+            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📁 Subir Archivo
+              <input type="file" id="express-file-invoice" accept="image/*" style="display:none;">
+            </label>
+          </div>
+        </div>
+        <div id="express-invoice-preview-wrap" style="display:none;" class="physical-invoice-preview">
+          <img id="express-invoice-img" class="physical-invoice-thumb" src="" alt="Factura Física">
+          <div style="flex:1; font-size:11.5px;">
+            <strong style="color:#10b981;"><i class="fas fa-check-circle"></i> Nota Física Adjunta</strong>
+            <div style="color:var(--text-muted); font-size:10.5px;">Se respaldará en Google Drive junto con el pedido.</div>
+          </div>
+          <button type="button" class="subitem-del-btn" id="express-invoice-del-btn" title="Eliminar foto">🗑️</button>
+        </div>
+      </div>
+
       <!-- Sub-Ítems dinámicos para el mostrador -->
       <div class="subitems-builder-box">
         <div class="subitems-builder-title">
           <span><i class="fas fa-cubes"></i> TRABAJOS SOLICITADOS</span>
-          <button type="button" class="secondary-button" id="express-add-item-btn" style="padding:3px 8px; font-size:11px; background:#0ea5e9; color:white; border:none; border-radius:6px;">
+          <button type="button" class="secondary-button" id="express-add-item-btn" style="padding:3px 8px; font-size:11px; background:#0ea5e9; color:white; border:none; border-radius:6px; cursor:pointer;">
             ➕ Otro Trabajo
           </button>
         </div>
-        <div id="express-items-list">
+        <!-- Chips rápidos -->
+        <div class="subitems-chips-bar">
+          <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Topper 3D', 1, '')">+ Topper 3D</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Stickers', 1, 'Pliego')">+ Stickers</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Taza Sublimada', 1, '')">+ Taza</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Invitación Digital', 1, '')">+ Invitación</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Letras 3D', 1, '')">+ Letras 3D</button>
+        </div>
+
+        <div id="express-items-list" style="width:100%; box-sizing:border-box;">
           <div class="subitem-row">
-            <input type="text" class="swal-item-tipo" placeholder="Tipo (ej: Topper 3D)" value="Topper 3D" required>
+            <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper 3D)" value="Topper 3D" required>
             <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
-            <input type="text" class="swal-item-det" placeholder="Detalles (medida, motivo)">
+            <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas (ej: 15cm, Paw Patrol)">
             <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
           </div>
         </div>
@@ -4326,142 +4780,204 @@ window.openExpressOrderModal = function() {
           <button type="button" class="secondary-button express-time-btn" data-target="today-afternoon" style="font-size:11px; padding:4px 10px;">📅 Hoy al final de la tarde (5:30pm)</button>
           <button type="button" class="secondary-button express-time-btn" data-target="tomorrow" style="font-size:11px; padding:4px 10px;">📅 Mañana por la mañana</button>
         </div>
-        <div class="form-inline">
+        <div class="form-inline" style="gap:8px;">
           <input type="date" id="express-fecha-entrega" name="fechaEntrega" required>
           <input type="time" id="express-hora-entrega" name="horaEntrega" value="17:30" required>
         </div>
       </div>
 
-      <div class="form-inline">
+      <!-- Responsable y Costo -->
+      <div class="form-inline" style="gap:8px;">
         <label class="field">
           <span class="field-label">RESPONSABLE ASIGNADO:</span>
-          <select id="express-responsable" name="responsable">
-            ${(state.data.users || []).filter(u => u.active).map(u => `<option value="${escapeHtml(u.name)}" ${u.name === state.session?.name ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
-            <option value="Sin asignar">Sin asignar</option>
+          <select id="express-responsable" name="responsable" required>
+            ${(state.team || ["Moises", "Nelson", "Yolber", "Yenny", "Andreina"]).map(r => `
+              <option value="${escapeHtml(r)}" ${state.session && state.session.username === r.toLowerCase() ? 'selected' : ''}>${escapeHtml(r)}</option>
+            `).join('')}
           </select>
         </label>
         <label class="field">
           <span class="field-label">PRECIO / COSTO ($):</span>
-          <input type="number" step="0.01" id="express-costo" name="costo" placeholder="0.00" style="font-weight:bold; color:#059669;">
+          <input type="number" id="express-costo" name="costo" step="0.01" min="0" placeholder="0.00" value="0.00">
         </label>
       </div>
 
       <!-- Aviso de Confirmación Visual en Pantalla -->
       <div id="express-visual-confirm" class="visual-confirm-box" style="display:none;">
-        <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Todo lo que indicaste ya está listo para revisar!</div>
-        <div id="express-confirm-summary" style="font-size:12px; color:var(--text-main); line-height:1.4;"></div>
+        <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Datos interpretados correctamente!</div>
+        <div id="express-confirm-summary" style="font-size:12px; line-height:1.4;"></div>
       </div>
 
-      <div style="display:flex; gap:10px; margin-top:10px;">
+      <div class="modal-foot" style="margin-top:10px; display:flex; gap:8px;">
         <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
-        <button type="submit" class="primary-button" id="express-submit-btn" style="flex:2; background:#f59e0b; color:white;">
+        <button type="submit" class="primary-button" id="express-submit-btn" style="flex:2; background:#f59e0b; color:white; font-weight:800; border:none;">
           ⚡ Guardar Pedido Mostrador
         </button>
       </div>
     </form>
   `);
 
-  // Default fecha hoy
-  const todayIso = new Date().toISOString().split('T')[0];
-  const fechaInput = document.getElementById("express-fecha-entrega");
-  if (fechaInput) fechaInput.value = todayIso;
+  // Configurar fecha por defecto (hoy)
+  const fInput = document.getElementById("express-fecha-entrega");
+  if (fInput) fInput.value = new Date().toISOString().split('T')[0];
 
-  // Manejo de botones de tiempo rápido
-  document.querySelectorAll(".express-time-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const now = new Date();
-      const fIn = document.getElementById("express-fecha-entrega");
-      const hIn = document.getElementById("express-hora-entrega");
-      if (!fIn || !hIn) return;
-
-      if (btn.dataset.hours) {
-        now.setHours(now.getHours() + parseInt(btn.dataset.hours, 10));
-        fIn.value = now.toISOString().split('T')[0];
-        hIn.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      } else if (btn.dataset.target === "today-afternoon") {
-        fIn.value = now.toISOString().split('T')[0];
-        hIn.value = "17:30";
-      } else if (btn.dataset.target === "tomorrow") {
-        now.setDate(now.getDate() + 1);
-        fIn.value = now.toISOString().split('T')[0];
-        hIn.value = "11:00";
+  // Listener para autocompletar cliente frecuente
+  const selClient = document.getElementById("express-client-select");
+  if (selClient) {
+    selClient.addEventListener("change", () => {
+      const opt = selClient.options[selClient.selectedIndex];
+      if (opt && opt.value) {
+        document.getElementById("express-cliente").value = opt.value;
+        const phone = opt.dataset.phone || "";
+        if (phone) document.getElementById("express-telefono").value = phone;
       }
-      showToast(`Hora fijada: ${fIn.value} a las ${hIn.value}`);
     });
-  });
+  }
 
-  // Botón agregar ítem en el express
-  document.getElementById("express-add-item-btn")?.addEventListener("click", () => {
+  // Helper para añadir subitems desde chips
+  window.addExpressSubItem = function(tipo, cant, det) {
     const list = document.getElementById("express-items-list");
     if (!list) return;
     const row = document.createElement("div");
     row.className = "subitem-row";
     row.innerHTML = `
-      <input type="text" class="swal-item-tipo" placeholder="Tipo (ej: Stickers)" required>
-      <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
-      <input type="text" class="swal-item-det" placeholder="Detalles (medida, motivo)">
+      <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo" value="${escapeHtml(tipo)}" required>
+      <input type="number" class="swal-item-cant" value="${cant || 1}" min="1" placeholder="Cant." style="text-align:center;">
+      <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas" value="${escapeHtml(det || '')}">
       <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
     `;
     list.appendChild(row);
+  };
+
+  // Botón Agregar Otro Trabajo
+  document.getElementById("express-add-item-btn")?.addEventListener("click", () => {
+    window.addExpressSubItem("Topper 3D", 1, "");
   });
 
-  // Submit del Express Form
+  // Manejo de Factura Física (Cámara y Archivo)
+  const camBtn = document.getElementById("express-cam-invoice-btn");
+  const fileInput = document.getElementById("express-file-invoice");
+  const prevWrap = document.getElementById("express-invoice-preview-wrap");
+  const prevImg = document.getElementById("express-invoice-img");
+  const delBtn = document.getElementById("express-invoice-del-btn");
+
+  const setInvoicePreview = (base64) => {
+    expressInvoiceBase64 = base64;
+    if (prevImg) prevImg.src = base64;
+    if (prevWrap) prevWrap.style.display = "flex";
+  };
+
+  camBtn?.addEventListener("click", () => {
+    if (typeof openLiveCameraModal === "function") {
+      openLiveCameraModal((capturedBase64) => {
+        setInvoicePreview(capturedBase64);
+      });
+    } else {
+      showToast("Cámara no disponible directamente.");
+    }
+  });
+
+  fileInput?.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (re) => setInvoicePreview(re.target.result);
+    reader.readAsDataURL(file);
+  });
+
+  delBtn?.addEventListener("click", () => {
+    expressInvoiceBase64 = "";
+    if (prevWrap) prevWrap.style.display = "none";
+    if (fileInput) fileInput.value = "";
+  });
+
+  // Presets de tiempo de entrega
+  document.querySelectorAll(".express-time-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const now = new Date();
+      const hours = btn.dataset.hours;
+      const target = btn.dataset.target;
+      const fIn = document.getElementById("express-fecha-entrega");
+      const hIn = document.getElementById("express-hora-entrega");
+
+      if (hours) {
+        now.setHours(now.getHours() + parseInt(hours, 10));
+        if (fIn) fIn.value = now.toISOString().split('T')[0];
+        if (hIn) hIn.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      } else if (target === "today-afternoon") {
+        if (fIn) fIn.value = now.toISOString().split('T')[0];
+        if (hIn) hIn.value = "17:30";
+      } else if (target === "tomorrow") {
+        now.setDate(now.getDate() + 1);
+        if (fIn) fIn.value = now.toISOString().split('T')[0];
+        if (hIn) hIn.value = "11:00";
+      }
+      showToast("Hora de entrega actualizada.");
+    });
+  });
+
+  // Envío del Formulario Express
   document.getElementById("express-order-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = document.getElementById("express-submit-btn");
-    btn.disabled = true;
-    btn.textContent = "⏳ Creando pedido...";
+    const cliente = document.getElementById("express-cliente")?.value.trim();
+    const telefono = document.getElementById("express-telefono")?.value.trim() || "";
+    const fEnt = document.getElementById("express-fecha-entrega")?.value;
+    const hEnt = document.getElementById("express-hora-entrega")?.value || "17:30";
+    const responsable = document.getElementById("express-responsable")?.value;
+    const costo = parseFloat(document.getElementById("express-costo")?.value || 0);
 
-    // Recolectar subItems
-    const subItems = [];
+    if (!cliente) {
+      alert("Por favor indica el nombre del cliente.");
+      return;
+    }
+
+    // Extraer subítems
+    const items = [];
     document.querySelectorAll("#express-items-list .subitem-row").forEach(row => {
-      const tipo = row.querySelector(".swal-item-tipo")?.value.trim();
-      const cant = parseInt(row.querySelector(".swal-item-cant")?.value || "1", 10);
-      const det = row.querySelector(".swal-item-det")?.value.trim();
-      if (tipo) {
-        subItems.push({ tipo, cantidad: cant, detalles: det, completado: false });
-      }
+      const t = row.querySelector(".swal-item-tipo")?.value.trim();
+      const c = parseInt(row.querySelector(".swal-item-cant")?.value, 10) || 1;
+      const d = row.querySelector(".swal-item-det")?.value.trim() || "";
+      if (t) items.push({ tipo: t, cantidad: c, detalles: d, done: false });
     });
 
-    const clienteVal = document.getElementById("express-cliente")?.value.trim();
-    const telVal = document.getElementById("express-telefono")?.value.trim();
-    const fechaVal = document.getElementById("express-fecha-entrega")?.value;
-    const horaVal = document.getElementById("express-hora-entrega")?.value || "17:30";
-    const respVal = document.getElementById("express-responsable")?.value || "Sin asignar";
-    const costoVal = parseFloat(document.getElementById("express-costo")?.value || "0");
-
-    const tipoResumen = subItems.length > 0 ? subItems.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ") : "Trabajo Express";
+    if (items.length === 0) {
+      items.push({ tipo: "Pedido Mostrador", cantidad: 1, detalles: "", done: false });
+    }
 
     const payload = {
-      cliente: clienteVal,
-      telefono: telVal,
-      tipo: tipoResumen,
-      motivo: "Mostrador Directo",
-      descripcion: `[PEDIDO MOSTRADOR RÁPIDO]:
-${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
-      fechaEntrega: fechaVal,
-      horaEntrega: horaVal,
-      responsable: respVal,
-      costo: costoVal,
+      cliente,
+      telefono,
+      tipo: items.map(i => `${i.cantidad > 1 ? i.cantidad + 'x ' : ''}${i.tipo}`).join(" + "),
+      descripcion: `[Pedido Mostrador Rápido SICS]\n` + items.map(i => `• ${i.cantidad}x ${i.tipo}${i.detalles ? ' ('+i.detalles+')' : ''}`).join("\n"),
+      subItems: items,
+      fechaEntrega: `${fEnt}T${hEnt}:00`,
+      responsable,
+      costo,
       diseno: "Sí",
-      subItems: subItems
+      estado: "Pendiente",
+      motivo: items[0].tipo,
+      fotosReferencia: expressInvoiceBase64 ? [expressInvoiceBase64] : []
     };
 
+    btn.disabled = true;
+    btn.textContent = "Guardando...";
+
     try {
-      await api("profile_create_order", { form: payload });
+      await api('crearPedido', payload);
       closeModal();
-      await refresh(false);
-      if (window.Swal) {
+      if (typeof Swal !== "undefined") {
         Swal.fire({
-          title: "¡Pedido Registrado!",
-          text: `El pedido de ${clienteVal} se creó con éxito y ya está disponible en bandeja.`,
           icon: "success",
-          timer: 2500,
+          title: "¡Pedido Registrado!",
+          text: `Orden rápida para ${cliente} guardada en taller.`,
+          timer: 2000,
           showConfirmButton: false
         });
       } else {
-        showToast("¡Pedido de mostrador creado con éxito!");
+        showToast("¡Pedido de mostrador guardado con éxito!");
       }
+      refresh();
     } catch(err) {
       btn.disabled = false;
       btn.textContent = "⚡ Guardar Pedido Mostrador";
@@ -4469,6 +4985,7 @@ ${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.
     }
   });
 };
+
 
 // =========================================================
 // 5. ASISTENTE DE VOZ & PARSER EN LENGUAJE NATURAL
@@ -4483,7 +5000,7 @@ window.initVoiceAssistant = function() {
     return null;
   }
   const recognizer = new SpeechRecognition();
-  recognizer.lang = "es-VE";
+  recognizer.lang = navigator.language || "es-419";
   recognizer.continuous = false;
   recognizer.interimResults = false;
   return recognizer;
@@ -4491,17 +5008,34 @@ window.initVoiceAssistant = function() {
 
 window.toggleSpeechRecognition = function() {
   const micBtn = document.getElementById("jj-mic-btn");
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    if (typeof Swal !== "undefined") {
+      Swal.fire({
+        icon: "warning",
+        title: "Voz no disponible",
+        text: "El reconocimiento por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge."
+      });
+    } else {
+      alert("El dictado por voz no es soportado por este navegador.");
+    }
+    return;
+  }
+
+  // Verificar contexto seguro HTTPS
+  if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    showToast("⚠️ El micrófono requiere conexión segura HTTPS o localhost.");
+  }
+
   if (!speechRecognitionInstance) {
     speechRecognitionInstance = window.initVoiceAssistant();
   }
 
-  if (!speechRecognitionInstance) {
-    alert("El dictado por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge.");
-    return;
-  }
+  if (!speechRecognitionInstance) return;
 
   if (isRecognizingSpeech) {
-    speechRecognitionInstance.stop();
+    try { speechRecognitionInstance.stop(); } catch(e) {}
     isRecognizingSpeech = false;
     if (micBtn) micBtn.classList.remove("listening");
     return;
@@ -4526,7 +5060,15 @@ window.toggleSpeechRecognition = function() {
     isRecognizingSpeech = false;
     if (micBtn) micBtn.classList.remove("listening");
     console.error("Speech recognition error:", event.error);
-    showToast(`Error de micrófono: ${event.error}`);
+    if (event.error === "not-allowed" || event.error === "permission-denied") {
+      showToast("❌ Permiso de micrófono denegado. Habilítalo en los ajustes del navegador.");
+    } else if (event.error === "no-speech") {
+      showToast("⚠️ No se escuchó ninguna voz. Intenta nuevamente.");
+    } else if (event.error === "network") {
+      showToast("⚠️ Error de conexión con el servicio de voz.");
+    } else {
+      showToast(`Error de voz: ${event.error}`);
+    }
   };
 
   speechRecognitionInstance.onend = () => {
@@ -4537,26 +5079,74 @@ window.toggleSpeechRecognition = function() {
   try {
     speechRecognitionInstance.start();
   } catch(e) {
-    console.error(e);
+    console.error("Error iniciando voz:", e);
+    isRecognizingSpeech = false;
+    if (micBtn) micBtn.classList.remove("listening");
+    showToast("⚠️ No se pudo activar el micrófono.");
   }
 };
 
 window.startVoiceDictationForExpress = function() {
+  const micBtn = document.getElementById("express-mic-btn");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
   if (!SpeechRecognition) {
-    alert("Dictado por voz no disponible en este navegador.");
+    if (typeof Swal !== "undefined") {
+      Swal.fire({
+        icon: "warning",
+        title: "Voz no disponible",
+        text: "El reconocimiento por voz no es soportado por este navegador. Te sugerimos usar Google Chrome o Microsoft Edge."
+      });
+    } else {
+      alert("Dictado por voz no disponible en este navegador.");
+    }
     return;
   }
+
+  if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    showToast("⚠️ El micrófono requiere conexión segura HTTPS o localhost.");
+  }
+
   const rec = new SpeechRecognition();
-  rec.lang = "es-VE";
-  rec.start();
-  showToast("🎙️ Escuchando... Dicta nombre y qué necesita.");
+  rec.lang = navigator.language || "es-419";
+  rec.continuous = false;
+  rec.interimResults = false;
+
+  rec.onstart = () => {
+    if (micBtn) micBtn.classList.add("listening");
+    showToast("🎙️ Escuchando... Dicta nombre y qué necesita.");
+  };
 
   rec.onresult = (e) => {
+    if (micBtn) micBtn.classList.remove("listening");
     const text = e.results[0][0].transcript;
     showToast(`Capturado: "${text}"`);
     window.parseAndFillExpressForm(text);
   };
+
+  rec.onerror = (e) => {
+    if (micBtn) micBtn.classList.remove("listening");
+    console.error("Speech recognition error:", e.error);
+    if (e.error === "not-allowed" || e.error === "permission-denied") {
+      showToast("❌ Permiso de micrófono denegado. Habilita los permisos en tu navegador.");
+    } else if (e.error === "no-speech") {
+      showToast("⚠️ No se detectó ninguna voz. Habla más cerca del micrófono.");
+    } else {
+      showToast(`Error de voz: ${e.error}`);
+    }
+  };
+
+  rec.onend = () => {
+    if (micBtn) micBtn.classList.remove("listening");
+  };
+
+  try {
+    rec.start();
+  } catch(e) {
+    console.error(e);
+    if (micBtn) micBtn.classList.remove("listening");
+    showToast("⚠️ No se pudo activar el micrófono. Verifica permisos.");
+  }
 };
 
 // Parser en Lenguaje Natural para estructurar pedidos hablados
@@ -4915,4 +5505,30 @@ window.doLogout = function() {
       showLogin();
     }
   }
+};
+
+
+// =========================================================
+// SICS 2026: NAVEGADOR GLOBAL ENTRE MÓDULOS Y FICHAS
+// =========================================================
+window.navigate = function(screenName) {
+  state.screen = screenName || "modules";
+  state.searchQuery = "";
+  if (typeof render === "function") render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+
+window.addStandardSubItem = function(tipo, cant, det) {
+  const list = document.getElementById("subitems-form-list");
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "subitem-row";
+  row.innerHTML = `
+    <input type="text" list="subitem-tipos-list" class="subitem-form-tipo" placeholder="Tipo" value="${escapeHtml(tipo)}">
+    <input type="number" class="subitem-form-cant" value="${cant || 1}" min="1" placeholder="Cant." style="text-align:center;">
+    <input type="text" class="subitem-form-det subitem-det-col" placeholder="Detalles / Medidas" value="${escapeHtml(det || '')}">
+    <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+  `;
+  list.appendChild(row);
 };
