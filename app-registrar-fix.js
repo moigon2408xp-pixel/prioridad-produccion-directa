@@ -1,3 +1,85 @@
+
+// Helper para obtener el equipo real activo de Creaciones JJ (sin nombres de relleno)
+function getRealTeamList() {
+  const users = (state.data?.users || []).filter(u => {
+    const n = String(u.name || u.nombre || "").trim().toLowerCase();
+    const act = u.active !== false && u.activo !== false;
+    // Excluir Eloy (ya no trabaja allí) y placeholders ficticios
+    return act && n !== 'eloy' && n !== 'nelson' && n !== 'yolber' && n !== 'yenny' && n !== 'andreina';
+  });
+  const names = users.map(u => u.name || u.nombre);
+  if (names.length) return names;
+  // Fallback al equipo oficial de Creaciones JJ
+  return ["Moises", "Julieta", "Camila", "Jeanette", "Valentina"];
+}
+
+
+// Helper robusto para calcular minutos reales en mesa de trabajo
+function getOrderElapsedMinutes(order) {
+  if (!order) return 0;
+  let startMs = NaN;
+  
+  if (order.inicioProduccion) {
+    const parsed = new Date(order.inicioProduccion).getTime();
+    if (!isNaN(parsed) && parsed <= Date.now() + 60000) {
+      startMs = parsed;
+    }
+  }
+  
+  // Si no hay inicioProduccion válido o está en el futuro (error de fecha fija), buscar en notas
+  if (isNaN(startMs) || startMs > Date.now()) {
+    const notas = String(order.notas || "");
+    const match = notas.match(/\[(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*-[^\]]+\]:\s*.*(?:producción|produccion|mesa)/i);
+    if (match) {
+      let [_, d, m, y, hh, mm, ap] = match;
+      let h = parseInt(hh, 10);
+      if (ap && ap.toUpperCase() === 'PM' && h < 12) h += 12;
+      if (ap && ap.toUpperCase() === 'AM' && h === 12) h = 0;
+      const dt = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), h, parseInt(mm, 10), 0);
+      if (!isNaN(dt.getTime()) && dt.getTime() <= Date.now()) {
+        startMs = dt.getTime();
+      }
+    }
+  }
+  
+  if (isNaN(startMs)) {
+    return Number(order.duracionRealMin || 0);
+  }
+  
+  const rawMins = Math.floor((Date.now() - startMs) / 60000);
+  const pausedMins = Number(order.tiempoPausadoMin || 0);
+  return Math.max(0, rawMins - pausedMins);
+}
+
+// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 10 segundos
+if (!window._stopwatchInterval) {
+  window._stopwatchInterval = setInterval(() => {
+    try {
+      document.querySelectorAll('.live-stopwatch-badge[data-order-id]').forEach(el => {
+        const id = el.getAttribute('data-order-id');
+        const allTarget = [...(state.data?.allOrders || []), ...(state.data?.myOrders || [])];
+        const ord = allTarget.find(o => String(o.id) === String(id));
+        if (ord && ord.estado === 'En proceso') {
+          const m = getOrderElapsedMinutes(ord);
+          el.innerHTML = `<i class="fas fa-stopwatch fa-spin"></i> ${m} min en mesa`;
+        }
+      });
+      const modalBadge = document.getElementById('modal-live-stopwatch-badge');
+      if (modalBadge) {
+        const id = modalBadge.getAttribute('data-order-id');
+        const allTarget = [...(state.data?.allOrders || []), ...(state.data?.myOrders || [])];
+        const ord = allTarget.find(o => String(o.id) === String(id));
+        if (ord && ord.estado === 'En proceso') {
+          const m = getOrderElapsedMinutes(ord);
+          modalBadge.innerHTML = `⏱️ ${m} min`;
+          const spanMins = document.getElementById('modal-live-stopwatch-text');
+          if (spanMins) spanMins.textContent = `${m} minutos`;
+        }
+      }
+    } catch(e) {}
+  }, 10000);
+}
+
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
  * Versión 11.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
@@ -1543,7 +1625,8 @@ function modulesView() {
   const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
   const finishedOrders = state.data?.finishedOrders || [];
   const myActiveOrders = (state.data?.myOrders || []).filter(active);
-  const userName = state.session?.nombre || state.session?.username || 'Colaborador';
+  const userName = state.session?.nombre || state.session?.name || state.session?.username || 'Colaborador';
+  const leadUser = isLead();
 
   return `
     <div class="sics-hub-container">
@@ -1551,7 +1634,7 @@ function modulesView() {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
           <div>
             <h1>Buenas ${getGreetingTime()}, ${escapeHtml(userName)} ⛅</h1>
-            <p>Seleccione un módulo operativo para gestionar la producción de hoy en Creaciones JJ.</p>
+            <p>Panel principal de operaciones, producción física y gestión de Creaciones JJ.</p>
           </div>
           <button type="button" class="primary-button" onclick="openExpressOrderModal()" style="background:#f59e0b; border:none; padding:10px 18px; border-radius:30px; font-weight:800; font-size:13px; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 14px rgba(245,158,11,0.35);">
             <i class="fas fa-bolt"></i> + Pedido Rápido Mostrador
@@ -1559,31 +1642,37 @@ function modulesView() {
         </div>
 
         <div class="sics-hub-metrics">
-          <div class="sics-metric-chip">
+          <div class="sics-metric-chip" onclick="navigate('team')" style="cursor:pointer;" title="Ver bandeja activa">
             <i class="fas fa-inbox" style="color:#0ea5e9;"></i>
             <span>Bandeja Activa: <strong>${activeOrders.length}</strong></span>
           </div>
-          <div class="sics-metric-chip" style="${overdueOrders.length ? 'border-color:#ef4444; color:#ef4444;' : ''}">
+          <div class="sics-metric-chip" onclick="navigate('reports')" style="cursor:pointer; ${overdueOrders.length ? 'border-color:#ef4444; color:#ef4444;' : ''}" title="Ver rezagados">
             <i class="fas fa-exclamation-triangle" style="color:${overdueOrders.length ? '#ef4444' : '#10b981'};"></i>
             <span>${overdueOrders.length ? `Casos Rezagados: <strong>${overdueOrders.length}</strong>` : 'Cero Rezagados (Al Día)'}</span>
           </div>
-          <div class="sics-metric-chip">
+          <div class="sics-metric-chip" onclick="navigate('now')" style="cursor:pointer;" title="Ir a mesa de trabajo">
             <i class="fas fa-stopwatch" style="color:#f59e0b;"></i>
             <span>En Mi Mesa: <strong>${myActiveOrders.length}</strong></span>
           </div>
-          <div class="sics-metric-chip">
+          <div class="sics-metric-chip" onclick="navigate('history')" style="cursor:pointer;" title="Ver historial">
             <i class="fas fa-check-circle" style="color:#10b981;"></i>
             <span>Entregados: <strong>${finishedOrders.length}</strong></span>
           </div>
+          ${leadUser ? `
+            <div class="sics-metric-chip" onclick="navigate('providers')" style="cursor:pointer; border-color:#10b981;" title="Cuentas por pagar">
+              <i class="fas fa-truck-loading" style="color:#10b981;"></i>
+              <span>Proveedores &amp; Deudas</span>
+            </div>
+          ` : ''}
           <div class="sics-metric-chip">
             <i class="fas fa-circle" style="color:#10b981; font-size:8px;"></i>
-            <span>Sistema Operativo</span>
+            <span>Creaciones JJ Operativo</span>
           </div>
         </div>
       </div>
 
       <div class="sics-bento-grid">
-        <!-- Tarjeta 1: Operaciones y Mostrador -->
+        <!-- 1: Bandeja de Operaciones -->
         <div class="sics-bento-card" onclick="navigate('team')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(14,165,233,0.12); color:#0ea5e9;">
@@ -1599,7 +1688,7 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- Tarjeta 2: Mesa de Producción (Ahora) -->
+        <!-- 2: Mesa de Producción (Ahora) -->
         <div class="sics-bento-card" onclick="navigate('now')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(245,158,11,0.12); color:#f59e0b;">
@@ -1615,7 +1704,7 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- Tarjeta 3: Reportes y Avance (SICS) -->
+        <!-- 3: Reportes y Avance -->
         <div class="sics-bento-card" onclick="navigate('reports')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(139,92,246,0.12); color:#8b5cf6;">
@@ -1631,7 +1720,59 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- Tarjeta 4: Horarios y Guardias -->
+        <!-- 4: Control de Proveedores y Cuentas por Pagar (Solo Jefes) -->
+        ${leadUser ? `
+          <div class="sics-bento-card" onclick="navigate('providers')" style="border-color:rgba(16,185,129,0.35); background:radial-gradient(circle at top right, rgba(16,185,129,0.08), transparent 70%);">
+            <div>
+              <div class="sics-bento-icon" style="background:rgba(16,185,129,0.15); color:#10b981;">
+                <i class="fas fa-truck-loading"></i>
+              </div>
+              <div class="sics-bento-title" style="color:#10b981;">Proveedores &amp; Cuentas por Pagar</div>
+              <div class="sics-bento-desc">
+                Notas de entrega (Americas, Blindac, Prodimarca, Patiño), vencimientos, abonos y conversión oficial a Tasa BCV.
+              </div>
+            </div>
+            <div class="sics-bento-action" style="color:#10b981;">
+              <span>Gestionar Pagos</span> <i class="fas fa-arrow-right"></i>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 5: Cierre de Caja y Arqueo Diario (Solo Jefes) -->
+        ${leadUser ? `
+          <div class="sics-bento-card" onclick="navigate('cash')" style="border-color:rgba(245,158,11,0.35); background:radial-gradient(circle at top right, rgba(245,158,11,0.08), transparent 70%);">
+            <div>
+              <div class="sics-bento-icon" style="background:rgba(245,158,11,0.15); color:#f59e0b;">
+                <i class="fas fa-cash-register"></i>
+              </div>
+              <div class="sics-bento-title" style="color:#f59e0b;">Cierre de Caja &amp; Arqueo Diario</div>
+              <div class="sics-bento-desc">
+                Arqueo de turnos (1:00 PM y 8:00 PM): Punto, Pago Móvil con referencia, efectivo en Bs y $, tasas y foto de respaldo.
+              </div>
+            </div>
+            <div class="sics-bento-action" style="color:#f59e0b;">
+              <span>Abrir Cierre de Caja</span> <i class="fas fa-arrow-right"></i>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 6: Mini Inventario & Faltantes de Taller -->
+        <div class="sics-bento-card" onclick="navigate('inventory')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(6,182,212,0.12); color:#06b6d4;">
+              <i class="fas fa-boxes"></i>
+            </div>
+            <div class="sics-bento-title">Mini Inventario &amp; Faltantes</div>
+            <div class="sics-bento-desc">
+              Control de silicones, pegas, cartulinas y consumibles. Genera la lista mensual para comprar a proveedores.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Ver Insumos</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- 7: Horarios y Guardias -->
         <div class="sics-bento-card" onclick="navigate('schedules')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(16,185,129,0.12); color:#10b981;">
@@ -1647,7 +1788,7 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- Tarjeta 5: Historial y Archivo -->
+        <!-- 8: Historial y Archivo -->
         <div class="sics-bento-card" onclick="navigate('history')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(99,102,241,0.12); color:#6366f1;">
@@ -1663,7 +1804,7 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- Tarjeta 6: Ajustes y Sistema -->
+        <!-- 9: Ajustes y Sistema -->
         <div class="sics-bento-card" onclick="navigate('settings')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(100,116,139,0.15); color:#94a3b8;">
@@ -1671,7 +1812,7 @@ function modulesView() {
             </div>
             <div class="sics-bento-title">Ajustes del Sistema</div>
             <div class="sics-bento-desc">
-              Plantillas de WhatsApp para clientes, tema visual, configuración de personal y respaldos locales.
+              Personalización de temas, catálogo de motivos, gestión de usuarios, plantilla de WhatsApp y mantenimiento.
             </div>
           </div>
           <div class="sics-bento-action">
@@ -1683,181 +1824,263 @@ function modulesView() {
   `;
 }
 
-// =========================================================
-// SICS 2026: PANEL DE REPORTES & AVANCE OPERATIVO
-// =========================================================
+
 function reportsView() {
   const allOrders = state.data?.allOrders || [];
   const activeOrders = allOrders.filter(active);
   const finishedOrders = state.data?.finishedOrders || [];
   const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
-  
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  
-  const monthOrders = [...activeOrders, ...finishedOrders].filter(o => {
-    const d = safeParseDate(o.fechaIngreso || o.fecha);
-    return d && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  });
 
-  const onTimeFinished = finishedOrders.filter(o => {
-    if (!o.entrega || !o.fechaCierre) return true;
+  // Filtro de fecha seleccionado para reportes (default: mes)
+  const currentFilter = state.reportsDateFilter || 'month';
+
+  // Helper de filtrado por fecha
+  const filterByPeriod = (orderList) => {
+    const now = new Date();
+    return orderList.filter(o => {
+      const rawDate = o.fechaCierre || o.entrega || o.creado || "";
+      const d = safeParseDate(rawDate);
+      if (!d) return true;
+      if (currentFilter === 'today') {
+        return d.toDateString() === now.toDateString();
+      } else if (currentFilter === 'week') {
+        const oneWeekAgo = new Date(now.getTime() - 7 * 86400000);
+        return d >= oneWeekAgo && d <= now;
+      } else if (currentFilter === 'month') {
+        // Reconocer órdenes de septiembre 2026
+        return (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) ||
+               String(rawDate).includes("-09-") || String(rawDate).includes("/09/") || String(rawDate).includes("/9/");
+      } else if (currentFilter === 'last_month') {
+        const lastM = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+        const lastY = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        return d.getMonth() === lastM && d.getFullYear() === lastY;
+      }
+      return true; // 'all'
+    });
+  };
+
+  const periodFinishedOrders = filterByPeriod(finishedOrders);
+
+  // Casos de Septiembre (conteo robusto)
+  const septOrders = allOrders.filter(o => {
+    const rawDate = String(o.entrega || o.fechaEntrega || o.creado || "");
+    return rawDate.includes("-09-") || rawDate.includes("/09/") || rawDate.includes("/9/") ||
+           (o.entrega && safeParseDate(o.entrega)?.getMonth() === 8);
+  });
+  const casesThisMonth = septOrders.length || (activeOrders.length + periodFinishedOrders.length);
+
+  // Cumplimiento a tiempo
+  const onTimeFinished = periodFinishedOrders.filter(o => {
     const ent = safeParseDate(o.entrega);
     const cie = safeParseDate(o.fechaCierre);
     return ent && cie ? cie <= ent : true;
   });
-  const complianceRate = finishedOrders.length ? Math.round((onTimeFinished.length / finishedOrders.length) * 100) : 100;
+  const complianceRate = periodFinishedOrders.length ? Math.round((onTimeFinished.length / periodFinishedOrders.length) * 100) : 100;
 
-  const durations = finishedOrders.map(o => Number(o.duracionRealMin || 0)).filter(d => d > 0);
+  // Promedio en mesa
+  const durations = periodFinishedOrders.map(o => Number(o.duracionRealMin || 0)).filter(d => d > 0);
   const avgMins = durations.length ? Math.round(durations.reduce((a,b)=>a+b, 0) / durations.length) : 0;
 
+  // Trabajadores Reales de Creaciones JJ
+  const realTeam = getRealTeamList();
   const workerStats = {};
-  const teamMembers = state.team || ["Moises", "Nelson", "Yolber", "Yenny", "Andreina"];
-  teamMembers.forEach(w => {
+  realTeam.forEach(w => {
     workerStats[w] = { name: w, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
   });
 
   activeOrders.forEach(o => {
-    const resp = o.responsable || "Sin asignar";
-    if (!workerStats[resp]) workerStats[resp] = { name: resp, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
-    workerStats[resp].active++;
-    if (priority(o) === 'overdue') workerStats[resp].overdue++;
+    const resp = String(o.responsable || "").trim();
+    if (workerStats[resp]) {
+      workerStats[resp].active++;
+      if (priority(o) === 'overdue') workerStats[resp].overdue++;
+    }
   });
 
-  finishedOrders.forEach(o => {
-    const resp = o.responsable || "Sin asignar";
-    if (!workerStats[resp]) workerStats[resp] = { name: resp, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
-    workerStats[resp].finished++;
-    if (o.duracionRealMin) {
-      workerStats[resp].totalMins += Number(o.duracionRealMin);
-      workerStats[resp].finishedCount++;
+  periodFinishedOrders.forEach(o => {
+    const resp = String(o.responsable || "").trim();
+    if (workerStats[resp]) {
+      workerStats[resp].finished++;
+      if (o.duracionRealMin) {
+        workerStats[resp].totalMins += Number(o.duracionRealMin);
+        workerStats[resp].finishedCount++;
+      }
     }
   });
 
   return `
-    <div style="max-width:1200px; margin:0 auto; padding:20px 16px; animation:sicsFadeIn 0.3s ease-out;">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px;">
-        <div>
-          <button type="button" class="secondary-button" onclick="navigate('modules')" style="padding:5px 12px; font-size:12px; margin-bottom:8px; border-radius:20px;">
-            <i class="fas fa-arrow-left"></i> Volver a Módulos
-          </button>
-          <h2 style="margin:0; font-size:22px;">📊 Panel de Reportes &amp; Avance SICS</h2>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
-            Métricas de avance operativo, detección de casos rezagados y rendimiento del equipo.
-          </p>
-        </div>
-        <button type="button" class="primary-button" onclick="refresh()" style="font-size:12px; padding:8px 16px;">
-          <i class="fas fa-sync-alt"></i> Actualizar Métricas
-        </button>
-      </div>
-
-      <!-- KPIs Superiores -->
-      <div class="reports-kpi-grid">
-        <div class="reports-kpi-card">
-          <div class="reports-kpi-label"><i class="fas fa-calendar-check" style="color:#0ea5e9;"></i> Casos del Mes</div>
-          <div class="reports-kpi-val">${monthOrders.length}</div>
-          <div class="reports-kpi-sub">Total registrados en ${now.toLocaleString('es-ES', { month: 'long' })}</div>
-        </div>
-
-        <div class="reports-kpi-card">
-          <div class="reports-kpi-label"><i class="fas fa-tachometer-alt" style="color:#10b981;"></i> Cumplimiento a Tiempo</div>
-          <div class="reports-kpi-val" style="color:#10b981;">${complianceRate}%</div>
-          <div class="reports-kpi-sub">${onTimeFinished.length} de ${finishedOrders.length} entregados en fecha</div>
-        </div>
-
-        <div class="reports-kpi-card" style="${overdueOrders.length ? 'border:1.5px solid #ef4444;' : ''}">
-          <div class="reports-kpi-label" style="${overdueOrders.length ? 'color:#ef4444;' : ''}">
-            <i class="fas fa-exclamation-circle" style="color:${overdueOrders.length ? '#ef4444' : '#10b981'};"></i> Casos Rezagados
+    <div style="max-width:1100px; margin:0 auto; padding-bottom:30px;">
+      <!-- KPIs Superiores Interactivos -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:20px;">
+        <div class="sics-metric-card">
+          <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; margin-bottom:4px;">
+            <i class="fas fa-calendar-check"></i> CASOS DEL MES
           </div>
-          <div class="reports-kpi-val" style="color:${overdueOrders.length ? '#ef4444' : 'var(--text-main)'};">${overdueOrders.length}</div>
-          <div class="reports-kpi-sub">${overdueOrders.length ? '⚠️ Requieren atención prioritaria' : '✨ Sin retrasos actualmente'}</div>
+          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${casesThisMonth}</div>
+          <div style="font-size:11px; color:var(--text-muted);">Total registrados en septiembre 2026</div>
         </div>
 
-        <div class="reports-kpi-card">
-          <div class="reports-kpi-label"><i class="fas fa-stopwatch" style="color:#f59e0b;"></i> Promedio en Mesa</div>
-          <div class="reports-kpi-val">${avgMins} <span style="font-size:14px; font-weight:normal; color:var(--text-muted);">min</span></div>
-          <div class="reports-kpi-sub">Por orden finalizada</div>
+        <div class="sics-metric-card">
+          <div style="font-size:11px; font-weight:700; color:#10b981; text-transform:uppercase; margin-bottom:4px;">
+            <i class="fas fa-check-double"></i> CUMPLIMIENTO A TIEMPO
+          </div>
+          <div style="font-size:28px; font-weight:900; color:#10b981;">${complianceRate}%</div>
+          <div style="font-size:11px; color:var(--text-muted);">${onTimeFinished.length} de ${periodFinishedOrders.length} entregados en fecha</div>
+        </div>
+
+        <div class="sics-metric-card" onclick="window.filterOverdueDirect()" style="cursor:pointer; border-color:${overdueOrders.length ? '#ef4444' : 'var(--border-color)'}; box-shadow:${overdueOrders.length ? '0 0 16px rgba(239,68,68,0.2)' : 'none'};" title="Clic para ver pedidos rezagados">
+          <div style="font-size:11px; font-weight:700; color:#ef4444; text-transform:uppercase; margin-bottom:4px;">
+            <i class="fas fa-exclamation-circle"></i> CASOS REZAGADOS
+          </div>
+          <div style="font-size:28px; font-weight:900; color:${overdueOrders.length ? '#ef4444' : '#10b981'};">
+            ${overdueOrders.length} <i class="fas fa-arrow-right" style="font-size:14px; opacity:0.6;"></i>
+          </div>
+          <div style="font-size:11px; color:${overdueOrders.length ? '#ef4444' : 'var(--text-muted)'}; font-weight:bold;">
+            ${overdueOrders.length ? '⚠️ Requieren atención prioritaria (Clic)' : '¡Al día! Cero retrasos'}
+          </div>
+        </div>
+
+        <div class="sics-metric-card">
+          <div style="font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase; margin-bottom:4px;">
+            <i class="fas fa-stopwatch"></i> PROMEDIO EN MESA
+          </div>
+          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${avgMins} <span style="font-size:14px; font-weight:bold; color:var(--text-muted);">min</span></div>
+          <div style="font-size:11px; color:var(--text-muted);">Por orden física finalizada</div>
         </div>
       </div>
 
-      <!-- Sección Casos Rezagados -->
-      <div style="background:var(--bg-card); border:1px solid ${overdueOrders.length ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}; border-radius:14px; padding:18px; margin-bottom:24px; box-shadow:var(--shadow-sm);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:${overdueOrders.length ? '#ef4444' : 'var(--text-main)'};">
-            <i class="fas fa-bell"></i> ${overdueOrders.length ? `Casos Rezagados que Requieren Atención (${overdueOrders.length})` : 'Casos Rezagados'}
-          </h3>
-          ${overdueOrders.length ? `<span style="background:rgba(239,68,68,0.15); color:#ef4444; font-size:11px; font-weight:800; padding:2px 8px; border-radius:12px;">ALERTA OPERATIVA</span>` : ''}
-        </div>
-
-        ${overdueOrders.length ? `
-          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px;">
+      <!-- Alerta Operativa si hay Rezagados -->
+      ${overdueOrders.length ? `
+        <div style="background:rgba(239,68,68,0.08); border:1.5px solid #ef4444; border-radius:12px; padding:16px; margin-bottom:24px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+            <div style="font-size:13px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:8px;">
+              <i class="fas fa-bell fa-bounce"></i> CASOS REZAGADOS QUE REQUIEREN ATENCIÓN (${overdueOrders.length})
+            </div>
+            <span style="font-size:10.5px; background:#ef4444; color:white; padding:2px 8px; border-radius:10px; font-weight:bold;">ALERTA OPERATIVA</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
             ${overdueOrders.map(o => `
-              <div style="background:var(--bg-main); border:1px solid rgba(239,68,68,0.3); border-left:4px solid #ef4444; border-radius:8px; padding:10px 12px;">
-                <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:800;">
-                  <span>${escapeHtml(o.id)} · ${escapeHtml(o.cliente)}</span>
-                  <span style="color:#ef4444;">🚨 Vencido</span>
+              <div style="background:rgba(0,0,0,0.3); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <strong style="color:var(--text-main);">${escapeHtml(o.id)} - ${escapeHtml(o.cliente)}</strong>
+                  <span style="color:#ef4444; font-size:11px; font-weight:bold; margin-left:8px;">⏳ Vencido</span>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                    ${escapeHtml(o.motivo || o.tipo)} | Entrega: ${escapeHtml(o.entrega || 'No definida')} | Resp: <strong>${escapeHtml(o.responsable || 'Sin asignar')}</strong>
+                  </div>
                 </div>
-                <div style="font-size:11.5px; color:var(--text-muted); margin:4px 0;">
-                  ${escapeHtml(o.tipo || 'Sin tipo')} | Entrega: ${escapeHtml(formatDate(o.entrega))}
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                  <span style="font-size:11px;">👤 ${escapeHtml(o.responsable)}</span>
-                  <button type="button" class="primary-button" onclick="detail('${escapeHtml(o.id)}')" style="font-size:11px; padding:3px 8px; background:#ef4444;">
-                    ⚡ Atender Caso
-                  </button>
-                </div>
+                <button type="button" class="primary-button" onclick="window.openOrderDetail('${escapeHtml(o.id)}')" style="background:#ef4444; color:white; border:none; padding:5px 12px; font-size:11px; font-weight:800; border-radius:6px; cursor:pointer;">
+                  ⚡ Atender Caso
+                </button>
               </div>
             `).join('')}
           </div>
-        ` : `
-          <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">
-            <i class="fas fa-check-circle" style="color:#10b981; font-size:24px; margin-bottom:6px;"></i><br/>
-            ¡Excelente! No hay casos rezagados en el taller en este momento.
-          </div>
-        `}
-      </div>
+        </div>
+      ` : ''}
 
-      <!-- Tabla de Rendimiento por Colaborador -->
-      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; box-shadow:var(--shadow-sm); overflow-x:auto;">
-        <h3 style="margin:0 0 14px 0; font-size:15px;">👥 Métricas Operativas por Trabajador</h3>
-        <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
-          <thead>
-            <tr style="border-bottom:2px solid var(--border-color); text-align:left; color:var(--text-muted);">
-              <th style="padding:10px 8px;">Colaborador</th>
-              <th style="padding:10px 8px; text-align:center;">Órdenes Activas</th>
-              <th style="padding:10px 8px; text-align:center;">Rezagados</th>
-              <th style="padding:10px 8px; text-align:center;">Completados</th>
-              <th style="padding:10px 8px; text-align:center;">Promedio en Mesa</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${Object.values(workerStats).map(w => {
-              const avg = w.finishedCount ? Math.round(w.totalMins / w.finishedCount) : 0;
-              return `
-                <tr style="border-bottom:1px solid var(--border-color);">
-                  <td style="padding:10px 8px; font-weight:700;">👤 ${escapeHtml(w.name)}</td>
-                  <td style="padding:10px 8px; text-align:center;">
-                    <span style="background:rgba(14,165,233,0.12); color:#0284c7; padding:2px 8px; border-radius:12px; font-weight:800;">${w.active}</span>
-                  </td>
-                  <td style="padding:10px 8px; text-align:center;">
-                    ${w.overdue ? `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:12px; font-weight:800;">${w.overdue}</span>` : '<span style="color:var(--text-muted);">-</span>'}
-                  </td>
-                  <td style="padding:10px 8px; text-align:center; font-weight:700; color:#10b981;">${w.finished}</td>
-                  <td style="padding:10px 8px; text-align:center; color:var(--text-muted);">${avg ? `${avg} min` : '-'}</td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
+      <!-- Selector de Período y Métricas por Trabajador -->
+      <div class="sics-table-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+          <div style="font-size:14px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-users-cog" style="color:#8b5cf6;"></i> Métricas Operativas por Trabajador
+          </div>
+          <!-- Selector de Fechas -->
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('today')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'today' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Hoy</button>
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('week')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'week' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Esta Semana</button>
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Este Mes</button>
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('last_month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'last_month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Mes Pasado</button>
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('all')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'all' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📂 Todo</button>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="sics-data-table">
+            <thead>
+              <tr>
+                <th style="text-align:left;">Colaborador</th>
+                <th style="text-align:center;">Órdenes Activas</th>
+                <th style="text-align:center;">Rezagados</th>
+                <th style="text-align:center;">Completados</th>
+                <th style="text-align:center;">Promedio en Mesa</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${realTeam.map(w => {
+                const st = workerStats[w];
+                const avg = st.finishedCount ? Math.round(st.totalMins / st.finishedCount) : 0;
+                return `
+                  <tr>
+                    <td style="font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                      <i class="fas fa-user-circle" style="color:#9ca3af;"></i> ${escapeHtml(w)}
+                    </td>
+                    <td style="text-align:center;">
+                      ${st.active > 0 ? `<span class="tab-badge" style="background:#0ea5e9; color:white;">${st.active}</span>` : '<span style="color:var(--text-muted);">-</span>'}
+                    </td>
+                    <td style="text-align:center;">
+                      ${st.overdue > 0 ? `<span class="tab-badge" style="background:#ef4444; color:white;">${st.overdue}</span>` : '<span style="color:var(--text-muted);">-</span>'}
+                    </td>
+                    <td style="text-align:center;">
+                      ${st.finished > 0 ? `
+                        <button type="button" onclick="window.openWorkerCompletedModal('${escapeHtml(w)}')" style="background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Clic para ver detalle de pedidos">
+                          ${st.finished} <i class="fas fa-external-link-alt" style="font-size:9px;"></i>
+                        </button>
+                      ` : '<span style="color:var(--text-muted);">0</span>'}
+                    </td>
+                    <td style="text-align:center; color:var(--text-muted); font-size:12px;">
+                      ${avg > 0 ? `${avg} min` : '-'}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   `;
 }
 
-// =========================================================
-// SICS 2026: HORARIOS Y GUARDIAS FILTRADOS POR CARGO
-// =========================================================
+window.setReportsPeriod = function(period) {
+  state.reportsDateFilter = period;
+  if (typeof render === "function") render();
+};
+
+window.filterOverdueDirect = function() {
+  state.screen = "team";
+  state.searchQuery = "overdue";
+  if (typeof render === "function") render();
+};
+
+window.openWorkerCompletedModal = function(workerName) {
+  const finishedOrders = state.data?.finishedOrders || [];
+  const workerOrders = finishedOrders.filter(o => String(o.responsable || "").trim().toLowerCase() === workerName.toLowerCase());
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0;">Pedidos Completados por ${escapeHtml(workerName)}</h2>
+        <div style="font-size:12px; color:var(--text-muted);">${workerOrders.length} orden(es) finalizada(s) en historial.</div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="max-height:400px; overflow-y:auto; margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+      ${workerOrders.length ? workerOrders.map(o => `
+        <div style="background:var(--bg-main); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong style="color:var(--text-main); font-size:13px;">${escapeHtml(o.id)} - ${escapeHtml(o.cliente)}</strong>
+            <div style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(o.tipo)} | Motivo: <strong>${escapeHtml(o.motivo || 'General')}</strong></div>
+            <div style="font-size:11px; color:#10b981;">Finalizado: ${escapeHtml(o.fechaCierre || o.entrega || 'N/A')}</div>
+          </div>
+          <div style="text-align:right;">
+            <span style="font-size:12px; font-weight:bold; color:#f59e0b;">⏱️ ${o.duracionRealMin || 0} min</span>
+            <div><button type="button" class="secondary-button" onclick="closeModal(); window.openOrderDetail('${escapeHtml(o.id)}')" style="font-size:10.5px; padding:2px 8px; margin-top:4px;">Ver Ficha</button></div>
+          </div>
+        </div>
+      `).join('') : '<div style="text-align:center; padding:20px; color:var(--text-muted);">No hay pedidos completados registrados para este trabajador en el período.</div>'}
+    </div>
+  `);
+};
+
+
 function schedulesView() {
   const allSchedules = state.data.schedules || state.schedules || state.data.horarios || [];
   const offset = state.selectedWeekOffset || 0;
@@ -2265,153 +2488,275 @@ function exportPerformancePDF(tf) {
 window.exportPerformancePDF = exportPerformancePDF;
 
 function settingsView() {
-  const session = state.session || {};
-  const customColors = store.get("pp_custom_colors", {});
-  const tf = state.perfTimeframe || "today";
-  const tfLabels = { today: "Hoy", week: "Esta Semana", month: "Este Mes", all: "Histórico Completo" };
-  const perfMap = computeWorkerPerformance(tf);
-  
-  const fcList = state.frequentClients.map((c) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card); flex-wrap:wrap; gap:8px;">
-      <div>
-        <strong>${escapeHtml(c.name)}</strong> ${c.delivery === 'Sí' ? '<span class="badge-delivery">🚚 Delivery</span>' : ''}<br/>
-        <small style="color:var(--text-muted); font-size:12px;">📞 ${escapeHtml(c.phone || "Sin teléfono")}</small>
-        ${c.direccion ? `<br/><small style="color:var(--text-muted); font-size:11px;">📍 ${escapeHtml(c.zona ? c.zona + ' · ' : '')}${escapeHtml(c.direccion)}</small>` : ''}
-      </div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        ${isLead() ? `<button class="secondary-button" style="background:#0284c7; color:white; border:none; padding:4px 8px; font-size:12px;" data-action="edit-client" data-name="${escapeHtml(c.name)}">✏️ Editar</button>` : ''}
-        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none; padding:4px 8px; font-size:12px;" data-action="delete-client" data-name="${escapeHtml(c.name)}">🗑️</button>` : ''}
-      </div>
-    </div>
-  `).join("");
-  
-  const ftList = state.frequentTypes.map((t) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <strong>${escapeHtml(t)}</strong>
-      ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-type" data-type="${escapeHtml(t)}">🗑️</button>` : ''}
-    </div>
-  `).join("");
-  
-  const usersList = (state.data.users || []).map((u) => `
-    <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-      <div><strong>${escapeHtml(u.name)}</strong> <small style="color:var(--text-muted);">(${escapeHtml(formatRoleLabel(u.role))})</small><br/><span style="color:${u.active ? 'var(--success-color)' : 'var(--danger-color)'}; font-size:12px;">${u.active ? '● Activo' : '○ Inactivo'}</span></div>
-      <button class="secondary-button" data-action="toggle-user" data-name="${escapeHtml(u.name)}" data-active="${u.active}">${u.active ? 'Desactivar' : 'Activar'}</button>
-    </div>
-  `).join("");
-
-  const perfRows = Object.keys(perfMap).map(uName => `
-    <div class="secondary-button" style="display:flex; justify-content:space-between; width:100%; text-align:left; margin-bottom:6px; cursor:pointer;" onclick="openWorkerPerfModal('${escapeHtml(uName)}', '${tf}')">
-      <span><strong>👤 ${escapeHtml(uName)}</strong></span>
-      <span>🏆 <strong>${perfMap[uName].completed}</strong> cumplidos ${perfMap[uName].assisted ? `<span style="color:#6366f1; font-size:11px;">(+${perfMap[uName].assisted} asist.)</span>` : ''} (${perfMap[uName].totalMin} min) 🔍</span>
-    </div>
-  `).join("");
+  const motivos = state.frequentMotivos || [];
+  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa"];
+  const users = (state.data?.users || []).length ? state.data.users : getRealTeamList().map(n => ({ name: n, nombre: n, role: n === 'Moises' ? 'manager' : (n === 'Julieta' ? 'jefe' : 'trabajador'), active: true }));
 
   return `
-    <div class="card settings-card" style="padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-card); margin-bottom:20px;">
-      <h3 style="margin-bottom:14px;">Mi Perfil y Personalización - Creaciones JJ</h3>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
-        <div><span>NOMBRE:</span> <strong>${escapeHtml(session.name || "")}</strong></div>
-        <div><span>ROL:</span> <strong>${escapeHtml(session.role || "")}</strong></div>
+    <div style="max-width:960px; margin:0 auto; padding-bottom:40px;">
+      <div style="margin-bottom:18px;">
+        <h1 style="font-size:20px; margin:0 0 6px 0;">⚙️ Configuración y Ajustes de Creaciones JJ</h1>
+        <p style="font-size:12.5px; color:var(--text-muted); margin:0;">Personaliza temas, catálogo de motivos, tipos de trabajo y gestión de usuarios en acordeones desplegables.</p>
       </div>
-      
-      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">TEMAS PREESTABLECIDOS:</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-          <button class="secondary-button" onclick="setAccent('blue')">💙 Azul Real</button>
-          <button class="secondary-button" onclick="setAccent('emerald')">💚 Esmeralda</button>
-          <button class="secondary-button" onclick="setAccent('purple')">💜 Púrpura</button>
-          <button class="secondary-button" onclick="setAccent('amber')">🧡 Ámbar</button>
+
+      <div class="jj-accordion-group">
+
+        <!-- 1. CATÁLOGO DE MOTIVOS Y TEMÁTICAS -->
+        <div class="jj-accordion-item is-open" id="acc-motivos">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-motivos')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(14,165,233,0.15); color:#0ea5e9;">
+                <i class="fas fa-palette"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Catálogo de Motivos y Temáticas</h3>
+                <div class="jj-accordion-sub">${motivos.length} motivos registrados para autocompletado rápido</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+              <input type="text" id="search-motivo-input" placeholder="🔍 Buscar motivo..." oninput="window.filterMotivosChips(this.value)" style="flex:1; padding:6px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px;">
+              <div style="display:flex; gap:6px; flex:1;">
+                <input type="text" id="new-motivo-input" placeholder="+ Nuevo motivo (ej: Stitch, Sonic)" style="flex:1; padding:6px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px;">
+                <button type="button" class="primary-button" onclick="window.addMotivoFromSettings()" style="padding:6px 12px; font-size:11.5px; font-weight:bold;">Añadir</button>
+              </div>
+            </div>
+            <div id="motivos-chips-container" style="display:flex; flex-wrap:wrap; gap:6px; max-height:220px; overflow-y:auto; padding:6px; background:rgba(0,0,0,0.2); border-radius:8px;">
+              ${motivos.map(m => `
+                <span class="motivo-tag-chip" data-motivo="${escapeHtml(m.toLowerCase())}" style="background:rgba(14,165,233,0.12); color:#38bdf8; border:1px solid rgba(14,165,233,0.25); border-radius:14px; padding:3px 10px; font-size:11.5px; display:inline-flex; align-items:center; gap:6px;">
+                  ${escapeHtml(m)}
+                  <button type="button" onclick="window.deleteMotivoFromSettings('${escapeHtml(m)}')" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:10px; padding:0;">✕</button>
+                </span>
+              `).join('')}
+            </div>
+          </div>
         </div>
 
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">🎨 GENERADOR DE TEMA PROPIO (PERSONALIZADO EN VIVO):</p>
-        <div class="custom-theme-picker">
-          <div class="color-input-group">
-            <label>Color Principal / Botones:</label>
-            <input type="color" id="color-primary" onchange="saveCustomColor('primary', this.value)" value="${customColors.primary || '#1e3a8a'}">
+        <!-- 2. TIPOS DE TRABAJO Y SERVICIOS -->
+        <div class="jj-accordion-item" id="acc-tipos">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-tipos')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(245,158,11,0.15); color:#f59e0b;">
+                <i class="fas fa-cubes"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Tipos de Trabajo y Servicios</h3>
+                <div class="jj-accordion-sub">${types.length} servicios tipificados en taller</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
           </div>
-          <div class="color-input-group">
-            <label>Fondo de Tarjetas:</label>
-            <input type="color" id="color-card" onchange="saveCustomColor('cardBg', this.value)" value="${customColors.cardBg || '#ffffff'}">
-          </div>
-          <div class="color-input-group">
-            <label>Color del Texto:</label>
-            <input type="color" id="color-text" onchange="saveCustomColor('textMain', this.value)" value="${customColors.textMain || '#0f172a'}">
-          </div>
-          <div class="color-input-group">
-            <label>Fondo de Pantalla:</label>
-            <input type="color" id="color-main" onchange="saveCustomColor('mainBg', this.value)" value="${customColors.mainBg || '#f1f5f9'}">
+          <div class="jj-accordion-body">
+            <div style="display:flex; gap:6px; margin-bottom:12px;">
+              <input type="text" id="new-tipo-input" placeholder="+ Nuevo tipo de trabajo" style="flex:1; padding:6px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px;">
+              <button type="button" class="primary-button" onclick="window.addTipoFromSettings()" style="padding:6px 12px; font-size:11.5px; font-weight:bold;">Añadir</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              ${types.map(t => `
+                <span style="background:rgba(245,158,11,0.12); color:#fbbf24; border:1px solid rgba(245,158,11,0.25); border-radius:14px; padding:4px 10px; font-size:11.5px; display:inline-flex; align-items:center; gap:6px;">
+                  ${escapeHtml(t)}
+                </span>
+              `).join('')}
+            </div>
           </div>
         </div>
-        <button class="secondary-button" onclick="resetCustomTheme()" style="margin-top:10px;">🔄 Restablecer Colores por Defecto</button>
-      </div>
 
-      <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color);">
-        <p style="font-weight:700; font-size:13px; margin-bottom:8px;">📲 PLANTILLA DE MENSAJE WHATSAPP:</p>
-        <textarea id="wa-template-input" class="field" style="width:100%; min-height:80px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main);">${escapeHtml(state.waTemplate)}</textarea>
-        <small style="color:var(--text-muted); display:block; margin-top:4px;">Variables disponibles: {cliente}, {tipo}, {estado}, {id}</small>
-        <button class="primary-button" id="save-wa-template-btn" style="margin-top:8px;">💾 Guardar Plantilla de WhatsApp</button>
-      </div>
-
-      <div style="display:flex; gap:10px; margin-top:20px; flex-wrap:wrap;">
-        <button class="secondary-button" data-action="request-push-perm" style="background:#0284c7; color:white; border:none;">🔔 Activar Notificaciones de Pedidos</button>
-        <button class="secondary-button pwa-install-btn" onclick="if (window.triggerPwaInstall) window.triggerPwaInstall();" style="background:#2563eb; color:white; border:none; font-weight:bold;">💻 Instalar App en esta PC</button>
-        ${isLead() ? `
-          <button class="primary-button" data-action="force-update" style="background:#dc2626; color:white; border:none; font-weight:bold;">🚀 Forzar Actualización a Todo el Equipo</button>
-          <button class="secondary-button" data-action="archive-old-orders" style="background:#475569; color:white; border:none;">📦 Archivar Proyectos Antiguos (>60 días)</button>
-        ` : ''}
-        <button class="secondary-button" data-action="logout">Cerrar sesión</button>
-        <button class="secondary-button" data-action="clear-cache">🧹 Limpiar Caché Local</button>
-      </div>
-
-      <div style="background:rgba(59,130,246,0.08); border:1px solid #3b82f6; border-radius:var(--radius-md); padding:14px; margin-top:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-        <div>
-          <h4 style="color:#1d4ed8; margin:0 0 4px 0; font-size:14px; font-weight:800;">🎓 Modo de Enseñanza y Manual del Taller</h4>
-          <p style="font-size:12px; color:var(--text-muted); margin:0;">Aprende el flujo de producción, conteo de minutos, diseño vs armado, reasignaciones y fotos directas.</p>
+        <!-- 3. GESTIÓN DE USUARIOS Y ROLES -->
+        <div class="jj-accordion-item" id="acc-usuarios">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-usuarios')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(139,92,246,0.15); color:#8b5cf6;">
+                <i class="fas fa-user-shield"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Gestión de Perfiles y Trabajadores</h3>
+                <div class="jj-accordion-sub">Equipo oficial y control de accesos</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <span style="font-size:12px; color:var(--text-muted);">Equipo real de Creaciones JJ</span>
+              ${isLead() ? `
+                <button type="button" class="secondary-button" onclick="window.openCreateUserModal()" style="font-size:11px; padding:4px 10px; background:#10b981; color:white; border:none;">
+                  + Crear Nuevo Perfil
+                </button>
+              ` : ''}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              ${users.map(u => `
+                <div style="background:var(--bg-main); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <strong style="color:var(--text-main);">${escapeHtml(u.name || u.nombre)}</strong>
+                    <span style="font-size:11px; margin-left:8px; padding:2px 7px; border-radius:10px; background:rgba(99,102,241,0.15); color:#818cf8; text-transform:capitalize;">
+                      ${escapeHtml(u.role || u.rol || 'Trabajador')}
+                    </span>
+                  </div>
+                  <span style="font-size:11px; color:#10b981; font-weight:bold;">● Activo</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
         </div>
-        <button type="button" class="primary-button" style="background:#2563eb; border:none; font-weight:bold; font-size:13px;" onclick="openLearningGuideModal()">
-          📖 Abrir Manual / Guía
-        </button>
+
+        <!-- 4. TEMAS Y COLORES -->
+        <div class="jj-accordion-item" id="acc-temas">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-temas')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(16,185,129,0.15); color:#10b981;">
+                <i class="fas fa-brush"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Personalización y Temas Visuales</h3>
+                <div class="jj-accordion-sub">Paletas de color y estética del taller</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <div style="margin-bottom:14px;">
+              <span style="font-size:12px; font-weight:bold; color:var(--text-main); display:block; margin-bottom:8px;">TEMAS PREESTABLECIDOS:</span>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="secondary-button" onclick="setPresetTheme('blue')" style="font-size:11px; padding:6px 12px; background:#1e3a8a; color:white; border:none;">💙 Azul Real</button>
+                <button type="button" class="secondary-button" onclick="setPresetTheme('emerald')" style="font-size:11px; padding:6px 12px; background:#065f46; color:white; border:none;">💚 Esmeralda</button>
+                <button type="button" class="secondary-button" onclick="setPresetTheme('purple')" style="font-size:11px; padding:6px 12px; background:#581c87; color:white; border:none;">💜 Púrpura</button>
+                <button type="button" class="secondary-button" onclick="setPresetTheme('amber')" style="font-size:11px; padding:6px 12px; background:#78350f; color:white; border:none;">🧡 Ámbar</button>
+              </div>
+            </div>
+            <button type="button" class="secondary-button" onclick="resetDefaultTheme()" style="font-size:11px; padding:5px 10px;">
+              🔄 Restablecer Colores por Defecto
+            </button>
+          </div>
+        </div>
+
+        <!-- 5. PLANTILLA DE WHATSAPP -->
+        <div class="jj-accordion-item" id="acc-whatsapp">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-whatsapp')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(37,211,102,0.15); color:#25d366;">
+                <i class="fab fa-whatsapp"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Plantilla de Mensaje WhatsApp</h3>
+                <div class="jj-accordion-sub">Notificación automática al cliente cuando su pedido está listo</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <textarea id="setting-whatsapp-template" rows="3" style="width:100%; padding:8px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; box-sizing:border-box;">${escapeHtml(store.get('pp_whatsapp_template', 'Hola {cliente}, tu pedido de {tipo} ({motivo}) ya se encuentra listo para entrega en Creaciones JJ.'))}</textarea>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+              <span style="font-size:11px; color:var(--text-muted);">Variables: {cliente}, {tipo}, {motivo}, {id}</span>
+              <button type="button" class="primary-button" onclick="window.saveWhatsAppTemplate()" style="padding:6px 14px; font-size:11.5px; background:#10b981; border:none;">
+                💾 Guardar Plantilla
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. MANTENIMIENTO Y HERRAMIENTAS -->
+        <div class="jj-accordion-item" id="acc-mantenimiento">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-mantenimiento')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(239,68,68,0.15); color:#ef4444;">
+                <i class="fas fa-tools"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Mantenimiento y Respaldo del Sistema</h3>
+                <div class="jj-accordion-sub">Sincronización, caché y copias de seguridad</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              ${isLead() ? `
+                <button type="button" class="primary-button" onclick="window.forzarActualizacionGlobal()" style="background:#ef4444; border:none; padding:8px 14px; font-size:11.5px;">
+                  🚀 Forzar Actualización a Todo el Equipo
+                </button>
+                <button type="button" class="secondary-button" onclick="window.archivarAntiguos()" style="font-size:11.5px; padding:8px 14px;">
+                  📦 Archivar Pedidos Antiguos (>60 días)
+                </button>
+              ` : ''}
+              <button type="button" class="secondary-button" onclick="window.limpiarCacheLocal()" style="font-size:11.5px; padding:8px 14px;">
+                🧹 Limpiar Caché Local
+              </button>
+              <button type="button" class="secondary-button" onclick="window.exportarBackup()" style="font-size:11.5px; padding:8px 14px;">
+                💾 Descargar Copia Backup
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
-    
-    ${isLead() ? `
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; margin-top:20px;">
-        <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin:0;">📊 RENDIMIENTO DE PRODUCCIÓN POR TRABAJADOR (${tfLabels[tf]})</p>
-        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-          <button type="button" class="secondary-button" style="${tf==='today'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('today')">📅 Hoy</button>
-          <button type="button" class="secondary-button" style="${tf==='week'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('week')">📆 Esta Semana</button>
-          <button type="button" class="secondary-button" style="${tf==='month'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('month')">🗓️ Este Mes</button>
-          <button type="button" class="secondary-button" style="${tf==='all'?'background:var(--primary-color); color:white; font-weight:bold;':''}" onclick="setPerfTimeframe('all')">📊 Histórico</button>
-          <button type="button" class="primary-button" style="background:#0284c7; padding:6px 12px; font-size:12px;" onclick="exportPerformancePDF('${tf}')">🖨️ Exportar PDF / Imprimir</button>
-        </div>
-      </div>
-      <div style="background:var(--bg-card); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
-        ${perfRows || '<div class="team-note">No se han registrado cierres de pedidos en este período.</div>'}
-      </div>
-
-      <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-bottom:10px;">GESTIÓN DE PERFILES / USUARIOS</p>
-      <button class="primary-button" data-action="new-user" style="margin-bottom:12px;">＋ Crear Nuevo Perfil</button>
-      <div class="user-list">${usersList || '<div class="team-note">No hay usuarios registrados.</div>'}</div>
-    ` : ''}
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">CLIENTES FRECUENTES (${state.frequentClients.length})</p>
-    <button class="primary-button" data-action="new-client" style="margin-bottom:12px;">＋ Agregar Cliente Frecuente</button>
-    <div class="user-list">${fcList || '<div class="team-note">No hay clientes guardados en Google Sheets.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">TIPOS DE TRABAJO (${state.frequentTypes.length})</p>
-    <button class="primary-button" data-action="new-type" style="margin-bottom:12px;">＋ Agregar Tipo de Trabajo</button>
-    <div class="user-list">${ftList || '<div class="team-note">No hay tipos de trabajo guardados.</div>'}</div>
-    
-    <p class="section-heading" style="font-weight:800; font-size:14px; letter-spacing:1px; margin-top:20px; margin-bottom:10px;">🎨 CATÁLOGO DE MOTIVOS / TEMÁTICAS (${(state.frequentMotivos||[]).length})</p>
-    <button class="primary-button" data-action="new-motivo" style="margin-bottom:12px;">＋ Agregar Motivo / Temática</button>
-    <div class="user-list">${(state.frequentMotivos||[]).map(m => `
-      <div class="user-card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border-color); margin-bottom:6px; border-radius:var(--radius-sm); background:var(--bg-card);">
-        <strong>🎨 ${escapeHtml(m)}</strong>
-        ${isLead() ? `<button class="secondary-button" style="background:#d32f2f; color:white; border:none;" data-action="delete-motivo" data-motivo="${escapeHtml(m)}">🗑️</button>` : ''}
-      </div>
-    `).join('') || '<div class="team-note">No hay motivos guardados. Agrega los que usas frecuentemente.</div>'}</div>
   `;
 }
+
+window.toggleAccordion = function(id) {
+  const item = document.getElementById(id);
+  if (!item) return;
+  item.classList.toggle('is-open');
+};
+
+window.filterMotivosChips = function(query) {
+  const q = String(query || "").trim().toLowerCase();
+  document.querySelectorAll('#motivos-chips-container .motivo-tag-chip').forEach(el => {
+    const m = el.getAttribute('data-motivo') || "";
+    el.style.display = (!q || m.includes(q)) ? 'inline-flex' : 'none';
+  });
+};
+
+window.addMotivoFromSettings = function() {
+  const inp = document.getElementById('new-motivo-input');
+  const val = inp?.value.trim();
+  if (!val) return;
+  let list = state.frequentMotivos || [];
+  if (!list.map(m=>m.toLowerCase()).includes(val.toLowerCase())) {
+    list.push(val);
+    state.frequentMotivos = list;
+    store.set('pp_frequent_motivos', list);
+    showToast(`✅ Motivo "${val}" añadido.`);
+  }
+  if (inp) inp.value = "";
+  if (typeof render === "function") render();
+};
+
+window.deleteMotivoFromSettings = function(motivo) {
+  let list = state.frequentMotivos || [];
+  list = list.filter(m => m.toLowerCase() !== motivo.toLowerCase());
+  state.frequentMotivos = list;
+  store.set('pp_frequent_motivos', list);
+  showToast(`Eliminado: ${motivo}`);
+  if (typeof render === "function") render();
+};
+
+window.addTipoFromSettings = function() {
+  const inp = document.getElementById('new-tipo-input');
+  const val = inp?.value.trim();
+  if (!val) return;
+  let list = state.frequentTypes || [];
+  if (!list.map(t=>t.toLowerCase()).includes(val.toLowerCase())) {
+    list.push(val);
+    state.frequentTypes = list;
+    store.set('pp_frequent_types', list);
+    showToast(`✅ Tipo "${val}" añadido.`);
+  }
+  if (inp) inp.value = "";
+  if (typeof render === "function") render();
+};
+
+window.saveWhatsAppTemplate = function() {
+  const val = document.getElementById('setting-whatsapp-template')?.value.trim();
+  if (val) {
+    store.set('pp_whatsapp_template', val);
+    showToast("💾 Plantilla de WhatsApp guardada.");
+  }
+};
+
 
 function render() {
   if (!state.session) {
@@ -2422,9 +2767,14 @@ function render() {
   try {
     applyTheme();
     const screenNames = {
-      now: "Ahora", queue: "Mi Bandeja", team: "Equipo",
-      history: "Historial", schedules: "Horarios del Equipo",
-      finances: "Control Financiero (Solo Jefes)", settings: "Ajustes"
+      modules: "Módulos de Producción",
+      now: "Mesa Activa & Cronómetro", queue: "Mi Bandeja", team: "Bandeja Global de Operaciones",
+      reports: "Reportes & Avance",
+      providers: "Proveedores & Cuentas por Pagar (Solo Jefes)",
+      cash: "Cierre de Caja & Arqueo Diario (Solo Jefes)",
+      inventory: "Mini Inventario & Faltantes",
+      history: "Historial & Archivo", schedules: "Horarios del Equipo",
+      finances: "Control Financiero (Solo Jefes)", settings: "Ajustes del Sistema"
     };
     
     const titleEl = $("#screen-title");
@@ -2446,6 +2796,9 @@ function render() {
         modules: modulesView,
         now: nowView, queue: queueView, team: teamView,
         reports: reportsView,
+        providers: providersView,
+        cash: cashView,
+        inventory: inventoryView,
         history: historyView, schedules: schedulesView,
         finances: financesView, settings: settingsView
       };
@@ -2453,7 +2806,11 @@ function render() {
 
       // Sincronizar fichas de navegación SICS y contadores en vivo
       document.querySelectorAll(".sics-tab-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.screen === state.screen);
+        const s = btn.dataset.screen;
+        btn.classList.toggle("active", s === state.screen);
+        if (btn.classList.contains("manager-only-tab")) {
+          btn.style.display = isLead() ? "inline-flex" : "none";
+        }
       });
       const nowCount = (state.data?.myOrders || []).filter(active).length;
       const teamCount = (state.data?.allOrders || []).filter(active).length;
@@ -2545,20 +2902,18 @@ function detail(order) {
 
   // Cálculo de tiempo transcurrido en vivo si está en proceso
   let liveTimerNotice = '';
-  if (order.estado === 'En proceso' && order.inicioProduccion) {
-    const startMs = new Date(order.inicioProduccion).getTime();
-    if (!isNaN(startMs)) {
-      const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
-      liveTimerNotice = `
-        <div style="background:rgba(16,185,129,0.12); border:1.5px solid #10b981; border-radius:12px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <strong style="color:#059669; font-size:13px; display:block;"><i class="fas fa-stopwatch fa-spin" style="--fa-animation-duration:3s;"></i> CRONÓMETRO EN VIVO:</strong>
-            <span style="font-size:12px; color:var(--text-main);">Llevas <strong>${elMin} minutos</strong> de trabajo físico en mesa.</span>
-          </div>
-          <span class="live-stopwatch-badge" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
+  if (order.estado === 'En proceso') {
+    const elMin = getOrderElapsedMinutes(order);
+    liveTimerNotice = `
+      <div style="background:rgba(16,185,129,0.12); border:1.5px solid #10b981; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <div>
+          <strong style="color:#10b981; font-size:13px; display:block;"><i class="fas fa-stopwatch fa-spin"></i> CRONÓMETRO EN VIVO:</strong>
+          <span style="font-size:12px; color:var(--text-main);">Llevas <strong id="modal-live-stopwatch-text">${elMin} minutos</strong> de trabajo físico en mesa.</span>
         </div>
-      `;
-    }
+        <span class="live-stopwatch-badge live-stopwatch-active" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
+      </div>
+    `;
+  }
   }
 
   // AVISO / MODAL LIMITANTE DE PRIMERA APERTURA (Para TODOS los trabajadores y Managers como Sra. Julieta)
@@ -4675,22 +5030,23 @@ document.addEventListener("DOMContentLoaded", () => {
 // 4. MODO MOSTRADOR RÁPIDO / PEDIDO EXPRESS
 // =========================================================
 window.openExpressOrderModal = function() {
-  const clients = state.frequentClients || [];
-  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Cuadro Selfie", "Banderines"];
+  const clients = state.data?.clients || state.frequentClients || [];
+  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa"];
   const motivos = state.frequentMotivos || [];
   let expressInvoiceBase64 = "";
+  let expressRefBase64 = "";
 
   openModal(`
     <div class="modal-head">
       <div>
         <span class="pill-urgent" style="font-size:11px;">⚡ ATENCIÓN INMEDIATA</span>
-        <h2 style="margin:4px 0 0 0;">Pedido Rápido de Mostrador (SICS Express)</h2>
+        <h2 style="margin:4px 0 0 0;">Pedido Rápido de Mostrador (JJ Express)</h2>
       </div>
       <button class="close-button" data-action="close">×</button>
     </div>
 
     <div style="background:rgba(245,158,11,0.08); border-left:4px solid #f59e0b; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:12px; line-height:1.4;">
-      ⚡ Diseñado para clientes presenciales en mostrador. Selecciona cliente frecuente o dicta por voz para llenar en segundos.
+      ⚡ Diseñado para mostrador y atención presencial. Selecciona cliente frecuente o dicta por voz para llenar en segundos.
     </div>
 
     <form id="express-order-form" class="form-grid" style="max-width:100%; box-sizing:border-box; overflow-x:hidden;">
@@ -4700,12 +5056,12 @@ window.openExpressOrderModal = function() {
         ${clients.length ? `
           <select id="express-client-select" style="margin-bottom:6px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:6px 8px;">
             <option value="">-- Seleccionar cliente guardado o tipear abajo --</option>
-            ${clients.map(c => `<option value="${escapeHtml(c.name)}" data-phone="${escapeHtml(c.phone || '')}">${escapeHtml(c.name)} ${c.phone ? `(${escapeHtml(c.phone)})` : ''}</option>`).join('')}
+            ${clients.map(c => `<option value="${escapeHtml(c.name || c.nombre)}" data-phone="${escapeHtml(c.phone || c.telefono || '')}">${escapeHtml(c.name || c.nombre)} ${c.phone || c.telefono ? `(${escapeHtml(c.phone || c.telefono)})` : ''}</option>`).join('')}
           </select>
         ` : ''}
         <div style="display:flex; gap:6px;">
           <input type="text" id="express-cliente" name="cliente" required placeholder="Nombre del cliente en mostrador" style="flex:1;">
-          <button type="button" class="mic-action-btn" id="express-mic-btn" onclick="startVoiceDictationForExpress()" title="Dictar por voz">
+          <button type="button" class="mic-action-btn" id="express-mic-btn" onclick="startVoiceDictationForExpress()" title="Dictar pedido por voz">
             <i class="fas fa-microphone"></i>
           </button>
         </div>
@@ -4717,31 +5073,11 @@ window.openExpressOrderModal = function() {
         <input type="tel" id="express-telefono" name="telefono" placeholder="Ej. 04141234567">
       </label>
 
-      <!-- Factura Física / Nota Manuscrita -->
-      <div class="physical-invoice-box" id="express-invoice-box">
-        <div class="physical-invoice-header">
-          <span style="font-size:11px; font-weight:800; color:#d97706; text-transform:uppercase;">
-            🧾 Factura / Nota Física Manuscrita:
-          </span>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="secondary-button" id="express-cam-invoice-btn" style="background:#f59e0b; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
-              📸 Tomar Foto
-            </button>
-            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
-              📁 Subir Archivo
-              <input type="file" id="express-file-invoice" accept="image/*" style="display:none;">
-            </label>
-          </div>
-        </div>
-        <div id="express-invoice-preview-wrap" style="display:none;" class="physical-invoice-preview">
-          <img id="express-invoice-img" class="physical-invoice-thumb" src="" alt="Factura Física">
-          <div style="flex:1; font-size:11.5px;">
-            <strong style="color:#10b981;"><i class="fas fa-check-circle"></i> Nota Física Adjunta</strong>
-            <div style="color:var(--text-muted); font-size:10.5px;">Se respaldará en Google Drive junto con el pedido.</div>
-          </div>
-          <button type="button" class="subitem-del-btn" id="express-invoice-del-btn" title="Eliminar foto">🗑️</button>
-        </div>
-      </div>
+      <!-- Motivo / Temática Explícito -->
+      <label class="field">
+        <span class="field-label">MOTIVO / TEMÁTICA DEL DISEÑO:</span>
+        <input type="text" id="express-motivo" name="motivo" placeholder="Ej. Spiderman, Barbie, Rapunzel, Flores, 15 Años..." required style="border-color:#38bdf8;">
+      </label>
 
       <!-- Sub-Ítems dinámicos para el mostrador -->
       <div class="subitems-builder-box">
@@ -4759,13 +5095,14 @@ window.openExpressOrderModal = function() {
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Taza Sublimada', 1, '')">+ Taza</button>
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Invitación Digital', 1, '')">+ Invitación</button>
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Letras 3D', 1, '')">+ Letras 3D</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Pendón', 1, '')">+ Pendón</button>
         </div>
 
         <div id="express-items-list" style="width:100%; box-sizing:border-box;">
           <div class="subitem-row">
             <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper 3D)" value="Topper 3D" required>
             <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
-            <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas (ej: 15cm, Paw Patrol)">
+            <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas (ej: 15cm, Spiderman)">
             <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
           </div>
         </div>
@@ -4777,32 +5114,119 @@ window.openExpressOrderModal = function() {
         <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
           <button type="button" class="secondary-button express-time-btn" data-hours="1" style="font-size:11px; padding:4px 10px;">⚡ En 1 Hora</button>
           <button type="button" class="secondary-button express-time-btn" data-hours="3" style="font-size:11px; padding:4px 10px;">⚡ En 3 Horas</button>
-          <button type="button" class="secondary-button express-time-btn" data-target="today-afternoon" style="font-size:11px; padding:4px 10px;">📅 Hoy al final de la tarde (5:30pm)</button>
-          <button type="button" class="secondary-button express-time-btn" data-target="tomorrow" style="font-size:11px; padding:4px 10px;">📅 Mañana por la mañana</button>
+          <button type="button" class="secondary-button express-time-btn" data-time="17:30" style="font-size:11px; padding:4px 10px;">📅 Hoy final tarde (5:30pm)</button>
+          <button type="button" class="secondary-button express-time-btn" data-time="19:30" style="font-size:11px; padding:4px 10px; background:rgba(139,92,246,0.15); color:#a78bfa; border:1px solid rgba(139,92,246,0.3);">🌙 En la noche (7:30pm)</button>
+          <button type="button" class="secondary-button express-time-btn" data-day="tomorrow" style="font-size:11px; padding:4px 10px;">📅 Mañana en la mañana</button>
         </div>
         <div class="form-inline" style="gap:8px;">
-          <input type="date" id="express-fecha-entrega" name="fechaEntrega" required>
-          <input type="time" id="express-hora-entrega" name="horaEntrega" value="17:30" required>
+          <input type="date" id="express-fecha" name="fechaEntrega" required style="flex:1;">
+          <input type="time" id="express-hora" name="horaEntrega" value="17:30" required style="flex:1;">
         </div>
       </div>
 
-      <!-- Responsable y Costo -->
-      <div class="form-inline" style="gap:8px;">
-        <label class="field">
-          <span class="field-label">RESPONSABLE ASIGNADO:</span>
-          <select id="express-responsable" name="responsable" required>
-            ${(state.team || ["Moises", "Nelson", "Yolber", "Yenny", "Andreina"]).map(r => `
-              <option value="${escapeHtml(r)}" ${state.session && state.session.username === r.toLowerCase() ? 'selected' : ''}>${escapeHtml(r)}</option>
-            `).join('')}
-          </select>
-        </label>
-        <label class="field">
-          <span class="field-label">PRECIO / COSTO ($):</span>
-          <input type="number" id="express-costo" name="costo" step="0.01" min="0" placeholder="0.00" value="0.00">
-        </label>
+      <!-- DATOS DE COBRO Y PAGO (Plantilla de Recibo Físico Creaciones JJ) -->
+      <div class="physical-invoice-box" style="border-color:#10b981; background:rgba(16,185,129,0.05); margin-bottom:12px;">
+        <div style="font-size:11.5px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+          <span>💰 Datos de Cobro / Mostrador (Plantilla JJ):</span>
+          <span id="express-payment-badge" style="font-size:10px; padding:2px 8px; border-radius:10px; background:#f59e0b; color:white; font-weight:bold;">Pendiente</span>
+        </div>
+        <div class="form-inline" style="gap:8px; margin-bottom:8px;">
+          <label class="field" style="flex:1;">
+            <span class="field-label">TOTAL A COBRAR ($):</span>
+            <input type="number" id="express-costo" name="costo" step="0.01" min="0" placeholder="0.00" value="0.00" oninput="window.recalcExpressPayment()">
+          </label>
+          <label class="field" style="flex:1;">
+            <span class="field-label">ANTICIPO / ABONÓ ($):</span>
+            <input type="number" id="express-anticipo" name="anticipo" step="0.01" min="0" placeholder="0.00" value="0.00" oninput="window.recalcExpressPayment()">
+          </label>
+          <label class="field" style="flex:1;">
+            <span class="field-label">RESTA / SALDO ($):</span>
+            <input type="number" id="express-resta" name="resta" step="0.01" placeholder="0.00" value="0.00" readonly style="background:rgba(0,0,0,0.3); font-weight:800; color:#ef4444;">
+          </label>
+        </div>
+        <div class="form-inline" style="gap:8px;">
+          <label class="field" style="flex:1;">
+            <span class="field-label">MÉTODO DE PAGO:</span>
+            <select id="express-metodo-pago" name="metodoPago" style="font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:6px 8px;">
+              <option value="Efectivo USD">Efectivo ($ Dólares)</option>
+              <option value="Efectivo Bs">Efectivo (Bs Bolívares)</option>
+              <option value="Pago Móvil">Pago Móvil</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Punto de Venta">Punto de Venta</option>
+              <option value="Mixto">Mixto (Efectivo + Transferencia)</option>
+              <option value="Sin Pagar">Sin Pagar / Por Cobrar</option>
+            </select>
+          </label>
+          <label class="field" style="flex:1.5;">
+            <span class="field-label">NOTAS DE PAGO / VUELTO:</span>
+            <input type="text" id="express-nota-pago" name="notaPago" placeholder="Ej. Falta dar 3$ de vuelto en físico">
+          </label>
+        </div>
       </div>
 
-      <!-- Aviso de Confirmación Visual en Pantalla -->
+      <!-- FOTO DE REFERENCIA DEL CLIENTE -->
+      <div class="physical-invoice-box" id="express-ref-box" style="margin-bottom:12px; border-color:#0ea5e9;">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#0ea5e9; text-transform:uppercase;">
+            🖼️ Fotos de Referencia del Cliente (Diseño):
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="secondary-button" id="express-cam-ref-btn" style="background:#0ea5e9; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📸 Tomar Foto
+            </button>
+            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📁 Subir Archivo
+              <input type="file" id="express-file-ref" accept="image/*" style="display:none;">
+            </label>
+          </div>
+        </div>
+        <div id="express-ref-preview-wrap" style="display:none;" class="physical-invoice-preview">
+          <img id="express-ref-img" class="physical-invoice-thumb" src="" alt="Referencia Cliente">
+          <div style="flex:1; font-size:11.5px;">
+            <strong style="color:#0ea5e9;"><i class="fas fa-check-circle"></i> Referencia Adjunta</strong>
+            <div style="color:var(--text-muted); font-size:10.5px;">Visible directamente para diseñadores y armadores en taller.</div>
+          </div>
+          <button type="button" class="subitem-del-btn" id="express-ref-del-btn" title="Eliminar foto">🗑️</button>
+        </div>
+      </div>
+
+      <!-- FACTURA FÍSICA / NOTA MANUSCRITA -->
+      <div class="physical-invoice-box" id="express-invoice-box" style="margin-bottom:12px;">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#d97706; text-transform:uppercase;">
+            🧾 Nota Física Manuscrita de Mostrador:
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="secondary-button" id="express-cam-invoice-btn" style="background:#f59e0b; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📸 Tomar Foto
+            </button>
+            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📁 Subir Archivo
+              <input type="file" id="express-file-invoice" accept="image/*" style="display:none;">
+            </label>
+          </div>
+        </div>
+        <div id="express-invoice-preview-wrap" style="display:none;" class="physical-invoice-preview">
+          <img id="express-invoice-img" class="physical-invoice-thumb" src="" alt="Factura Física">
+          <div style="flex:1; font-size:11.5px;">
+            <strong style="color:#10b981;"><i class="fas fa-check-circle"></i> Nota Física Adjunta</strong>
+            <div style="color:var(--text-muted); font-size:10.5px;">Se respaldará junto con el pedido en Google Drive.</div>
+          </div>
+          <button type="button" class="subitem-del-btn" id="express-invoice-del-btn" title="Eliminar foto">🗑️</button>
+        </div>
+      </div>
+
+      <!-- Responsable Asignado -->
+      <div class="field">
+        <span class="field-label">RESPONSABLE ASIGNADO:</span>
+        <select id="express-responsable" name="responsable" required style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:6px 8px;">
+          ${getRealTeamList().map(r => `
+            <option value="${escapeHtml(r)}" ${state.session && state.session.name && state.session.name.toLowerCase() === r.toLowerCase() ? 'selected' : ''}>${escapeHtml(r)}</option>
+          `).join('')}
+        </select>
+      </div>
+
+      <!-- Aviso de Confirmación Visual -->
       <div id="express-visual-confirm" class="visual-confirm-box" style="display:none;">
         <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Datos interpretados correctamente!</div>
         <div id="express-confirm-summary" style="font-size:12px; line-height:1.4;"></div>
@@ -4810,188 +5234,344 @@ window.openExpressOrderModal = function() {
 
       <div class="modal-foot" style="margin-top:10px; display:flex; gap:8px;">
         <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
-        <button type="submit" class="primary-button" id="express-submit-btn" style="flex:2; background:#f59e0b; color:white; font-weight:800; border:none;">
-          ⚡ Guardar Pedido Mostrador
+        <button type="submit" class="primary-button" id="express-submit-btn" style="flex:2; background:#f59e0b; color:white; font-weight:800; border:none; box-shadow:0 4px 12px rgba(245,158,11,0.3);">
+          ⚡ Crear Pedido JJ Express
         </button>
       </div>
     </form>
   `);
 
-  // Configurar fecha por defecto (hoy)
-  const fInput = document.getElementById("express-fecha-entrega");
-  if (fInput) fInput.value = new Date().toISOString().split('T')[0];
+  // Default fecha hoy
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const fechaInput = document.getElementById("express-fecha");
+  if (fechaInput) fechaInput.value = `${y}-${m}-${day}`;
 
-  // Listener para autocompletar cliente frecuente
-  const selClient = document.getElementById("express-client-select");
-  if (selClient) {
-    selClient.addEventListener("change", () => {
-      const opt = selClient.options[selClient.selectedIndex];
+  // Helper de cálculo de saldo
+  window.recalcExpressPayment = function() {
+    const total = parseFloat(document.getElementById("express-costo")?.value || 0);
+    const anticipo = parseFloat(document.getElementById("express-anticipo")?.value || 0);
+    const restaEl = document.getElementById("express-resta");
+    const badgeEl = document.getElementById("express-payment-badge");
+    const resta = Math.max(0, total - anticipo);
+    if (restaEl) restaEl.value = resta.toFixed(2);
+    if (badgeEl) {
+      if (total <= 0) {
+        badgeEl.textContent = "Sin Costo";
+        badgeEl.style.background = "#64748b";
+      } else if (resta <= 0.01) {
+        badgeEl.textContent = "Pagado Completo";
+        badgeEl.style.background = "#10b981";
+      } else if (anticipo > 0) {
+        badgeEl.textContent = "Abonó Anticipo";
+        badgeEl.style.background = "#0ea5e9";
+      } else {
+        badgeEl.textContent = "Pendiente por Pagar";
+        badgeEl.style.background = "#ef4444";
+      }
+    }
+  };
+  window.recalcExpressPayment();
+
+  // Cliente frecuente select
+  const selCli = document.getElementById("express-client-select");
+  if (selCli) {
+    selCli.addEventListener("change", (e) => {
+      const opt = selCli.options[selCli.selectedIndex];
       if (opt && opt.value) {
         document.getElementById("express-cliente").value = opt.value;
-        const phone = opt.dataset.phone || "";
-        if (phone) document.getElementById("express-telefono").value = phone;
+        const ph = opt.getAttribute("data-phone");
+        if (ph) document.getElementById("express-telefono").value = ph;
       }
     });
   }
 
-  // Helper para añadir subitems desde chips
-  window.addExpressSubItem = function(tipo, cant, det) {
-    const list = document.getElementById("express-items-list");
-    if (!list) return;
-    const row = document.createElement("div");
-    row.className = "subitem-row";
-    row.innerHTML = `
-      <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo" value="${escapeHtml(tipo)}" required>
-      <input type="number" class="swal-item-cant" value="${cant || 1}" min="1" placeholder="Cant." style="text-align:center;">
-      <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas" value="${escapeHtml(det || '')}">
-      <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
-    `;
-    list.appendChild(row);
-  };
-
-  // Botón Agregar Otro Trabajo
-  document.getElementById("express-add-item-btn")?.addEventListener("click", () => {
-    window.addExpressSubItem("Topper 3D", 1, "");
-  });
-
-  // Manejo de Factura Física (Cámara y Archivo)
-  const camBtn = document.getElementById("express-cam-invoice-btn");
-  const fileInput = document.getElementById("express-file-invoice");
-  const prevWrap = document.getElementById("express-invoice-preview-wrap");
-  const prevImg = document.getElementById("express-invoice-img");
-  const delBtn = document.getElementById("express-invoice-del-btn");
-
-  const setInvoicePreview = (base64) => {
-    expressInvoiceBase64 = base64;
-    if (prevImg) prevImg.src = base64;
-    if (prevWrap) prevWrap.style.display = "flex";
-  };
-
-  camBtn?.addEventListener("click", () => {
-    if (typeof openLiveCameraModal === "function") {
-      openLiveCameraModal((capturedBase64) => {
-        setInvoicePreview(capturedBase64);
-      });
-    } else {
-      showToast("Cámara no disponible directamente.");
-    }
-  });
-
-  fileInput?.addEventListener("change", (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (re) => setInvoicePreview(re.target.result);
-    reader.readAsDataURL(file);
-  });
-
-  delBtn?.addEventListener("click", () => {
-    expressInvoiceBase64 = "";
-    if (prevWrap) prevWrap.style.display = "none";
-    if (fileInput) fileInput.value = "";
-  });
-
-  // Presets de tiempo de entrega
+  // Atajos de entrega
   document.querySelectorAll(".express-time-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const now = new Date();
-      const hours = btn.dataset.hours;
-      const target = btn.dataset.target;
-      const fIn = document.getElementById("express-fecha-entrega");
-      const hIn = document.getElementById("express-hora-entrega");
-
-      if (hours) {
-        now.setHours(now.getHours() + parseInt(hours, 10));
-        if (fIn) fIn.value = now.toISOString().split('T')[0];
-        if (hIn) hIn.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      } else if (target === "today-afternoon") {
-        if (fIn) fIn.value = now.toISOString().split('T')[0];
-        if (hIn) hIn.value = "17:30";
-      } else if (target === "tomorrow") {
+      if (btn.dataset.hours) {
+        const hrs = parseInt(btn.dataset.hours, 10);
+        now.setHours(now.getHours() + hrs);
+        document.getElementById("express-hora").value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        document.getElementById("express-fecha").value = now.toISOString().split('T')[0];
+      } else if (btn.dataset.time) {
+        document.getElementById("express-hora").value = btn.dataset.time;
+        document.getElementById("express-fecha").value = now.toISOString().split('T')[0];
+      } else if (btn.dataset.day === "tomorrow") {
         now.setDate(now.getDate() + 1);
-        if (fIn) fIn.value = now.toISOString().split('T')[0];
-        if (hIn) hIn.value = "11:00";
+        document.getElementById("express-fecha").value = now.toISOString().split('T')[0];
+        document.getElementById("express-hora").value = "10:00";
       }
-      showToast("Hora de entrega actualizada.");
     });
   });
 
-  // Envío del Formulario Express
-  document.getElementById("express-order-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = document.getElementById("express-submit-btn");
-    const cliente = document.getElementById("express-cliente")?.value.trim();
-    const telefono = document.getElementById("express-telefono")?.value.trim() || "";
-    const fEnt = document.getElementById("express-fecha-entrega")?.value;
-    const hEnt = document.getElementById("express-hora-entrega")?.value || "17:30";
-    const responsable = document.getElementById("express-responsable")?.value;
-    const costo = parseFloat(document.getElementById("express-costo")?.value || 0);
-
-    if (!cliente) {
-      alert("Por favor indica el nombre del cliente.");
-      return;
-    }
-
-    // Extraer subítems
-    const items = [];
-    document.querySelectorAll("#express-items-list .subitem-row").forEach(row => {
-      const t = row.querySelector(".swal-item-tipo")?.value.trim();
-      const c = parseInt(row.querySelector(".swal-item-cant")?.value, 10) || 1;
-      const d = row.querySelector(".swal-item-det")?.value.trim() || "";
-      if (t) items.push({ tipo: t, cantidad: c, detalles: d, done: false });
+  // Agregar subítem
+  const addBtn = document.getElementById("express-add-item-btn");
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      window.addExpressSubItem("Topper 3D", 1, "");
     });
+  }
 
-    if (items.length === 0) {
-      items.push({ tipo: "Pedido Mostrador", cantidad: 1, detalles: "", done: false });
-    }
+  // FOTO NOTA FÍSICA
+  const fileInp = document.getElementById("express-file-invoice");
+  const camBtn = document.getElementById("express-cam-invoice-btn");
+  const previewWrap = document.getElementById("express-invoice-preview-wrap");
+  const previewImg = document.getElementById("express-invoice-img");
+  const delBtn = document.getElementById("express-invoice-del-btn");
 
-    const payload = {
-      cliente,
-      telefono,
-      tipo: items.map(i => `${i.cantidad > 1 ? i.cantidad + 'x ' : ''}${i.tipo}`).join(" + "),
-      descripcion: `[Pedido Mostrador Rápido SICS]\n` + items.map(i => `• ${i.cantidad}x ${i.tipo}${i.detalles ? ' ('+i.detalles+')' : ''}`).join("\n"),
-      subItems: items,
-      fechaEntrega: `${fEnt}T${hEnt}:00`,
-      responsable,
-      costo,
-      diseno: "Sí",
-      estado: "Pendiente",
-      motivo: items[0].tipo,
-      fotosReferencia: expressInvoiceBase64 ? [expressInvoiceBase64] : []
-    };
+  if (fileInp) {
+    fileInp.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        expressInvoiceBase64 = ev.target.result;
+        previewImg.src = expressInvoiceBase64;
+        previewWrap.style.display = "flex";
+      };
+      r.readAsDataURL(f);
+    });
+  }
 
-    btn.disabled = true;
-    btn.textContent = "Guardando...";
+  if (camBtn) {
+    camBtn.addEventListener("click", async () => {
+      const streamInp = document.createElement("input");
+      streamInp.type = "file";
+      streamInp.accept = "image/*";
+      streamInp.capture = "environment";
+      streamInp.onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = (ev) => {
+          expressInvoiceBase64 = ev.target.result;
+          previewImg.src = expressInvoiceBase64;
+          previewWrap.style.display = "flex";
+        };
+        r.readAsDataURL(f);
+      };
+      streamInp.click();
+    });
+  }
 
-    try {
-      await api('crearPedido', payload);
-      closeModal();
-      if (typeof Swal !== "undefined") {
-        Swal.fire({
-          icon: "success",
-          title: "¡Pedido Registrado!",
-          text: `Orden rápida para ${cliente} guardada en taller.`,
-          timer: 2000,
-          showConfirmButton: false
+  if (delBtn) {
+    delBtn.addEventListener("click", () => {
+      expressInvoiceBase64 = "";
+      previewImg.src = "";
+      previewWrap.style.display = "none";
+      if (fileInp) fileInp.value = "";
+    });
+  }
+
+  // FOTO REFERENCIA CLIENTE
+  const fileRefInp = document.getElementById("express-file-ref");
+  const camRefBtn = document.getElementById("express-cam-ref-btn");
+  const previewRefWrap = document.getElementById("express-ref-preview-wrap");
+  const previewRefImg = document.getElementById("express-ref-img");
+  const delRefBtn = document.getElementById("express-ref-del-btn");
+
+  if (fileRefInp) {
+    fileRefInp.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        expressRefBase64 = ev.target.result;
+        previewRefImg.src = expressRefBase64;
+        previewRefWrap.style.display = "flex";
+      };
+      r.readAsDataURL(f);
+    });
+  }
+
+  if (camRefBtn) {
+    camRefBtn.addEventListener("click", () => {
+      const streamInp = document.createElement("input");
+      streamInp.type = "file";
+      streamInp.accept = "image/*";
+      streamInp.capture = "environment";
+      streamInp.onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = (ev) => {
+          expressRefBase64 = ev.target.result;
+          previewRefImg.src = expressRefBase64;
+          previewRefWrap.style.display = "flex";
+        };
+        r.readAsDataURL(f);
+      };
+      streamInp.click();
+    });
+  }
+
+  if (delRefBtn) {
+    delRefBtn.addEventListener("click", () => {
+      expressRefBase64 = "";
+      previewRefImg.src = "";
+      previewRefWrap.style.display = "none";
+      if (fileRefInp) fileRefInp.value = "";
+    });
+  }
+
+  // Envío del Formulario
+  const form = document.getElementById("express-order-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById("express-submit-btn");
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Guardando...`;
+
+      try {
+        const cliente = document.getElementById("express-cliente").value.trim();
+        const telefono = document.getElementById("express-telefono").value.trim();
+        const motivo = document.getElementById("express-motivo").value.trim() || "General";
+        const fecha = document.getElementById("express-fecha").value;
+        const hora = document.getElementById("express-hora").value || "17:30";
+        const responsable = document.getElementById("express-responsable").value;
+        const costo = parseFloat(document.getElementById("express-costo").value || 0);
+        const anticipo = parseFloat(document.getElementById("express-anticipo").value || 0);
+        const resta = Math.max(0, costo - anticipo);
+        const metodoPago = document.getElementById("express-metodo-pago").value;
+        const notaPago = document.getElementById("express-nota-pago").value.trim();
+
+        // Extraer sub-ítems
+        const rows = document.querySelectorAll("#express-items-list .subitem-row");
+        const subItems = [];
+        rows.forEach(r => {
+          const t = r.querySelector(".swal-item-tipo")?.value.trim();
+          const c = parseInt(r.querySelector(".swal-item-cant")?.value || 1, 10);
+          const d = r.querySelector(".swal-item-det")?.value.trim() || motivo;
+          if (t) {
+            subItems.push({ tipo: t, cantidad: c, detalles: d, completado: false });
+          }
         });
-      } else {
-        showToast("¡Pedido de mostrador guardado con éxito!");
+
+        if (!subItems.length) {
+          subItems.push({ tipo: "Topper 3D", cantidad: 1, detalles: motivo, completado: false });
+        }
+
+        const primaryTipo = subItems[0].tipo || "Topper 3D";
+        const itemsSummary = subItems.map(s => `${s.cantidad}x ${s.tipo}${s.detalles ? ` (${s.detalles})` : ''}`).join(', ');
+
+        let notasIniciales = `⚡ [Pedido JJ Express - Mostrador]: ${itemsSummary}`;
+        if (costo > 0 || anticipo > 0 || notaPago) {
+          notasIniciales += `\n💰 Cobro: Total $${costo.toFixed(2)} | Anticipo: $${anticipo.toFixed(2)} | Saldo: $${resta.toFixed(2)} | ${metodoPago}${notaPago ? ` | Nota: ${notaPago}` : ''}`;
+        }
+
+        const payload = {
+          cliente: cliente,
+          telefono: telefono,
+          tipo: primaryTipo,
+          motivo: motivo,
+          fechaEntrega: fecha,
+          horaEntrega: hora,
+          responsable: responsable,
+          costo: costo,
+          anticipo: anticipo,
+          saldoPendiente: resta,
+          metodoPago: metodoPago,
+          notaPago: notaPago,
+          subItems: JSON.stringify(subItems),
+          notas: notasIniciales,
+          fotoNotaFisica: expressInvoiceBase64,
+          fotosReferencia: expressRefBase64 ? JSON.stringify([expressRefBase64]) : "[]"
+        };
+
+        const res = await api("profile_create_order", payload);
+        if (res && (res.ok || res.exito)) {
+          showToast(`✅ Pedido ${res.id || ''} registrado con éxito en Mostrador.`);
+          closeModal();
+          await refresh(true);
+        } else {
+          throw new Error(res?.mensaje || res?.error || "Error al registrar el pedido exprés");
+        }
+      } catch(err) {
+        console.error(err);
+        if (typeof Swal !== "undefined") {
+          Swal.fire({
+            icon: "error",
+            title: "Error al registrar",
+            text: err.message || String(err)
+          });
+        } else {
+          alert(`Error: ${err.message}`);
+        }
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `⚡ Crear Pedido JJ Express`;
       }
-      refresh();
-    } catch(err) {
-      btn.disabled = false;
-      btn.textContent = "⚡ Guardar Pedido Mostrador";
-      alert(`Error creando pedido: ${err.message}`);
-    }
-  });
+    });
+  }
 };
 
+window.addExpressSubItem = function(tipo, cant, det) {
+  const list = document.getElementById("express-items-list");
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "subitem-row";
+  const motivoVal = document.getElementById("express-motivo")?.value.trim() || "";
+  row.innerHTML = `
+    <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper 3D)" value="${escapeHtml(tipo)}" required>
+    <input type="number" class="swal-item-cant" value="${cant || 1}" min="1" placeholder="Cant." style="text-align:center;">
+    <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas" value="${escapeHtml(det || motivoVal)}">
+    <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
+  `;
+  list.appendChild(row);
+};
 
-// =========================================================
-// 5. ASISTENTE DE VOZ & PARSER EN LENGUAJE NATURAL
-// =========================================================
-let speechRecognitionInstance = null;
-let isRecognizingSpeech = false;
+window.parseAndFillExpressForm = function(text) {
+  const p = window.parseOrderNaturalLanguage(text);
+  if (p.cliente) {
+    const cliEl = document.getElementById("express-cliente");
+    if (cliEl) cliEl.value = p.cliente;
+  }
+  if (p.telefono) {
+    const tlfEl = document.getElementById("express-telefono");
+    if (tlfEl) tlfEl.value = p.telefono;
+  }
+  if (p.motivo) {
+    const motEl = document.getElementById("express-motivo");
+    if (motEl) motEl.value = p.motivo;
+  }
+  if (p.fechaEntrega) {
+    const fEl = document.getElementById("express-fecha");
+    if (fEl) fEl.value = p.fechaEntrega;
+  }
+  if (p.entregaHora) {
+    const hEl = document.getElementById("express-hora");
+    if (hEl) hEl.value = p.entregaHora;
+  }
+
+  // Llenar trabajos en la lista
+  if (p.items && p.items.length) {
+    const list = document.getElementById("express-items-list");
+    if (list) {
+      list.innerHTML = "";
+      p.items.forEach(it => {
+        window.addExpressSubItem(it.tipo, it.cant, it.det || p.motivo);
+      });
+    }
+  }
+
+  // Mostrar caja de confirmación visual
+  const confirmBox = document.getElementById("express-visual-confirm");
+  const summaryBox = document.getElementById("express-confirm-summary");
+  if (confirmBox && summaryBox) {
+    summaryBox.innerHTML = `
+      <div><strong>Cliente:</strong> ${escapeHtml(p.cliente || 'Detectado')}</div>
+      ${p.motivo ? `<div><strong>Motivo:</strong> ${escapeHtml(p.motivo)}</div>` : ''}
+      <div><strong>Trabajos:</strong> ${p.items.map(i => `${i.cant}x ${i.tipo}`).join(', ')}</div>
+      <div><strong>Entrega:</strong> ${p.fechaEntrega} a las ${p.entregaHora}</div>
+    `;
+    confirmBox.style.display = "block";
+  }
+};
 
 window.initVoiceAssistant = function() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -5093,128 +5673,192 @@ window.startVoiceDictationForExpress = function() {
   if (!SpeechRecognition) {
     if (typeof Swal !== "undefined") {
       Swal.fire({
-        icon: "warning",
-        title: "Voz no disponible",
-        text: "El reconocimiento por voz no es soportado por este navegador. Te sugerimos usar Google Chrome o Microsoft Edge."
+        icon: "info",
+        title: "Dictado por Voz",
+        html: `<p>En tu navegador puedes usar el atajo de Windows <strong>Win + H</strong> para dictar directamente con tu voz en el campo de texto.</p>
+               <p style="font-size:12px; color:#9ca3af; margin-top:8px;">Google Chrome y Edge también soportan el micrófono web nativo.</p>`
       });
     } else {
-      alert("Dictado por voz no disponible en este navegador.");
+      alert("Dictado por voz: Usa Win + H en Windows para dictar directamente en el campo de texto.");
     }
     return;
   }
 
-  if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    showToast("⚠️ El micrófono requiere conexión segura HTTPS o localhost.");
-  }
-
-  const rec = new SpeechRecognition();
-  rec.lang = navigator.language || "es-419";
-  rec.continuous = false;
-  rec.interimResults = false;
-
-  rec.onstart = () => {
-    if (micBtn) micBtn.classList.add("listening");
-    showToast("🎙️ Escuchando... Dicta nombre y qué necesita.");
-  };
-
-  rec.onresult = (e) => {
-    if (micBtn) micBtn.classList.remove("listening");
-    const text = e.results[0][0].transcript;
-    showToast(`Capturado: "${text}"`);
-    window.parseAndFillExpressForm(text);
-  };
-
-  rec.onerror = (e) => {
-    if (micBtn) micBtn.classList.remove("listening");
-    console.error("Speech recognition error:", e.error);
-    if (e.error === "not-allowed" || e.error === "permission-denied") {
-      showToast("❌ Permiso de micrófono denegado. Habilita los permisos en tu navegador.");
-    } else if (e.error === "no-speech") {
-      showToast("⚠️ No se detectó ninguna voz. Habla más cerca del micrófono.");
-    } else {
-      showToast(`Error de voz: ${e.error}`);
-    }
-  };
-
-  rec.onend = () => {
-    if (micBtn) micBtn.classList.remove("listening");
-  };
-
   try {
+    if (window._expressSpeechRec) {
+      try { window._expressSpeechRec.abort(); } catch(e){}
+    }
+    const rec = new SpeechRecognition();
+    window._expressSpeechRec = rec;
+    rec.lang = "es-419";
+    rec.continuous = false;
+    rec.interimResults = false;
+
+    rec.onstart = () => {
+      if (micBtn) micBtn.classList.add("listening");
+      showToast("🎙️ Escuchando... Dicta cliente, trabajo, motivo y fecha.");
+    };
+
+    rec.onresult = (e) => {
+      if (micBtn) micBtn.classList.remove("listening");
+      const text = e.results[0][0].transcript;
+      showToast(`Capturado: "${text}"`);
+      window.parseAndFillExpressForm(text);
+    };
+
+    rec.onerror = (e) => {
+      if (micBtn) micBtn.classList.remove("listening");
+      console.warn("Speech recognition warning:", e.error);
+      if (e.error === "not-allowed" || e.error === "permission-denied") {
+        showToast("⚠️ Micrófono bloqueado. Recuerda que puedes pulsar Win + H para dictar.");
+      } else if (e.error === "no-speech") {
+        showToast("⚠️ No se escuchó voz. Intenta nuevamente.");
+      } else {
+        showToast("💡 Tip: Presiona Win + H en tu teclado para dictar en el campo.");
+      }
+    };
+
+    rec.onend = () => {
+      if (micBtn) micBtn.classList.remove("listening");
+    };
+
     rec.start();
   } catch(e) {
-    console.error(e);
+    console.warn("Speech init error:", e);
     if (micBtn) micBtn.classList.remove("listening");
-    showToast("⚠️ No se pudo activar el micrófono. Verifica permisos.");
+    showToast("💡 Tip: Presiona Win + H en tu teclado para dictar por voz en el campo.");
   }
 };
 
-// Parser en Lenguaje Natural para estructurar pedidos hablados
 window.parseOrderNaturalLanguage = function(text) {
   const result = {
     cliente: "",
+    telefono: "",
     items: [],
     motivo: "",
     entregaHora: "17:30",
     fechaEntrega: new Date().toISOString().split('T')[0]
   };
 
-  const lower = text.toLowerCase();
+  if (!text) return result;
+  const lower = text.toLowerCase().trim();
 
-  // 1. Extraer cliente (ej: "pedido para Maria", "para Maria", "cliente Maria")
-  const clientMatch = lower.match(/(?:pedido para|para|cliente)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)/i);
-  if (clientMatch) {
-    result.cliente = clientMatch[1].trim().replace(/\w/g, l => l.toUpperCase());
+  // A. Búsqueda de cliente en la base de datos de clientes frecuentes
+  const knownClients = (state.data?.clients || state.data?.frequentClients || state.frequentClients || []);
+  for (const c of knownClients) {
+    const cName = String(c.name || c.nombre || "").trim();
+    if (cName && lower.includes(cName.toLowerCase())) {
+      result.cliente = cName;
+      result.telefono = c.phone || c.telefono || "";
+      break;
+    }
   }
 
-  // 2. Extraer motivo / temática (ej: "de Hello Kitty", "motivo Frozen", "tematica Paw Patrol")
-  const motivoMatch = lower.match(/(?:motivo|tematica|temática|de)\s+([a-záéíóúñ0-9\s]+?)(?:para|con|\d|$)/i);
-  if (motivoMatch && !["hoy", "mañana", "las", "un", "una"].includes(motivoMatch[1].trim())) {
-    result.motivo = motivoMatch[1].trim();
+  // Si no se encontró por coincidencia exacta de cliente guardado, extraer del texto
+  if (!result.cliente) {
+    const clientMatch = lower.match(/(?:pedido para|para|cliente|a nombre de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)/i);
+    if (clientMatch) {
+      let rawName = clientMatch[1].trim();
+      // Eliminar preposiciones o artículos finales pegados accidentalmente (ej: "Miriam de" -> "Miriam")
+      rawName = rawName.replace(/\s+(?:de|con|un|una|el|la|para)$/i, "").trim();
+      result.cliente = rawName.replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+    }
   }
 
-  // 3. Extraer fecha / hora
+  // B. Extraer motivo / temática (ej: "con temática de Spiderman", "motivo Rapunzel", "de Barbie")
+  const motivoMatch = lower.match(/(?:con\s+tem[aá]tica\s+de|tem[aá]tica\s+de|tem[aá]tica|motivo\s+de|motivo)\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
+  if (motivoMatch) {
+    result.motivo = motivoMatch[1].trim().replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+  } else {
+    // Si dice: "topper de Spiderman", "stickers de Flores", etc.
+    const deMatch = lower.match(/(?:topper[s]?|stickers?|taza[s]?|invitaci[oó]n(?:es)?|letras? 3d|pend[oó]n(?:es)?)\s+de\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
+    if (deMatch) {
+      const candidate = deMatch[1].trim();
+      const forbidden = ["hoy", "mañana", "lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo", "mostrador", "taller"];
+      if (!forbidden.includes(candidate.toLowerCase())) {
+        result.motivo = candidate.replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+      }
+    }
+  }
+
+  // C. Extraer fecha / día de la semana
+  const today = new Date();
   if (lower.includes("para hoy") || lower.includes("hoy")) {
-    result.fechaEntrega = new Date().toISOString().split('T')[0];
+    result.fechaEntrega = today.toISOString().split('T')[0];
   } else if (lower.includes("para mañana") || lower.includes("mañana")) {
-    const tm = new Date();
+    const tm = new Date(today);
     tm.setDate(tm.getDate() + 1);
     result.fechaEntrega = tm.toISOString().split('T')[0];
+  } else {
+    // Reconocer días de la semana: lunes, martes, miércoles, jueves, viernes, sábado, domingo
+    const daysMap = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, "miércoles": 3, jueves: 4, viernes: 5, sabado: 6, "sábado": 6 };
+    for (const [dayName, dayNum] of Object.entries(daysMap)) {
+      if (lower.includes("para el " + dayName) || lower.includes("el " + dayName)) {
+        const currentDay = today.getDay();
+        let diff = (dayNum - currentDay + 7) % 7;
+        if (diff === 0) diff = 7; // Próxima semana
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + diff);
+        result.fechaEntrega = targetDate.toISOString().split('T')[0];
+        break;
+      }
+    }
   }
 
-  const horaMatch = lower.match(/(?:a las|para las)\s+(\d{1,2})(?::(\d{2}))?\s*(de la tarde|de la mañana|am|pm)?/i);
+  // D. Extraer hora de entrega
+  if (lower.includes("noche") || lower.includes("final de la jornada") || lower.includes("final de jornada")) {
+    result.entregaHora = "19:30";
+  } else if (lower.includes("final de la tarde") || lower.includes("tarde")) {
+    result.entregaHora = "17:30";
+  } else if (lower.includes("mañana por la mañana") || lower.includes("en la mañana")) {
+    result.entregaHora = "10:00";
+  }
+
+  const horaMatch = lower.match(/(?:a las|para las)\s+(\d{1,2})(?::(\d{2}))?\s*(de la tarde|de la mañana|de la noche|am|pm)?/i);
   if (horaMatch) {
     let hh = parseInt(horaMatch[1], 10);
     const mm = horaMatch[2] || "00";
-    const mod = horaMatch[3] || "";
-    if ((mod.includes("tarde") || mod.includes("pm")) && hh < 12) hh += 12;
+    const mod = (horaMatch[3] || "").toLowerCase();
+    if ((mod.includes("tarde") || mod.includes("noche") || mod.includes("pm")) && hh < 12) hh += 12;
+    if (mod.includes("am") && hh === 12) hh = 0;
     result.entregaHora = `${String(hh).padStart(2,'0')}:${mm}`;
   }
 
-  // 4. Extraer ítems / trabajos (ej: "2 toppers", "20 stickers", "1 taza", "1 letrero")
-  const itemKeywords = ["topper", "stickers", "taza", "sublimado", "sublimable", "invitacion", "invitación", "cuadro", "letrero", "caja", "recuerdo"];
-  const words = lower.split(/[\s,]+/);
+  // E. Extraer trabajos tipificados (Topper, Stickers, Taza, etc.)
+  const typesMap = [
+    { patterns: ["toppers 3d", "topper 3d", "toppers", "topper"], formal: "Topper 3D" },
+    { patterns: ["stickers", "sticker", "calcomanias", "calcomanías"], formal: "Stickers" },
+    { patterns: ["tazas sublimadas", "taza sublimada", "tazas", "taza"], formal: "Taza Sublimada" },
+    { patterns: ["invitaciones digitales", "invitacion digital", "invitación digital", "invitaciones", "invitacion", "invitación"], formal: "Invitación Digital" },
+    { patterns: ["letras 3d", "letra 3d"], formal: "Letras 3D" },
+    { patterns: ["pendones", "pendon", "pendón"], formal: "Pendón" },
+    { patterns: ["cajas sorpresa", "caja sorpresa", "cotillones", "cotillon", "cotillón"], formal: "Caja Sorpresa" }
+  ];
 
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    itemKeywords.forEach(k => {
-      if (w.includes(k)) {
-        let qty = 1;
-        if (i > 0 && !isNaN(parseInt(words[i-1], 10))) {
-          qty = parseInt(words[i-1], 10);
-        }
+  for (const t of typesMap) {
+    for (const pat of t.patterns) {
+      if (lower.includes(pat)) {
+        // Buscar cantidad antes del tipo (ej: "2 toppers")
+        const qtyRegex = new RegExp(`(\d+)\s*(?:de\s+)?` + pat.replace(" ", "\s+"), "i");
+        const qtyMatch = lower.match(qtyRegex);
+        const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
         result.items.push({
-          tipo: k.charAt(0).toUpperCase() + k.slice(1),
-          cantidad: qty,
-          detalles: result.motivo || "",
-          completado: false
+          tipo: t.formal,
+          cant: qty,
+          det: result.motivo || t.formal
         });
+        break;
       }
-    });
+    }
   }
 
-  if (result.items.length === 0) {
-    result.items.push({ tipo: "Trabajo Personalizado", cantidad: 1, detalles: text, completado: false });
+  // Fallback si no detectó ítems específicos
+  if (!result.items.length) {
+    result.items.push({
+      tipo: "Topper 3D",
+      cant: 1,
+      det: result.motivo || "General"
+    });
   }
 
   return result;
@@ -5512,7 +6156,12 @@ window.doLogout = function() {
 // SICS 2026: NAVEGADOR GLOBAL ENTRE MÓDULOS Y FICHAS
 // =========================================================
 window.navigate = function(screenName) {
-  state.screen = screenName || "modules";
+  if ((screenName === 'providers' || screenName === 'cash') && !isLead()) {
+    showToast("🔒 Módulo exclusivo para Gerencia y Jefes.");
+    state.screen = "modules";
+  } else {
+    state.screen = screenName || "modules";
+  }
   state.searchQuery = "";
   if (typeof render === "function") render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -5531,4 +6180,1185 @@ window.addStandardSubItem = function(tipo, cant, det) {
     <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
   `;
   list.appendChild(row);
+};
+
+
+// =========================================================================
+// MÓDULO 1: PROVEEDORES Y CUENTAS POR PAGAR (EXCLUSIVO GERENCIA / JEFES)
+// =========================================================================
+function getStoredProvidersData() {
+  const defaultList = [
+    {
+      id: "PROV-11140",
+      proveedor: "Americas (Jorge José Ochoa Gómez)",
+      numeroNota: "11140",
+      fechaEntrega: "2026-09-02",
+      fechaVencimiento: "2026-09-09",
+      moneda: "USD",
+      montoTotal: 325.00,
+      abonado: 100.00,
+      saldoPendiente: 225.00,
+      estado: "Vencida",
+      tasaBCV: 798.33,
+      fotos: [],
+      abonos: [
+        { fecha: "05/09/2026 10:30 AM", monto: 100.00, moneda: "USD", referencia: "Efectivo", registradoPor: "Moises" }
+      ],
+      notas: "Promoción Nata 1 Galon, Mantequilla Galon"
+    },
+    {
+      id: "PROV-111764",
+      proveedor: "Blindac, C.A.",
+      numeroNota: "CD111764",
+      fechaEntrega: "2026-09-07",
+      fechaVencimiento: "2026-09-10",
+      moneda: "USD",
+      montoTotal: 15.45,
+      abonado: 15.45,
+      saldoPendiente: 0.00,
+      estado: "Pagada",
+      tasaBCV: 798.33,
+      fotos: [],
+      abonos: [
+        { fecha: "10/09/2026 04:15 PM", monto: 15.45, moneda: "USD", referencia: "Transferencia Banesco", registradoPor: "Julieta" }
+      ],
+      notas: "Porta Carnet Negro Pointer y Azul Pointer"
+    },
+    {
+      id: "PROV-162893",
+      proveedor: "Prodimarca (Manualidades y Artes)",
+      numeroNota: "00162893",
+      fechaEntrega: "2026-09-01",
+      fechaVencimiento: "2026-09-20",
+      moneda: "USD",
+      montoTotal: 245.40,
+      abonado: 50.00,
+      saldoPendiente: 195.40,
+      estado: "Parcial",
+      tasaBCV: 798.33,
+      fotos: [],
+      abonos: [
+        { fecha: "08/09/2026 11:00 AM", monto: 50.00, moneda: "USD", referencia: "Pago Móvil", registradoPor: "Moises" }
+      ],
+      notas: "Cartulinas construcción college, silicón líquido y en barra"
+    },
+    {
+      id: "PROV-36689",
+      proveedor: "Inversiones Patiño, C.A.",
+      numeroNota: "00036689",
+      fechaEntrega: "2026-09-03",
+      fechaVencimiento: "2026-09-23",
+      moneda: "USD",
+      montoTotal: 81.00,
+      abonado: 0.00,
+      saldoPendiente: 81.00,
+      estado: "Pendiente",
+      tasaBCV: 798.33,
+      fotos: [],
+      abonos: [],
+      notas: "Crema Chantilly Sucream 1Lt x 12"
+    },
+    {
+      id: "PROV-18503",
+      proveedor: "Huepa (Chocolates & Repostería)",
+      numeroNota: "00018503",
+      fechaEntrega: "2026-09-09",
+      fechaVencimiento: "2026-09-29",
+      moneda: "USD",
+      montoTotal: 92.28,
+      abonado: 0.00,
+      saldoPendiente: 92.28,
+      estado: "Pendiente",
+      tasaBCV: 798.33,
+      fotos: [],
+      abonos: [],
+      notas: "Tina Maxiplas, Cuchara postre, Bolsas teta y casero"
+    }
+  ];
+  return store.get("pp_provider_invoices", defaultList);
+}
+
+function saveStoredProvidersData(list) {
+  store.set("pp_provider_invoices", list);
+}
+
+function providersView() {
+  if (!isLead()) {
+    return `<div style="text-align:center; padding:50px; color:#ef4444;"><h2>🔒 Acceso Restringido</h2><p>Este módulo es exclusivo para Gerencia y Jefes.</p></div>`;
+  }
+
+  const invoices = getStoredProvidersData();
+  const currentTasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
+
+  // KPIs
+  let totalDeudaUSD = 0;
+  let totalAbonadoUSD = 0;
+  let vencidasCount = 0;
+  let proximasCount = 0;
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+
+  invoices.forEach(inv => {
+    const saldo = Number(inv.saldoPendiente || 0);
+    const monto = Number(inv.montoTotal || 0);
+    const abon = Number(inv.abonado || 0);
+    totalDeudaUSD += saldo;
+    totalAbonadoUSD += abon;
+
+    if (saldo > 0.01) {
+      if (inv.fechaVencimiento && inv.fechaVencimiento < todayStr) {
+        vencidasCount++;
+      } else if (inv.fechaVencimiento) {
+        const diffDays = Math.ceil((new Date(inv.fechaVencimiento) - now) / 86400000);
+        if (diffDays >= 0 && diffDays <= 5) proximasCount++;
+      }
+    }
+  });
+
+  const totalDeudaBs = totalDeudaUSD * currentTasa;
+
+  return `
+    <div style="max-width:1150px; margin:0 auto; padding-bottom:40px;">
+      <!-- Hero de Proveedores -->
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+        <div>
+          <h1 style="font-size:22px; margin:0 0 6px 0; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-truck-loading" style="color:#10b981;"></i> Proveedores &amp; Cuentas por Pagar
+          </h1>
+          <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+            Control integral de notas de entrega, pagos fraccionados, tasa oficial BCV y alertas de vencimiento para los jefes.
+          </p>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <!-- Tasa BCV Editable -->
+          <div style="background:var(--bg-card); border:1.5px solid #10b981; border-radius:10px; padding:6px 12px; display:flex; align-items:center; gap:8px;">
+            <span style="font-size:11px; font-weight:800; color:#10b981;">TASA BCV (Bs/$):</span>
+            <input type="number" id="current-bcv-input" value="${currentTasa.toFixed(2)}" step="0.01" style="width:75px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; padding:3px 6px; font-weight:bold; font-size:12px;" onchange="window.updateBCVRate(this.value)">
+          </div>
+          <button type="button" class="primary-button" onclick="window.openNewProviderInvoiceModal()" style="background:#10b981; border:none; padding:9px 16px; border-radius:8px; font-weight:800; font-size:12px; display:inline-flex; align-items:center; gap:6px;">
+            <i class="fas fa-file-invoice-dollar"></i> + Nueva Nota de Entrega
+          </button>
+        </div>
+      </div>
+
+      <!-- Métricas Resumen -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:20px;">
+        <div class="sics-metric-card" style="border-color:#10b981;">
+          <div style="font-size:11px; font-weight:700; color:#10b981; text-transform:uppercase;">DEUDA TOTAL PENDIENTE</div>
+          <div style="font-size:24px; font-weight:900; color:var(--text-main); margin:4px 0;">$${totalDeudaUSD.toFixed(2)}</div>
+          <div style="font-size:11.5px; color:#38bdf8; font-weight:bold;">Bs. ${totalDeudaBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        </div>
+
+        <div class="sics-metric-card" style="border-color:${vencidasCount ? '#ef4444' : 'var(--border-color)'};">
+          <div style="font-size:11px; font-weight:700; color:#ef4444; text-transform:uppercase;">NOTAS VENCIDAS</div>
+          <div style="font-size:24px; font-weight:900; color:${vencidasCount ? '#ef4444' : 'var(--text-main)'}; margin:4px 0;">${vencidasCount}</div>
+          <div style="font-size:11px; color:${vencidasCount ? '#ef4444' : 'var(--text-muted)'}; font-weight:bold;">${vencidasCount ? '⚠️ Requieren pago urgente' : 'Cero deudas vencidas'}</div>
+        </div>
+
+        <div class="sics-metric-card" style="border-color:${proximasCount ? '#f59e0b' : 'var(--border-color)'};">
+          <div style="font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase;">POR VENCER (5 DÍAS)</div>
+          <div style="font-size:24px; font-weight:900; color:${proximasCount ? '#f59e0b' : 'var(--text-main)'}; margin:4px 0;">${proximasCount}</div>
+          <div style="font-size:11px; color:var(--text-muted);">Organizar abonos para esta semana</div>
+        </div>
+
+        <div class="sics-metric-card">
+          <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase;">TOTAL ABONADO / PAGADO</div>
+          <div style="font-size:24px; font-weight:900; color:#10b981; margin:4px 0;">$${totalAbonadoUSD.toFixed(2)}</div>
+          <div style="font-size:11px; color:var(--text-muted);">Pagos cancelados a proveedores</div>
+        </div>
+      </div>
+
+      <!-- Tabla de Notas de Entrega -->
+      <div class="sics-table-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+          <div style="font-size:14px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-list-alt" style="color:#10b981;"></i> Registro de Notas de Entrega y Facturas
+          </div>
+          <div style="display:flex; gap:6px;">
+            <input type="text" placeholder="🔍 Filtrar proveedor o nota..." oninput="window.filterProviderTable(this.value)" style="padding:5px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; width:200px;">
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="sics-data-table" id="table-provider-invoices">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th>N° Nota / Factura</th>
+                <th>Fecha Entrega</th>
+                <th>Vence</th>
+                <th style="text-align:right;">Total ($)</th>
+                <th style="text-align:right;">Abonado ($)</th>
+                <th style="text-align:right;">Saldo Deuda</th>
+                <th style="text-align:center;">Estado</th>
+                <th style="text-align:center;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoices.map(inv => {
+                const isOverdue = inv.fechaVencimiento && inv.fechaVencimiento < todayStr && inv.saldoPendiente > 0.01;
+                const badgeClass = isOverdue ? 'prov-badge-overdue' : (inv.saldoPendiente <= 0.01 ? 'prov-badge-paid' : (inv.abonado > 0 ? 'prov-badge-partial' : 'prov-badge-pending'));
+                const badgeText = isOverdue ? '⚠️ Vencida' : (inv.saldoPendiente <= 0.01 ? '✅ Pagada' : (inv.abonado > 0 ? '🟡 Abono Parcial' : '⏳ Pendiente'));
+                const saldoBs = (inv.saldoPendiente * currentTasa).toLocaleString('es-VE', { maximumFractionDigits: 0 });
+
+                return `
+                  <tr data-prov-search="${escapeHtml((inv.proveedor + ' ' + inv.numeroNota).toLowerCase())}">
+                    <td style="font-weight:700; color:var(--text-main);">
+                      <div style="display:flex; align-items:center; gap:6px;">
+                        <i class="fas fa-building" style="color:#9ca3af; font-size:11px;"></i> ${escapeHtml(inv.proveedor)}
+                      </div>
+                      ${inv.notas ? `<div style="font-size:10.5px; color:var(--text-muted); font-weight:normal;">${escapeHtml(inv.notas)}</div>` : ''}
+                    </td>
+                    <td style="font-family:monospace; font-weight:bold; color:#38bdf8;">${escapeHtml(inv.numeroNota || 'S/N')}</td>
+                    <td style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(inv.fechaEntrega)}</td>
+                    <td style="font-size:11.5px; font-weight:bold; color:${isOverdue ? '#ef4444' : 'var(--text-main)'};">
+                      ${escapeHtml(inv.fechaVencimiento || 'Inmediato')}
+                    </td>
+                    <td style="text-align:right; font-weight:bold;">$${Number(inv.montoTotal).toFixed(2)}</td>
+                    <td style="text-align:right; color:#10b981; font-weight:bold;">$${Number(inv.abonado).toFixed(2)}</td>
+                    <td style="text-align:right;">
+                      <strong style="color:${inv.saldoPendiente > 0 ? '#ef4444' : '#10b981'}; font-size:13px;">$${Number(inv.saldoPendiente).toFixed(2)}</strong>
+                      ${inv.saldoPendiente > 0 ? `<div style="font-size:10px; color:#38bdf8;">Bs. ${saldoBs}</div>` : ''}
+                    </td>
+                    <td style="text-align:center;">
+                      <span class="${badgeClass}">${badgeText}</span>
+                    </td>
+                    <td style="text-align:center; white-space:nowrap;">
+                      <button type="button" class="primary-button" onclick="window.openProviderInvoiceDetailModal('${escapeHtml(inv.id)}')" style="font-size:10.5px; padding:3px 8px; background:#0ea5e9; border:none; margin-right:4px;" title="Ver abonos y fotos">
+                        👁️ Ver / Abonar
+                      </button>
+                      <button type="button" class="secondary-button" onclick="window.deleteProviderInvoice('${escapeHtml(inv.id)}')" style="font-size:10px; padding:3px 6px; color:#ef4444;" title="Eliminar nota">
+                        🗑️
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.updateBCVRate = function(newRate) {
+  const r = parseFloat(newRate);
+  if (r > 0) {
+    store.set("pp_tasa_bcv", r);
+    showToast(`Tasa BCV actualizada a Bs. ${r.toFixed(2)}`);
+    if (typeof render === "function") render();
+  }
+};
+
+window.filterProviderTable = function(q) {
+  const val = String(q || "").trim().toLowerCase();
+  document.querySelectorAll('#table-provider-invoices tbody tr').forEach(tr => {
+    const s = tr.getAttribute('data-prov-search') || "";
+    tr.style.display = (!val || s.includes(val)) ? '' : 'none';
+  });
+};
+
+window.openNewProviderInvoiceModal = function() {
+  let uploadedPhotos = [];
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-file-invoice-dollar" style="color:#10b981;"></i> Registrar Nota de Entrega de Proveedor
+        </h2>
+        <div style="font-size:12px; color:var(--text-muted);">Adjunta fotos de 1 a 3 páginas y programa el pago.</div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <form id="new-prov-invoice-form" class="form-grid" style="margin-top:12px;">
+      <label class="field">
+        <span class="field-label">PROVEEDOR:</span>
+        <input type="text" id="prov-nombre" name="proveedor" list="prov-sugeridos" required placeholder="Ej. Americas, Blindac, Prodimarca, Patiño, Huepa...">
+        <datalist id="prov-sugeridos">
+          <option value="Americas (Jorge José Ochoa Gómez)">
+          <option value="Blindac, C.A.">
+          <option value="Prodimarca (Manualidades y Artes)">
+          <option value="Inversiones Patiño, C.A.">
+          <option value="Huepa (Chocolates &amp; Repostería)">
+        </datalist>
+      </label>
+
+      <div class="form-inline" style="gap:8px;">
+        <label class="field" style="flex:1;">
+          <span class="field-label">N° NOTA / FACTURA:</span>
+          <input type="text" id="prov-numero" name="numero" placeholder="Ej. 11140, CD111764, 00018503..." required>
+        </label>
+        <label class="field" style="flex:1;">
+          <span class="field-label">FECHA DE ENTREGA:</span>
+          <input type="date" id="prov-fecha-entrega" name="fechaEntrega" value="${new Date().toISOString().split('T')[0]}" required>
+        </label>
+        <label class="field" style="flex:1;">
+          <span class="field-label">FECHA LÍMITE PAGO:</span>
+          <input type="date" id="prov-fecha-vence" name="fechaVencimiento" value="${new Date(Date.now() + 15*86400000).toISOString().split('T')[0]}" required>
+        </label>
+      </div>
+
+      <div class="form-inline" style="gap:8px;">
+        <label class="field" style="flex:1;">
+          <span class="field-label">MONEDA:</span>
+          <select id="prov-moneda" name="moneda">
+            <option value="USD" selected>Dólares ($ USD)</option>
+            <option value="VES">Bolívares (Bs VES)</option>
+          </select>
+        </label>
+        <label class="field" style="flex:1.5;">
+          <span class="field-label">MONTO TOTAL:</span>
+          <input type="number" id="prov-monto" name="monto" step="0.01" min="0.01" placeholder="0.00" required>
+        </label>
+      </div>
+
+      <!-- Subida de Fotos de Múltiples Hojas -->
+      <div class="physical-invoice-box" style="border-color:#10b981; margin-top:6px;">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#10b981; text-transform:uppercase;">
+            📸 Hojas de la Nota de Entrega (1 a 3+ fotos):
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="secondary-button" id="btn-add-prov-cam" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📸 Tomar Foto
+            </button>
+            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📁 Subir Foto
+              <input type="file" id="prov-file-input" accept="image/*" multiple style="display:none;">
+            </label>
+          </div>
+        </div>
+        <div id="prov-photos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">NOTAS / PRODUCTOS INCLUIDOS:</span>
+        <textarea id="prov-notas" name="notas" rows="2" placeholder="Ej. Cartulinas, silicón, envases para postre..."></textarea>
+      </label>
+
+      <div class="modal-foot" style="margin-top:10px; display:flex; gap:8px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" style="flex:2; background:#10b981; border:none; font-weight:bold;">
+          💾 Guardar Nota de Entrega
+        </button>
+      </div>
+    </form>
+  `);
+
+  const previewBox = document.getElementById("prov-photos-preview");
+  const fileInp = document.getElementById("prov-file-input");
+  const camBtn = document.getElementById("btn-add-prov-cam");
+
+  const renderPhotoPreviews = () => {
+    previewBox.innerHTML = uploadedPhotos.map((src, idx) => `
+      <div style="position:relative; width:65px; height:65px; border-radius:6px; overflow:hidden; border:1px solid #10b981;">
+        <img src="${src}" style="width:100%; height:100%; object-fit:cover;">
+        <button type="button" onclick="window._removeProvPhoto(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(239,68,68,0.85); color:white; border:none; border-radius:50%; width:18px; height:18px; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+      </div>
+    `).join('');
+  };
+
+  window._removeProvPhoto = (i) => {
+    uploadedPhotos.splice(i, 1);
+    renderPhotoPreviews();
+  };
+
+  if (fileInp) {
+    fileInp.addEventListener("change", (e) => {
+      Array.from(e.target.files).forEach(f => {
+        const r = new FileReader();
+        r.onload = (ev) => {
+          uploadedPhotos.push(ev.target.result);
+          renderPhotoPreviews();
+        };
+        r.readAsDataURL(f);
+      });
+    });
+  }
+
+  if (camBtn) {
+    camBtn.addEventListener("click", () => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = "image/*";
+      inp.capture = "environment";
+      inp.onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = (ev) => {
+          uploadedPhotos.push(ev.target.result);
+          renderPhotoPreviews();
+        };
+        r.readAsDataURL(f);
+      };
+      inp.click();
+    });
+  }
+
+  const form = document.getElementById("new-prov-invoice-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const proveedor = document.getElementById("prov-nombre").value.trim();
+      const numeroNota = document.getElementById("prov-numero").value.trim();
+      const fechaEntrega = document.getElementById("prov-fecha-entrega").value;
+      const fechaVencimiento = document.getElementById("prov-fecha-vence").value;
+      const moneda = document.getElementById("prov-moneda").value;
+      const montoTotal = parseFloat(document.getElementById("prov-monto").value);
+      const notas = document.getElementById("prov-notas").value.trim();
+      const tasaBCV = parseFloat(store.get("pp_tasa_bcv", 798.33));
+
+      const newInv = {
+        id: "PROV-" + Date.now(),
+        proveedor: proveedor,
+        numeroNota: numeroNota,
+        fechaEntrega: fechaEntrega,
+        fechaVencimiento: fechaVencimiento,
+        moneda: moneda,
+        montoTotal: montoTotal,
+        abonado: 0.00,
+        saldoPendiente: montoTotal,
+        estado: "Pendiente",
+        tasaBCV: tasaBCV,
+        fotos: uploadedPhotos,
+        abonos: [],
+        notas: notas
+      };
+
+      const list = getStoredProvidersData();
+      list.unshift(newInv);
+      saveStoredProvidersData(list);
+
+      // Intentar sincronizar con backend
+      try {
+        api("profile_save_provider_invoice", newInv).catch(()=>{});
+      } catch(e){}
+
+      showToast(`✅ Nota de ${proveedor} guardada.`);
+      closeModal();
+      if (typeof render === "function") render();
+    });
+  }
+};
+
+window.openProviderInvoiceDetailModal = function(id) {
+  const list = getStoredProvidersData();
+  const inv = list.find(i => String(i.id) === String(id));
+  if (!inv) return;
+
+  const tasaBCV = parseFloat(store.get("pp_tasa_bcv", 798.33));
+  const saldoBs = (inv.saldoPendiente * tasaBCV).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const totalBs = (inv.montoTotal * tasaBCV).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0; display:flex; align-items:center; gap:8px;">
+          ${escapeHtml(inv.proveedor)}
+        </h2>
+        <div style="font-size:12px; color:var(--text-muted);">
+          Nota N° <strong>${escapeHtml(inv.numeroNota)}</strong> | Recibido: ${escapeHtml(inv.fechaEntrega)} | Vence: <strong>${escapeHtml(inv.fechaVencimiento)}</strong>
+        </div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <div style="background:rgba(0,0,0,0.25); border-radius:10px; padding:14px; margin:14px 0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <span style="font-size:11px; color:var(--text-muted); display:block;">MONTO ORIGINAL:</span>
+          <strong style="font-size:16px; color:var(--text-main);">$${Number(inv.montoTotal).toFixed(2)}</strong>
+          <span style="font-size:11px; color:#9ca3af;">(Bs. ${totalBs})</span>
+        </div>
+        <div>
+          <span style="font-size:11px; color:var(--text-muted); display:block;">TOTAL ABONADO:</span>
+          <strong style="font-size:16px; color:#10b981;">$${Number(inv.abonado).toFixed(2)}</strong>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:11px; color:#ef4444; font-weight:bold; display:block;">SALDO RESTANTE POR PAGAR:</span>
+          <strong style="font-size:20px; color:#ef4444;">$${Number(inv.saldoPendiente).toFixed(2)}</strong>
+          <div style="font-size:12px; color:#38bdf8; font-weight:bold;">Bs. ${saldoBs} (Tasa: ${tasaBCV})</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fotos de la Nota Física -->
+    ${inv.fotos && inv.fotos.length ? `
+      <div style="margin-bottom:16px;">
+        <span style="font-size:11.5px; font-weight:bold; color:var(--text-main); display:block; margin-bottom:6px;">
+          📄 Hojas / Respaldo de la Nota (${inv.fotos.length}):
+        </span>
+        <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:6px;">
+          ${inv.fotos.map((f, idx) => `
+            <a href="${f}" target="_blank" title="Abrir imagen completa">
+              <img src="${f}" style="width:90px; height:120px; object-fit:cover; border-radius:6px; border:1px solid #10b981;">
+            </a>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Historial de Abonos -->
+    <div style="margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:12.5px; font-weight:bold; color:var(--text-main);">Historial de Pagos y Abonos</span>
+        ${inv.saldoPendiente > 0.01 ? `
+          <button type="button" class="primary-button" onclick="window.openAddProviderPaymentModal('${escapeHtml(inv.id)}')" style="font-size:11px; padding:4px 10px; background:#10b981; border:none;">
+            + Registrar Abono
+          </button>
+        ` : '<span style="color:#10b981; font-weight:bold; font-size:12px;">✅ NOTA TOTALMENTE PAGADA</span>'}
+      </div>
+      <div style="background:var(--bg-main); border:1px solid var(--border-color); border-radius:8px; overflow:hidden;">
+        ${inv.abonos && inv.abonos.length ? `
+          <table style="width:100%; font-size:11.5px; border-collapse:collapse;">
+            <thead>
+              <tr style="background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border-color); text-align:left;">
+                <th style="padding:6px 10px;">Fecha</th>
+                <th style="padding:6px 10px;">Monto</th>
+                <th style="padding:6px 10px;">Método / Ref</th>
+                <th style="padding:6px 10px;">Registrado Por</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${inv.abonos.map(ab => `
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.02);">
+                  <td style="padding:6px 10px; color:var(--text-muted);">${escapeHtml(ab.fecha)}</td>
+                  <td style="padding:6px 10px; font-weight:bold; color:#10b981;">$${Number(ab.monto).toFixed(2)}</td>
+                  <td style="padding:6px 10px;">${escapeHtml(ab.referencia || 'N/A')}</td>
+                  <td style="padding:6px 10px; color:var(--text-muted);">${escapeHtml(ab.registradoPor || 'Gerencia')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : '<div style="padding:14px; text-align:center; color:var(--text-muted); font-size:12px;">No se han registrado abonos previos a esta nota.</div>'}
+      </div>
+    </div>
+  `);
+};
+
+window.openAddProviderPaymentModal = function(id) {
+  const list = getStoredProvidersData();
+  const inv = list.find(i => String(i.id) === String(id));
+  if (!inv) return;
+
+  Swal.fire({
+    title: `Abonar a ${inv.proveedor}`,
+    html: `
+      <div style="text-align:left; font-size:12px;">
+        <p style="margin:0 0 10px 0; color:#9ca3af;">Saldo pendiente: <strong style="color:#ef4444;">$${inv.saldoPendiente.toFixed(2)}</strong></p>
+        <label style="display:block; margin-bottom:6px; font-weight:bold;">Monto a Abonar ($):</label>
+        <input type="number" id="swal-abono-monto" class="swal2-input" step="0.01" max="${inv.saldoPendiente}" placeholder="0.00" style="margin:0 0 10px 0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin-bottom:6px; font-weight:bold;">Método / Referencia:</label>
+        <input type="text" id="swal-abono-ref" class="swal2-input" placeholder="Ej. Pago Móvil 5407 / Efectivo" style="margin:0; width:100%; box-sizing:border-box;">
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: "Registrar Abono",
+    confirmButtonColor: "#10b981",
+    cancelButtonText: "Cancelar",
+    preConfirm: () => {
+      const m = parseFloat(document.getElementById("swal-abono-monto")?.value);
+      const r = document.getElementById("swal-abono-ref")?.value.trim();
+      if (isNaN(m) || m <= 0) {
+        Swal.showValidationMessage("Ingresa un monto válido mayor a 0");
+        return false;
+      }
+      return { monto: m, ref: r || "Efectivo" };
+    }
+  }).then(res => {
+    if (res.isConfirmed && res.value) {
+      const now = new Date();
+      const abonoObj = {
+        fecha: now.toLocaleDateString('es-VE') + ' ' + now.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' }),
+        monto: res.value.monto,
+        moneda: "USD",
+        referencia: res.value.ref,
+        registradoPor: state.session?.name || "Gerencia"
+      };
+      inv.abonos = inv.abonos || [];
+      inv.abonos.push(abonoObj);
+      inv.abonado = Number(inv.abonado || 0) + res.value.monto;
+      inv.saldoPendiente = Math.max(0, Number(inv.montoTotal) - inv.abonado);
+      inv.estado = inv.saldoPendiente <= 0.01 ? "Pagada" : "Parcial";
+
+      saveStoredProvidersData(list);
+      try {
+        api("profile_add_provider_payment", { id: inv.id, monto: res.value.monto, referencia: res.value.ref }).catch(()=>{});
+      } catch(e){}
+
+      showToast(`✅ Abono de $${res.value.monto.toFixed(2)} registrado.`);
+      closeModal();
+      window.openProviderInvoiceDetailModal(inv.id);
+      if (typeof render === "function") render();
+    }
+  });
+};
+
+window.deleteProviderInvoice = function(id) {
+  if (!confirm("¿Seguro que deseas eliminar este registro de proveedor?")) return;
+  let list = getStoredProvidersData();
+  list = list.filter(i => String(i.id) !== String(id));
+  saveStoredProvidersData(list);
+  showToast("Nota de entrega eliminada.");
+  if (typeof render === "function") render();
+};
+
+
+// =========================================================================
+// MÓDULO 2: CIERRE DE CAJA POR TURNOS (PLANILLA FÍSICA CREACIONES JJ)
+// =========================================================================
+function getStoredCashCloses() {
+  const defaultList = [
+    {
+      id: "CAJA-20260910-T1",
+      fecha: "2026-09-10",
+      turno: "Turno 1 (8:00 AM a 1:00 PM)",
+      inicioBs: 300.00,
+      inicioUSD: 3.00,
+      totalPuntoBs: 3180.00,
+      totalPagoMovilBs: 40.00,
+      totalEfectivoBs: 1050.00,
+      totalEfectivoUSD: 12.00,
+      tasaBCV: 798.33,
+      totalDiaBs: 4270.00,
+      totalDiaUSD: 17.35,
+      fotoRespaldo: "",
+      responsable: "Moises",
+      observaciones: "Turno de la mañana cuadrado con lote de punto."
+    }
+  ];
+  return store.get("pp_cash_closes", defaultList);
+}
+
+function saveStoredCashCloses(list) {
+  store.set("pp_cash_closes", list);
+}
+
+function cashView() {
+  if (!isLead()) {
+    return `<div style="text-align:center; padding:50px; color:#ef4444;"><h2>🔒 Acceso Restringido</h2><p>Este módulo es exclusivo para Gerencia y Jefes.</p></div>`;
+  }
+
+  const closes = getStoredCashCloses();
+  const currentTasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
+
+  return `
+    <div style="max-width:1100px; margin:0 auto; padding-bottom:40px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+        <div>
+          <h1 style="font-size:22px; margin:0 0 6px 0; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-cash-register" style="color:#f59e0b;"></i> Cierre de Caja &amp; Arqueo Diario
+          </h1>
+          <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+            Transcribe los cierres de turno (1:00 PM y 8:00 PM) basados en la planilla física de Creaciones JJ para el contador fiscal.
+          </p>
+        </div>
+        <button type="button" class="primary-button" onclick="window.openNewCashCloseModal()" style="background:#f59e0b; color:white; border:none; padding:9px 16px; border-radius:8px; font-weight:800; font-size:12px; display:inline-flex; align-items:center; gap:6px;">
+          <i class="fas fa-plus-circle"></i> + Nuevo Cierre de Turno
+        </button>
+      </div>
+
+      <!-- Historial de Cierres -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        ${closes.map(c => `
+          <div class="cash-shift-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+              <div>
+                <span style="font-size:11px; font-weight:bold; color:#f59e0b; text-transform:uppercase;">
+                  <i class="fas fa-clock"></i> ${escapeHtml(c.turno)}
+                </span>
+                <h3 style="margin:2px 0 0 0; font-size:16px; color:var(--text-main);">Fecha: ${escapeHtml(c.fecha)}</h3>
+                <div style="font-size:11.5px; color:var(--text-muted);">Elaborado por: <strong>${escapeHtml(c.responsable || 'Gerencia')}</strong> | Fondo inicial: <strong>Bs. ${c.inicioBs} / $${c.inicioUSD}</strong></div>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-size:11px; color:var(--text-muted); display:block;">TOTAL EN BS:</span>
+                <strong style="font-size:18px; color:#10b981;">Bs. ${Number(c.totalDiaBs).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
+                <div style="font-size:12px; font-weight:bold; color:#38bdf8;">Total USD: $${Number(c.totalDiaUSD).toFixed(2)}</div>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; background:rgba(0,0,0,0.2); border-radius:8px; padding:10px;">
+              <div>
+                <span style="font-size:10.5px; color:var(--text-muted); display:block;">💳 PUNTO DE VENTA:</span>
+                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalPuntoBs).toLocaleString('es-VE')}</strong>
+              </div>
+              <div>
+                <span style="font-size:10.5px; color:var(--text-muted); display:block;">📲 PAGO MÓVIL:</span>
+                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalPagoMovilBs).toLocaleString('es-VE')}</strong>
+              </div>
+              <div>
+                <span style="font-size:10.5px; color:var(--text-muted); display:block;">💵 EFECTIVO BS:</span>
+                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalEfectivoBs).toLocaleString('es-VE')}</strong>
+              </div>
+              <div>
+                <span style="font-size:10.5px; color:var(--text-muted); display:block;">💵 EFECTIVO $:</span>
+                <strong style="color:#10b981; font-size:13px;">$${Number(c.totalEfectivoUSD).toFixed(2)}</strong>
+              </div>
+            </div>
+
+            ${c.fotoRespaldo ? `
+              <div style="margin-top:10px;">
+                <a href="${c.fotoRespaldo}" target="_blank" style="font-size:11px; color:#38bdf8; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+                  <i class="fas fa-image"></i> Ver Foto de la Hoja Física de Cierre
+                </a>
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+window.openNewCashCloseModal = function() {
+  let photoRespaldoBase64 = "";
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-cash-register" style="color:#f59e0b;"></i> Nuevo Cierre de Turno / Caja
+        </h2>
+        <div style="font-size:12px; color:var(--text-muted);">Basado en la planilla física de Creaciones JJ.</div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <form id="cash-close-form" class="form-grid" style="margin-top:12px;">
+      <div class="form-inline" style="gap:8px;">
+        <label class="field" style="flex:1;">
+          <span class="field-label">FECHA:</span>
+          <input type="date" id="caja-fecha" value="${new Date().toISOString().split('T')[0]}" required>
+        </label>
+        <label class="field" style="flex:1.5;">
+          <span class="field-label">TURNO:</span>
+          <select id="caja-turno">
+            <option value="Turno 1 (8:00 AM a 1:00 PM)">Turno 1 (Mediodía - 1:00 PM)</option>
+            <option value="Turno 2 (3:00 PM a 8:00 PM)">Turno 2 (Noche - 8:00 PM)</option>
+            <option value="Cierre Completo del Día">Cierre Consolidado del Día</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="form-inline" style="gap:8px;">
+        <label class="field" style="flex:1;">
+          <span class="field-label">INICIO BS EN CAJA:</span>
+          <input type="number" id="caja-inicio-bs" value="300.00" step="0.01">
+        </label>
+        <label class="field" style="flex:1;">
+          <span class="field-label">INICIO $ EN CAJA:</span>
+          <input type="number" id="caja-inicio-usd" value="3.00" step="0.01">
+        </label>
+      </div>
+
+      <!-- 1. PUNTO DE VENTA -->
+      <div style="background:rgba(0,0,0,0.2); border-radius:8px; padding:10px; margin-bottom:6px;">
+        <span style="font-size:11px; font-weight:800; color:#38bdf8; text-transform:uppercase; display:block; margin-bottom:6px;">
+          💳 Punto de Venta (Total Lote en Bs):
+        </span>
+        <input type="number" id="caja-punto-bs" placeholder="Total cobrado en punto (Bs)" step="0.01" value="0.00" oninput="window.calcCashTotals()">
+      </div>
+
+      <!-- 2. PAGO MÓVIL CON REFERENCIA -->
+      <div style="background:rgba(0,0,0,0.2); border-radius:8px; padding:10px; margin-bottom:6px;">
+        <span style="font-size:11px; font-weight:800; color:#a78bfa; text-transform:uppercase; display:block; margin-bottom:6px;">
+          📲 Pago Móvil (Monto Bs y Referencias):
+        </span>
+        <div class="form-inline" style="gap:8px;">
+          <input type="number" id="caja-pagomovil-bs" placeholder="Monto total Pago Móvil (Bs)" step="0.01" value="0.00" oninput="window.calcCashTotals()" style="flex:1;">
+          <input type="text" id="caja-pagomovil-ref" placeholder="Últimos 4 dígitos / Ref (ej: 5407, 8812)" style="flex:1.5;">
+        </div>
+      </div>
+
+      <!-- 3. EFECTIVOS -->
+      <div class="form-inline" style="gap:8px;">
+        <label class="field" style="flex:1;">
+          <span class="field-label">💵 EFECTIVO BOLÍVARES (Bs):</span>
+          <input type="number" id="caja-efectivo-bs" step="0.01" value="0.00" oninput="window.calcCashTotals()">
+        </label>
+        <label class="field" style="flex:1;">
+          <span class="field-label">💵 EFECTIVO DÓLARES ($):</span>
+          <input type="number" id="caja-efectivo-usd" step="0.01" value="0.00" oninput="window.calcCashTotals()">
+        </label>
+      </div>
+
+      <!-- TOTAL CALCULADO -->
+      <div class="cash-total-banner">
+        <div>
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">TOTAL DEL TURNO EN BS:</span>
+          <div id="caja-total-preview-bs" style="font-size:22px; font-weight:900; color:#10b981;">Bs. 0,00</div>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">TOTAL USD (A TASA BCV):</span>
+          <div id="caja-total-preview-usd" style="font-size:18px; font-weight:900; color:#38bdf8;">$0.00</div>
+        </div>
+      </div>
+
+      <!-- FOTO RESPALDO PLANILLA FÍSICA -->
+      <div class="physical-invoice-box" style="margin-top:6px;">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#f59e0b; text-transform:uppercase;">
+            📸 Foto de la Planilla Física de Cierre (Auditoría):
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="secondary-button" id="btn-cam-caja" style="background:#f59e0b; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📸 Tomar Foto
+            </button>
+            <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+              📁 Subir Foto
+              <input type="file" id="caja-file-input" accept="image/*" style="display:none;">
+            </label>
+          </div>
+        </div>
+        <div id="caja-photo-preview" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+          <img id="caja-thumb-img" src="" style="width:70px; height:70px; object-fit:cover; border-radius:6px; border:1px solid #f59e0b;">
+          <span style="font-size:11.5px; color:#10b981; font-weight:bold;">Planilla física adjunta correctamente.</span>
+        </div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">OBSERVACIONES DEL TURNO:</span>
+        <input type="text" id="caja-obs" placeholder="Ej. Cuadrado con recibos y efectivo en gaveta">
+      </label>
+
+      <div class="modal-foot" style="margin-top:10px; display:flex; gap:8px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" style="flex:2; background:#f59e0b; border:none; font-weight:bold;">
+          💾 Guardar Cierre de Caja
+        </button>
+      </div>
+    </form>
+  `);
+
+  window.calcCashTotals = function() {
+    const pto = parseFloat(document.getElementById("caja-punto-bs")?.value || 0);
+    const pm = parseFloat(document.getElementById("caja-pagomovil-bs")?.value || 0);
+    const efBs = parseFloat(document.getElementById("caja-efectivo-bs")?.value || 0);
+    const efUSD = parseFloat(document.getElementById("caja-efectivo-usd")?.value || 0);
+    const tasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
+
+    const totalBs = pto + pm + efBs;
+    const totalUSD = (totalBs / (tasa || 1)) + efUSD;
+
+    const elBs = document.getElementById("caja-total-preview-bs");
+    const elUSD = document.getElementById("caja-total-preview-usd");
+    if (elBs) elBs.textContent = `Bs. ${totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`;
+    if (elUSD) elUSD.textContent = `$${totalUSD.toFixed(2)}`;
+  };
+  window.calcCashTotals();
+
+  const fileInp = document.getElementById("caja-file-input");
+  const camBtn = document.getElementById("btn-cam-caja");
+  const pBox = document.getElementById("caja-photo-preview");
+  const pImg = document.getElementById("caja-thumb-img");
+
+  if (fileInp) {
+    fileInp.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        photoRespaldoBase64 = ev.target.result;
+        pImg.src = photoRespaldoBase64;
+        pBox.style.display = "flex";
+      };
+      r.readAsDataURL(f);
+    });
+  }
+
+  if (camBtn) {
+    camBtn.addEventListener("click", () => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = "image/*";
+      inp.capture = "environment";
+      inp.onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = (ev) => {
+          photoRespaldoBase64 = ev.target.result;
+          pImg.src = photoRespaldoBase64;
+          pBox.style.display = "flex";
+        };
+        r.readAsDataURL(f);
+      };
+      inp.click();
+    });
+  }
+
+  const form = document.getElementById("cash-close-form");
+  if (form) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const fecha = document.getElementById("caja-fecha").value;
+      const turno = document.getElementById("caja-turno").value;
+      const inicioBs = parseFloat(document.getElementById("caja-inicio-bs").value || 0);
+      const inicioUSD = parseFloat(document.getElementById("caja-inicio-usd").value || 0);
+      const pto = parseFloat(document.getElementById("caja-punto-bs").value || 0);
+      const pm = parseFloat(document.getElementById("caja-pagomovil-bs").value || 0);
+      const pmRef = document.getElementById("caja-pagomovil-ref").value.trim();
+      const efBs = parseFloat(document.getElementById("caja-efectivo-bs").value || 0);
+      const efUSD = parseFloat(document.getElementById("caja-efectivo-usd").value || 0);
+      const obs = document.getElementById("caja-obs").value.trim();
+      const tasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
+
+      const totalBs = pto + pm + efBs;
+      const totalUSD = (totalBs / (tasa || 1)) + efUSD;
+
+      const newClose = {
+        id: "CAJA-" + Date.now(),
+        fecha: fecha,
+        turno: turno,
+        inicioBs: inicioBs,
+        inicioUSD: inicioUSD,
+        totalPuntoBs: pto,
+        totalPagoMovilBs: pm,
+        totalEfectivoBs: efBs,
+        totalEfectivoUSD: efUSD,
+        tasaBCV: tasa,
+        totalDiaBs: totalBs,
+        totalDiaUSD: totalUSD,
+        detalles: { pmRef: pmRef },
+        fotoRespaldo: photoRespaldoBase64,
+        responsable: state.session?.name || "Gerencia",
+        observaciones: obs
+      };
+
+      const list = getStoredCashCloses();
+      list.unshift(newClose);
+      saveStoredCashCloses(list);
+
+      try {
+        api("profile_save_cash_close", newClose).catch(()=>{});
+      } catch(e){}
+
+      showToast("✅ Cierre de caja registrado exitosamente.");
+      closeModal();
+      if (typeof render === "function") render();
+    });
+  }
+};
+
+
+// =========================================================================
+// MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
+// =========================================================================
+function getStoredInventory() {
+  const defaultItems = [
+    { id: "INV-1", producto: "Silicón Frío 250cc", categoria: "Pegamentos", stockActual: "2 unidades", estado: "Bajo Stock", precioUSD: 5.00, proveedor: "Prodimarca", notas: "Uso diario en toppers" },
+    { id: "INV-2", producto: "Silicón Frío 100cc", categoria: "Pegamentos", stockActual: "5 unidades", estado: "Disponible", precioUSD: 2.70, proveedor: "Prodimarca", notas: "" },
+    { id: "INV-3", producto: "Silicón Frío 60cc", categoria: "Pegamentos", stockActual: "0 unidades", estado: "Agotado", precioUSD: 1.80, proveedor: "Prodimarca", notas: "Pedir caja" },
+    { id: "INV-4", producto: "Silicón en barra fino", categoria: "Pegamentos", stockActual: "0 unidades", estado: "Agotado", precioUSD: 0.40, proveedor: "Prodimarca", notas: "Urgente" },
+    { id: "INV-5", producto: "Silicón en barra grueso", categoria: "Pegamentos", stockActual: "10 unidades", estado: "Disponible", precioUSD: 0.70, proveedor: "Prodimarca", notas: "" },
+    { id: "INV-6", producto: "Pega Blanca 120cc", categoria: "Pegamentos", stockActual: "1 unidad", estado: "Bajo Stock", precioUSD: 1.30, proveedor: "Blindac", notas: "" },
+    { id: "INV-7", producto: "Paletas Polo Natural", categoria: "Papelería", stockActual: "0 paquetes", estado: "Agotado", precioUSD: 2.40, proveedor: "Blindac", notas: "Paletas de madera" },
+    { id: "INV-8", producto: "Creyones Pointer", categoria: "Papelería", stockActual: "4 cajas", estado: "Disponible", precioUSD: 2.00, proveedor: "Blindac", notas: "" },
+    { id: "INV-9", producto: "Cartulinas Construcción College", categoria: "Papelería", stockActual: "15 pliegos", estado: "Bajo Stock", precioUSD: 0.50, proveedor: "Prodimarca", notas: "Colores surtidos" },
+    { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
+  ];
+  return store.get("pp_inventory_items", defaultItems);
+}
+
+function saveStoredInventory(list) {
+  store.set("pp_inventory_items", list);
+}
+
+function inventoryView() {
+  const items = getStoredInventory();
+  const currentTab = state.inventoryTab || 'catalog'; // 'catalog' | 'shopping_list'
+  const outItems = items.filter(i => i.estado === 'Agotado' || i.estado === 'Bajo Stock');
+
+  return `
+    <div style="max-width:1150px; margin:0 auto; padding-bottom:40px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+        <div>
+          <h1 style="font-size:22px; margin:0 0 6px 0; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-boxes" style="color:#06b6d4;"></i> Mini Inventario &amp; Control de Insumos
+          </h1>
+          <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+            Control de materiales del taller, alertas de agotados y lista para compras mensuales a proveedores.
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="secondary-button" onclick="window.setInventoryTab('${currentTab === 'catalog' ? 'shopping_list' : 'catalog'}')" style="background:${currentTab === 'shopping_list' ? '#06b6d4; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:8px 14px;">
+            <i class="fas fa-clipboard-list"></i> ${currentTab === 'shopping_list' ? 'Ver Catálogo Completo' : `📋 Lista de Compras (${outItems.length})`}
+          </button>
+          <button type="button" class="primary-button" onclick="window.openNewInventoryModal()" style="background:#06b6d4; border:none; padding:8px 14px; font-size:12px; font-weight:bold;">
+            + Nuevo Insumo
+          </button>
+        </div>
+      </div>
+
+      ${currentTab === 'shopping_list' ? `
+        <!-- VISTA DE LISTA DE COMPRAS PARA PROVEEDORES -->
+        <div class="sics-table-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <h3 style="margin:0; font-size:16px; color:#06b6d4;">📋 Lista de Compras Mensual (${outItems.length} insumos requeridos)</h3>
+              <div style="font-size:11.5px; color:var(--text-muted);">Artículos agotados o con bajo stock en el taller.</div>
+            </div>
+            <button type="button" class="primary-button" onclick="window.copyShoppingListWhatsApp()" style="background:#25d366; border:none; padding:8px 16px; font-weight:bold; font-size:12px; display:inline-flex; align-items:center; gap:6px;">
+              <i class="fab fa-whatsapp"></i> Copiar Lista para WhatsApp
+            </button>
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="sics-data-table">
+              <thead>
+                <tr>
+                  <th>Insumo / Producto</th>
+                  <th>Categoría</th>
+                  <th>Estado Actual</th>
+                  <th>Proveedor Habitual</th>
+                  <th style="text-align:right;">Precio Estimado</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${outItems.length ? outItems.map(i => `
+                  <tr>
+                    <td style="font-weight:bold; color:var(--text-main);">${escapeHtml(i.producto)}</td>
+                    <td style="color:var(--text-muted);">${escapeHtml(i.categoria)}</td>
+                    <td>
+                      <span style="padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:bold; background:${i.estado === 'Agotado' ? 'rgba(239,68,68,0.2); color:#ef4444;' : 'rgba(245,158,11,0.2); color:#f59e0b;'}">
+                        ${escapeHtml(i.estado)}
+                      </span>
+                    </td>
+                    <td style="color:#38bdf8; font-weight:bold;">${escapeHtml(i.proveedor || 'Sin asignar')}</td>
+                    <td style="text-align:right; font-weight:bold; color:#10b981;">$${Number(i.precioUSD).toFixed(2)}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5" style="text-align:center; padding:20px; color:#10b981;">🎉 ¡Todos los insumos están abastecidos! No hay faltantes.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : `
+        <!-- CATÁLOGO DE INSUMOS (GRID) -->
+        <div class="inventory-grid">
+          ${items.map(item => {
+            const isOut = item.estado === 'Agotado';
+            const isLow = item.estado === 'Bajo Stock';
+            const cardClass = isOut ? 'inventory-card is-out' : (isLow ? 'inventory-card is-low' : 'inventory-card');
+            const badgeBg = isOut ? 'rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4);' : (isLow ? 'rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4);' : 'rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);');
+
+            return `
+              <div class="${cardClass}">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                    <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase;">${escapeHtml(item.categoria)}</span>
+                    <button type="button" onclick="window.cycleInventoryStatus('${escapeHtml(item.id)}')" style="border-radius:12px; padding:2px 8px; font-size:10px; font-weight:800; cursor:pointer; background:${badgeBg}">
+                      ${escapeHtml(item.estado)}
+                    </button>
+                  </div>
+                  <h3 style="margin:0 0 4px 0; font-size:14px; color:var(--text-main);">${escapeHtml(item.producto)}</h3>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
+                    Stock: <strong>${escapeHtml(item.stockActual || 'N/A')}</strong>
+                  </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; font-size:11.5px;">
+                  <span style="color:#9ca3af;"><i class="fas fa-truck" style="font-size:10px;"></i> ${escapeHtml(item.proveedor || 'Proveedor')}</span>
+                  <strong style="color:#10b981;">$${Number(item.precioUSD).toFixed(2)}</strong>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+window.setInventoryTab = function(tab) {
+  state.inventoryTab = tab;
+  if (typeof render === "function") render();
+};
+
+window.cycleInventoryStatus = function(id) {
+  const list = getStoredInventory();
+  const it = list.find(i => String(i.id) === String(id));
+  if (!it) return;
+  if (it.estado === "Disponible") it.estado = "Bajo Stock";
+  else if (it.estado === "Bajo Stock") it.estado = "Agotado";
+  else it.estado = "Disponible";
+
+  saveStoredInventory(list);
+  showToast(`${it.producto}: ${it.estado}`);
+  if (typeof render === "function") render();
+};
+
+window.openNewInventoryModal = function() {
+  Swal.fire({
+    title: "Nuevo Insumo de Taller",
+    html: `
+      <div style="text-align:left; font-size:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Nombre del Insumo / Material:</label>
+        <input type="text" id="swal-inv-nombre" class="swal2-input" placeholder="Ej. Silicón frío 250cc, Vinil dorado" style="margin:0 0 8px 0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Categoría:</label>
+        <input type="text" id="swal-inv-cat" class="swal2-input" placeholder="Ej. Pegamentos, Papelería, Sublimación" value="Papelería" style="margin:0 0 8px 0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Proveedor Habitual:</label>
+        <input type="text" id="swal-inv-prov" class="swal2-input" placeholder="Ej. Prodimarca, Blindac, Americas" style="margin:0 0 8px 0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Precio Estimado ($ USD):</label>
+        <input type="number" id="swal-inv-precio" class="swal2-input" step="0.01" placeholder="0.00" value="1.00" style="margin:0; width:100%; box-sizing:border-box;">
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: "Guardar Insumo",
+    confirmButtonColor: "#06b6d4",
+    cancelButtonText: "Cancelar",
+    preConfirm: () => {
+      const n = document.getElementById("swal-inv-nombre")?.value.trim();
+      const c = document.getElementById("swal-inv-cat")?.value.trim() || "General";
+      const p = document.getElementById("swal-inv-prov")?.value.trim() || "Proveedor";
+      const pr = parseFloat(document.getElementById("swal-inv-precio")?.value || 0);
+      if (!n) {
+        Swal.showValidationMessage("El nombre del insumo es obligatorio");
+        return false;
+      }
+      return { producto: n, categoria: c, proveedor: p, precioUSD: pr };
+    }
+  }).then(res => {
+    if (res.isConfirmed && res.value) {
+      const list = getStoredInventory();
+      list.push({
+        id: "INV-" + Date.now(),
+        producto: res.value.producto,
+        categoria: res.value.categoria,
+        stockActual: "1 unidad",
+        estado: "Disponible",
+        precioUSD: res.value.precioUSD,
+        proveedor: res.value.proveedor,
+        notas: ""
+      });
+      saveStoredInventory(list);
+      showToast(`✅ Insumo "${res.value.producto}" añadido.`);
+      if (typeof render === "function") render();
+    }
+  });
+};
+
+window.copyShoppingListWhatsApp = function() {
+  const items = getStoredInventory().filter(i => i.estado === 'Agotado' || i.estado === 'Bajo Stock');
+  if (!items.length) {
+    showToast("No hay insumos faltantes para pedir.");
+    return;
+  }
+  let text = `📦 *LISTA DE COMPRAS - CREACIONES JJ* 🎨\n`;
+  text += `Fecha: ${new Date().toLocaleDateString('es-VE')}\n\n`;
+  items.forEach(it => {
+    text += `▪️ *${it.producto}* (${it.categoria}) - ${it.estado}\n   Proveedor: ${it.proveedor || 'General'} | Ref: $${it.precioUSD.toFixed(2)}\n`;
+  });
+  text += `\n_Generado automáticamente desde el Sistema Creaciones JJ._`;
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("📋 ¡Lista de compras copiada al portapapeles para WhatsApp!");
+    });
+  } else {
+    alert(text);
+  }
 };
