@@ -2578,6 +2578,21 @@ function settingsView() {
             <i class="fas fa-chevron-down jj-accordion-chevron"></i>
           </div>
           <div class="jj-accordion-body">
+            <!-- Botón directo para que el usuario logueado cambie su PIN -->
+            <div style="background:linear-gradient(135deg, rgba(56,189,248,0.1), rgba(14,165,233,0.05)); border:1.5px solid #0284c7; border-radius:10px; padding:12px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+              <div>
+                <strong style="color:#0284c7; font-size:13px; display:flex; align-items:center; gap:6px;">
+                  <i class="fas fa-key"></i> Mi Contraseña / PIN de Acceso
+                </strong>
+                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                  Sesión activa: <strong>${escapeHtml(state.session?.name || state.session?.nombre || '')}</strong> · Puedes personalizar tu PIN de 6 dígitos
+                </div>
+              </div>
+              <button type="button" class="primary-button" onclick="window.openChangePinModal()" style="font-size:11.5px; padding:6px 14px; background:#0284c7; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">
+                🔑 Cambiar Mi PIN
+              </button>
+            </div>
+
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <span style="font-size:12px; color:var(--text-muted);">Equipo real de Creaciones JJ</span>
               ${isLead() ? `
@@ -2654,6 +2669,48 @@ function settingsView() {
                 💾 Guardar Plantilla
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- 5b. INTELIGENCIA ARTIFICIAL & TRANSCRIPCIÓN DE FOTOS -->
+        <div class="jj-accordion-item" id="acc-ia">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-ia')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(16,185,129,0.15); color:#10b981;">
+                <i class="fas fa-robot"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Inteligencia Artificial & Transcripción de Fotos</h3>
+                <div class="jj-accordion-sub">Gemini Flash para lectura instantánea de recibos y arqueos</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">
+              Al tomar o subir fotos de comandas de <strong>JJ Express</strong> o planillas de <strong>Cierre de Caja</strong>, el sistema utiliza <strong>Google Gemini Flash</strong> para transcribir automáticamente los datos manuscritos y montos para que no tengas que copiarlos a mano.
+            </p>
+            <div class="field" style="margin-bottom:12px;">
+              <span class="field-label">CLAVE DE API GOOGLE GEMINI (GRATUITA):</span>
+              <div style="display:flex; gap:8px;">
+                <input type="password" id="settings-gemini-key" placeholder="AIzaSy..." value="${escapeHtml(window.getGeminiApiKey ? window.getGeminiApiKey() : '')}" style="flex:1;">
+                <button type="button" class="secondary-button" id="toggle-gemini-key-vis" style="padding:6px 10px;" onclick="const inp=document.getElementById('settings-gemini-key'); inp.type = inp.type==='password'?'text':'password';">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+              <small style="color:var(--text-muted); font-size:11px; margin-top:4px; display:block;">
+                ¿No tienes clave? Obtén una 100% gratis en: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="color:#0ea5e9; text-decoration:underline; font-weight:bold;">Google AI Studio (1 minuto)</a>
+              </small>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="primary-button" onclick="window.saveGeminiKeyFromSettings()" style="background:#10b981; border:none; padding:8px 16px; font-weight:bold; cursor:pointer;">
+                💾 Guardar Clave de IA
+              </button>
+              <button type="button" class="secondary-button" onclick="window.testGeminiConnection()" style="padding:8px 14px; font-weight:bold; cursor:pointer;">
+                🧪 Probar Conexión
+              </button>
+            </div>
+            <div id="gemini-test-result" style="margin-top:10px; font-size:12px;"></div>
           </div>
         </div>
 
@@ -2913,7 +2970,6 @@ function detail(order) {
         <span class="live-stopwatch-badge live-stopwatch-active" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
       </div>
     `;
-  }
   }
 
   // AVISO / MODAL LIMITANTE DE PRIMERA APERTURA (Para TODOS los trabajadores y Managers como Sra. Julieta)
@@ -5332,6 +5388,9 @@ window.openExpressOrderModal = function() {
         expressInvoiceBase64 = ev.target.result;
         previewImg.src = expressInvoiceBase64;
         previewWrap.style.display = "flex";
+        if (typeof triggerOcrForExpressInvoice === "function") {
+          triggerOcrForExpressInvoice(expressInvoiceBase64);
+        }
       };
       r.readAsDataURL(f);
     });
@@ -7065,6 +7124,9 @@ window.openNewCashCloseModal = function() {
         photoRespaldoBase64 = ev.target.result;
         pImg.src = photoRespaldoBase64;
         pBox.style.display = "flex";
+        if (typeof triggerOcrForCashClose === "function") {
+          triggerOcrForCashClose(photoRespaldoBase64);
+        }
       };
       r.readAsDataURL(f);
     });
@@ -7362,3 +7424,512 @@ window.copyShoppingListWhatsApp = function() {
     alert(text);
   }
 };
+
+
+/* =========================================================
+   SISTEMA DE AUTOGESTIÓN DE PIN Y OCR DE FOTOS CON GEMINI IA
+   CREACIONES JJ · OCHOA & RISQUEZ
+   ========================================================= */
+
+// 1. MODAL DE CAMBIO DE PIN / CONTRASEÑA
+window.openChangePinModal = function() {
+  const currentUserName = state.session?.name || state.session?.nombre || "Usuario";
+  
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-key" style="color:#38bdf8;"></i> Cambiar Mi PIN Personal
+        </h2>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+          Actualiza tu clave de acceso para <strong>${escapeHtml(currentUserName)}</strong>
+        </div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <form id="change-pin-form" class="form-grid" style="margin-top:14px;">
+      <div style="background:rgba(56,189,248,0.08); border-left:4px solid #38bdf8; padding:10px 12px; border-radius:6px; font-size:12px; line-height:1.4;">
+        🔒 Puedes cambiar la contraseña genérica por un PIN personal de <strong>4 a 6 dígitos</strong> que recuerdes fácilmente.
+      </div>
+
+      <label class="field">
+        <span class="field-label">USUARIO ACTIVO:</span>
+        <input type="text" value="${escapeHtml(currentUserName)}" disabled style="background:rgba(255,255,255,0.05); font-weight:bold; cursor:not-allowed;">
+      </label>
+
+      <label class="field">
+        <span class="field-label">NUEVO PIN (4 A 6 DÍGITOS):</span>
+        <div style="position:relative; display:flex; align-items:center;">
+          <input type="password" id="new-pin-input" inputmode="numeric" maxlength="6" placeholder="Ej. 240815" required style="width:100%; padding-right:38px;">
+          <button type="button" id="toggle-pin-visibility" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px;" title="Ver/Ocultar">
+            <i class="fas fa-eye"></i>
+          </button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="field-label">CONFIRMAR NUEVO PIN:</span>
+        <input type="password" id="confirm-pin-input" inputmode="numeric" maxlength="6" placeholder="Repite tu nuevo PIN" required>
+      </label>
+
+      <div id="pin-match-error" style="display:none; color:#ef4444; font-size:12px; font-weight:bold; padding:6px 10px; background:rgba(239,68,68,0.1); border-radius:6px;">
+        ⚠️ Los PIN ingresados no coinciden o deben tener entre 4 y 6 dígitos numéricos.
+      </div>
+
+      <div class="modal-foot" style="margin-top:12px; display:flex; gap:8px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" id="submit-pin-btn" style="flex:2; background:#0284c7; border:none; font-weight:bold; cursor:pointer;">
+          💾 Guardar Nuevo PIN
+        </button>
+      </div>
+    </form>
+  `);
+
+  const eyeBtn = document.getElementById("toggle-pin-visibility");
+  const newPinInp = document.getElementById("new-pin-input");
+  const confPinInp = document.getElementById("confirm-pin-input");
+  const errBox = document.getElementById("pin-match-error");
+
+  if (eyeBtn && newPinInp) {
+    eyeBtn.addEventListener("click", () => {
+      const isPwd = newPinInp.type === "password";
+      newPinInp.type = isPwd ? "text" : "password";
+      if (confPinInp) confPinInp.type = isPwd ? "text" : "password";
+      eyeBtn.innerHTML = isPwd ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+    });
+  }
+
+  const form = document.getElementById("change-pin-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const p1 = (newPinInp?.value || "").trim();
+      const p2 = (confPinInp?.value || "").trim();
+
+      if (!p1 || p1.length < 4 || p1.length > 6 || p1 !== p2) {
+        if (errBox) errBox.style.display = "block";
+        return;
+      }
+      if (errBox) errBox.style.display = "none";
+
+      const btn = document.getElementById("submit-pin-btn");
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+      }
+
+      try {
+        const res = await api("profile_change_pin", {
+          user: currentUserName,
+          newPin: p1
+        });
+        if (res && (res.ok || res.exito)) {
+          if (state.session) state.session.pin = p1;
+          store.set("pp_profile_session", state.session);
+          closeModal();
+          if (window.Swal) {
+            Swal.fire({
+              title: "¡PIN Actualizado!",
+              text: "Tu nueva clave de acceso personal ha sido guardada correctamente en el sistema.",
+              icon: "success",
+              confirmButtonColor: "#0284c7"
+            });
+          } else {
+            alert("¡PIN actualizado con éxito!");
+          }
+        } else {
+          throw new Error(res?.error || res?.mensaje || "No se pudo actualizar el PIN");
+        }
+      } catch (err) {
+        alert("Error al guardar PIN: " + err.message);
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "💾 Guardar Nuevo PIN";
+        }
+      }
+    });
+  }
+};
+
+// 2. CONFIGURACIÓN DE GEMINI API KEY
+window.getGeminiApiKey = function() {
+  return localStorage.getItem("jj_gemini_api_key") || "";
+};
+
+window.setGeminiApiKey = function(key) {
+  const clean = String(key || "").trim();
+  if (clean) {
+    localStorage.setItem("jj_gemini_api_key", clean);
+  } else {
+    localStorage.removeItem("jj_gemini_api_key");
+  }
+};
+
+window.saveGeminiKeyFromSettings = function() {
+  const val = document.getElementById("settings-gemini-key")?.value?.trim() || "";
+  window.setGeminiApiKey(val);
+  showToast(val ? "✅ Clave de Gemini guardada correctamente." : "🗑️ Clave de Gemini eliminada.");
+};
+
+window.testGeminiConnection = async function() {
+  const resEl = document.getElementById("gemini-test-result");
+  const key = document.getElementById("settings-gemini-key")?.value?.trim() || window.getGeminiApiKey();
+  if (!key) {
+    if (resEl) resEl.innerHTML = '<span style="color:#ef4444; font-weight:bold;">⚠️ Por favor ingresa una clave API primero.</span>';
+    return;
+  }
+  if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: "Responde exactamente: OK Creaciones JJ" }] }]
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (resEl) resEl.innerHTML = `<span style="color:#10b981; font-weight:bold;"><i class="fas fa-check-circle"></i> ¡Conexión Exitosa con Google Gemini! (${escapeHtml(text.trim())})</span>`;
+  } catch (err) {
+    if (resEl) resEl.innerHTML = `<span style="color:#ef4444; font-weight:bold;">❌ Error de conexión: ${escapeHtml(err.message)}</span>`;
+  }
+};
+
+// 3. MOTOR DE TRANSCRIPCIÓN CON IA (GEMINI VISION)
+window.transcribePhysicalSheet = async function(base64Image, sheetType) {
+  if (!base64Image) {
+    throw new Error("No hay imagen cargada para transcribir.");
+  }
+
+  let apiKey = window.getGeminiApiKey();
+
+  if (!apiKey) {
+    let enteredKey = "";
+    if (window.Swal) {
+      const result = await Swal.fire({
+        title: "✨ Transcripción Automática con IA",
+        html: `
+          <div style="font-size:12.5px; text-align:left; line-height:1.5; color:var(--text-main, #333);">
+            El sistema de Creaciones JJ utiliza <strong>Google Gemini Flash</strong> para transcribir hojas y recibos físicos al instante sin tipear.<br><br>
+            Por favor, introduce tu <strong>Gemini API Key gratuita</strong> de Google AI Studio (se guardará en este dispositivo):
+          </div>
+          <input type="password" id="swal-gemini-key" class="swal2-input" placeholder="AIzaSy..." style="width:85%; font-size:13px;">
+          <div style="margin-top:8px; font-size:11.5px;">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="color:#0284c7; font-weight:bold; text-decoration:underline;">
+              🔗 Obtén tu clave gratis en Google AI Studio (toma 1 minuto)
+            </a>
+          </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: "Guardar y Transcribir",
+        cancelButtonText: "Cancelar",
+        confirmButtonColor: "#0284c7",
+        preConfirm: () => {
+          const val = document.getElementById("swal-gemini-key")?.value?.trim();
+          if (!val) {
+            Swal.showValidationMessage("Debes ingresar una clave válida");
+          }
+          return val;
+        }
+      });
+      if (!result.isConfirmed || !result.value) return null;
+      apiKey = result.value;
+      window.setGeminiApiKey(apiKey);
+    } else {
+      apiKey = prompt("Introduce tu clave API de Google Gemini para transcripción automática:");
+      if (!apiKey) return null;
+      window.setGeminiApiKey(apiKey);
+    }
+  }
+
+  const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+  
+  let promptText = "";
+  if (sheetType === "caja") {
+    promptText = `Eres un transcriptor contable experto para el taller de Creaciones JJ.
+Analiza la foto de la planilla física de Cierre de Caja / Arqueo Diario.
+La planilla contiene columnas manuscritas: PUNTO (lotes/montos en Bs), PAGO MOVIL (montos y refs), EFECTIVOS BS (montos en Bs), EFECTIVOS $ (montos en $), e INICIO BS EN CAJA (ej. 300bs / 3$).
+Devuelve ÚNICAMENTE un JSON estricto válido con las siguientes claves:
+{
+  "fecha": "YYYY-MM-DD",
+  "turno": "Turno 1 (8:00 AM a 1:00 PM)" | "Turno 2 (3:00 PM a 8:00 PM)" | "Cierre Completo del Día",
+  "inicioBs": 300,
+  "inicioUSD": 3,
+  "puntoVentaBs": suma total de los montos de punto de venta en Bs (número),
+  "puntoVentaLotes": "desglose de los montos separados por coma (ej. 140, 1480, 600, 960)",
+  "pagoMovilBs": suma total de pago móvil en Bs (número),
+  "pagoMovilRef": "referencia o banco (ej. Ref 5407)",
+  "efectivoBs": suma total de efectivo en bolívares (número),
+  "efectivoUSD": suma total de efectivo en dólares (número),
+  "observaciones": "cualquier nota u observación legible"
+}`;
+  } else {
+    promptText = `Eres un transcriptor experto para Creaciones JJ, taller de papelería creativa y diseño.
+Analiza la foto de la comanda física de pedido rápido (JJ Express).
+El formato impreso tiene: CLIENTE, TELÉFONO, FECHA DE PEDIDO, FECHA DE ENTREGA, CANT, DESCRIPCIÓN (ej. Pendón, Topper), P.UNIT, TOTAL ($), método EFECTIVO / TRANSFERENCIA, TOTAL, ANTICIPO, RESTA, NOTAS (ej. Falta dar 3$ de vuelto) y ATENDIDO POR.
+Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
+{
+  "cliente": "nombre del cliente",
+  "telefono": "teléfono (ej. 04141234567)",
+  "tipo": "tipo de producto (Topper 3D, Pendón, Libreta, Stickers, etc.)",
+  "motivo": "personaje, motivo o temática si está indicado",
+  "cantidad": 1,
+  "costo": monto total en dólares (número),
+  "abono": anticipo o abono en dólares (número),
+  "resta": resta o saldo en dólares (número),
+  "metodoPago": "Efectivo $" | "Pago Móvil" | "Punto de Venta" | "Zelle",
+  "notasCobro": "observaciones, notas de vuelto o cobro",
+  "fechaEntrega": "YYYY-MM-DD",
+  "atendidoPor": "nombre del responsable"
+}`;
+  }
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const payload = {
+      contents: [{
+        parts: [
+          { text: promptText },
+          { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        response_mime_type: "application/json"
+      }
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error("Respuesta vacía del modelo de IA.");
+
+    return JSON.parse(rawText);
+  } catch (directErr) {
+    console.warn("Fallo llamada directa Gemini, intentando vía backend:", directErr);
+    try {
+      const backendRes = await api("profile_ai_transcribe", {
+        imageBase64: base64Image,
+        sheetType: sheetType,
+        apiKey: apiKey
+      });
+      if (backendRes && backendRes.data) {
+        return backendRes.data;
+      }
+    } catch (bErr) {}
+    throw directErr;
+  }
+};
+
+// 4. HANDLERS INTERACTIVOS PARA JJ EXPRESS Y CIERRE DE CAJA
+window.triggerOcrForExpressInvoice = async function(base64) {
+  const container = document.getElementById("express-invoice-preview-wrap");
+  if (!container) return;
+
+  let banner = document.getElementById("express-ocr-status-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "express-ocr-status-banner";
+    container.parentNode.insertBefore(banner, container.nextSibling);
+  }
+
+  banner.className = "ocr-scanning-banner";
+  banner.style.display = "flex";
+  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Transcribiendo datos del recibo con IA (Gemini)...</span>';
+
+  try {
+    const data = await window.transcribePhysicalSheet(base64, "express");
+    if (!data) {
+      banner.style.display = "none";
+      return;
+    }
+
+    if (data.cliente) {
+      const cliInp = document.getElementById("express-cliente");
+      if (cliInp) cliInp.value = data.cliente;
+    }
+    if (data.telefono) {
+      const telInp = document.getElementById("express-telefono");
+      if (telInp) telInp.value = data.telefono;
+    }
+    if (data.costo !== undefined && data.costo !== null && !isNaN(Number(data.costo))) {
+      const cInp = document.getElementById("express-costo");
+      if (cInp) cInp.value = Number(data.costo);
+    }
+    if (data.abono !== undefined && data.abono !== null && !isNaN(Number(data.abono))) {
+      const aInp = document.getElementById("express-abono");
+      if (aInp) aInp.value = Number(data.abono);
+    }
+    if (data.resta !== undefined && data.resta !== null && !isNaN(Number(data.resta))) {
+      const rInp = document.getElementById("express-resta");
+      if (rInp) rInp.value = Number(data.resta);
+    }
+    if (data.motivo) {
+      const mInp = document.getElementById("express-motivo");
+      if (mInp) mInp.value = data.motivo;
+    }
+    if (data.notasCobro) {
+      const nInp = document.getElementById("express-notas-cobro");
+      if (nInp) nInp.value = data.notasCobro;
+    }
+    if (data.fechaEntrega) {
+      const fInp = document.getElementById("express-fecha");
+      if (fInp) fInp.value = data.fechaEntrega;
+    }
+    if (data.metodoPago) {
+      const metSelect = document.getElementById("express-metodo-pago");
+      if (metSelect) {
+        for (let opt of metSelect.options) {
+          if (opt.value.toLowerCase().includes(data.metodoPago.toLowerCase()) || data.metodoPago.toLowerCase().includes(opt.value.toLowerCase())) {
+            metSelect.value = opt.value;
+            break;
+          }
+        }
+      }
+    }
+    if (data.atendidoPor) {
+      const respSelect = document.getElementById("express-responsable");
+      if (respSelect) {
+        for (let opt of respSelect.options) {
+          if (opt.value.toLowerCase().includes(data.atendidoPor.toLowerCase()) || data.atendidoPor.toLowerCase().includes(opt.value.toLowerCase())) {
+            respSelect.value = opt.value;
+            break;
+          }
+        }
+      }
+    }
+    if (data.tipo) {
+      const tipoSelect = document.getElementById("express-tipo-select");
+      if (tipoSelect) {
+        let matched = false;
+        for (let opt of tipoSelect.options) {
+          if (opt.value.toLowerCase().includes(data.tipo.toLowerCase()) || data.tipo.toLowerCase().includes(opt.value.toLowerCase())) {
+            tipoSelect.value = opt.value;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched && data.tipo) {
+          const newOpt = document.createElement("option");
+          newOpt.value = data.tipo;
+          newOpt.textContent = data.tipo;
+          tipoSelect.appendChild(newOpt);
+          tipoSelect.value = data.tipo;
+        }
+      }
+    }
+
+    if (typeof window.calcExpressBalance === "function") {
+      window.calcExpressBalance();
+    }
+
+    banner.className = "ocr-verified-banner";
+    banner.innerHTML = '<i class="fas fa-check-circle"></i> <span>✨ <strong>Datos transcritos con éxito:</strong> Comprueba que los datos coincidan con la comanda física antes de guardar.</span>';
+    showToast("✨ Recibo transcrito automáticamente con IA");
+  } catch (err) {
+    console.error("Error en transcripción OCR Express:", err);
+    banner.className = "ocr-error-banner";
+    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>No se pudo transcribir automáticamente (${escapeHtml(err.message)}). Puedes llenar los campos manualmente.</span>`;
+  }
+};
+var triggerOcrForExpressInvoice = window.triggerOcrForExpressInvoice;
+
+window.triggerOcrForCashClose = async function(base64) {
+  const container = document.getElementById("caja-photo-preview");
+  if (!container) return;
+
+  let banner = document.getElementById("caja-ocr-status-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "caja-ocr-status-banner";
+    container.parentNode.insertBefore(banner, container.nextSibling);
+  }
+
+  banner.className = "ocr-scanning-banner";
+  banner.style.display = "flex";
+  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Transcribiendo planilla de arqueo con IA (Gemini)...</span>';
+
+  try {
+    const data = await window.transcribePhysicalSheet(base64, "caja");
+    if (!data) {
+      banner.style.display = "none";
+      return;
+    }
+
+    if (data.fecha) {
+      const fInp = document.getElementById("caja-fecha");
+      if (fInp) fInp.value = data.fecha;
+    }
+    if (data.turno) {
+      const tSel = document.getElementById("caja-turno");
+      if (tSel) {
+        for (let opt of tSel.options) {
+          if (opt.value.toLowerCase().includes(data.turno.toLowerCase()) || data.turno.toLowerCase().includes(opt.value.toLowerCase())) {
+            tSel.value = opt.value;
+            break;
+          }
+        }
+      }
+    }
+    if (data.inicioBs !== undefined && data.inicioBs !== null && !isNaN(Number(data.inicioBs))) {
+      const iBs = document.getElementById("caja-inicio-bs");
+      if (iBs) iBs.value = Number(data.inicioBs);
+    }
+    if (data.inicioUSD !== undefined && data.inicioUSD !== null && !isNaN(Number(data.inicioUSD))) {
+      const iUsd = document.getElementById("caja-inicio-usd");
+      if (iUsd) iUsd.value = Number(data.inicioUSD);
+    }
+    if (data.puntoVentaBs !== undefined && data.puntoVentaBs !== null && !isNaN(Number(data.puntoVentaBs))) {
+      const pBs = document.getElementById("caja-punto-bs");
+      if (pBs) pBs.value = Number(data.puntoVentaBs);
+    }
+    if (data.pagoMovilBs !== undefined && data.pagoMovilBs !== null && !isNaN(Number(data.pagoMovilBs))) {
+      const pmBs = document.getElementById("caja-pagomovil-bs");
+      if (pmBs) pmBs.value = Number(data.pagoMovilBs);
+    }
+    if (data.pagoMovilRef) {
+      const pmRef = document.getElementById("caja-pagomovil-ref");
+      if (pmRef) pmRef.value = data.pagoMovilRef;
+    }
+    if (data.efectivoBs !== undefined && data.efectivoBs !== null && !isNaN(Number(data.efectivoBs))) {
+      const efBs = document.getElementById("caja-efectivo-bs");
+      if (efBs) efBs.value = Number(data.efectivoBs);
+    }
+    if (data.efectivoUSD !== undefined && data.efectivoUSD !== null && !isNaN(Number(data.efectivoUSD))) {
+      const efUsd = document.getElementById("caja-efectivo-usd");
+      if (efUsd) efUsd.value = Number(data.efectivoUSD);
+    }
+    if (data.observaciones) {
+      const obs = document.getElementById("caja-obs");
+      if (obs) obs.value = data.observaciones;
+    }
+
+    if (typeof window.calcCashTotals === "function") {
+      window.calcCashTotals();
+    }
+
+    banner.className = "ocr-verified-banner";
+    banner.innerHTML = '<i class="fas fa-check-circle"></i> <span>✨ <strong>Planilla transcrita con éxito:</strong> Por favor verifica que los montos coincidan con la hoja antes de guardar.</span>';
+    showToast("✨ Planilla transcrita automáticamente con IA");
+  } catch (err) {
+    console.error("Error en transcripción OCR Caja:", err);
+    banner.className = "ocr-error-banner";
+    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>No se pudo transcribir automáticamente (${escapeHtml(err.message)}). Puedes llenar los campos manualmente.</span>`;
+  }
+};
+var triggerOcrForCashClose = window.triggerOcrForCashClose;
