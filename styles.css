@@ -734,6 +734,86 @@ body {
   .custom-theme-picker { grid-template-columns: 1fr; }
   .login-brand-name { font-size: 28px; }
   .login-logo { width: 110px; height: 110px; }
+  
+  /* Mejoras móviles para Creaciones JJ */
+  .jj-main-header {
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+  }
+  
+  .jj-header-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  
+  .sics-module-tabs-bar {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 8px;
+  }
+  
+  .sics-tab-btn {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+  
+  .sics-bento-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .sics-metric-card {
+    padding: 12px;
+  }
+  
+  .order-card-compact {
+    padding: 12px;
+  }
+  
+  .modal-content {
+    width: 95%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  
+  .jj-accordion-body {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .jj-header-brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .jj-brand-title {
+    font-size: 18px;
+  }
+  
+  .jj-brand-sub {
+    font-size: 12px;
+  }
+  
+  .sics-bento-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .backup-container {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .bottom-nav {
+    padding: 8px 12px;
+  }
+  
+  .nav-button {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
 }
 
 /* ============================================================
