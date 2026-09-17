@@ -123,10 +123,25 @@ function applyTheme() {
   }
   
   let cssRules = [];
+  
+  // Aplicar colores personalizados si existen
   if (customColors.primary) {
     cssRules.push(`--primary-color: ${customColors.primary} !important;`);
     cssRules.push(`--primary-hover: ${customColors.primary} !important;`);
+  } else {
+    // Aplicar colores preestablecidos según el accent
+    const accentColors = {
+      blue: "#1e3a8a",
+      emerald: "#065f46", 
+      purple: "#581c87",
+      amber: "#78350f"
+    };
+    if (accentColors[currentAccent]) {
+      cssRules.push(`--primary-color: ${accentColors[currentAccent]} !important;`);
+      cssRules.push(`--primary-hover: ${accentColors[currentAccent]} !important;`);
+    }
   }
+  
   if (customColors.cardBg) {
     cssRules.push(`--bg-card: ${customColors.cardBg} !important;`);
   }
@@ -177,6 +192,28 @@ function resetCustomTheme() {
 }
 
 window.toggleTheme = toggleTheme;
+
+// Temas preestablecidos: los botones de Ajustes llaman a estas funciones
+const PRESET_ACCENTS = ["blue", "emerald", "purple", "amber"];
+const PRESET_NAMES = { blue: "Azul Real", emerald: "Esmeralda", purple: "Púrpura", amber: "Ámbar" };
+
+function setPresetTheme(name) {
+  if (PRESET_ACCENTS.indexOf(name) === -1) name = "blue";
+  store.remove("pp_custom_colors");
+  store.set("pp_accent", name);
+  applyTheme();
+  showToast("🎨 Tema aplicado: " + (PRESET_NAMES[name] || name));
+}
+
+function resetDefaultTheme() {
+  resetCustomTheme();
+}
+
+window.setPresetTheme = setPresetTheme;
+window.resetDefaultTheme = resetDefaultTheme;
+window.setAccent = setAccent;
+window.resetCustomTheme = resetCustomTheme;
+window.saveCustomColor = saveCustomColor;
 window.setAccent = setAccent;
 window.saveCustomColor = saveCustomColor;
 window.resetCustomTheme = resetCustomTheme;
@@ -663,12 +700,15 @@ async function api(action, extra = {}, timeoutMs = null) {
   } catch (err) {
     clearTimeout(timeoutId);
     state.systemErrors = state.systemErrors || [];
-    state.systemErrors.unshift({
-      action: action,
-      error: err.message || String(err),
-      time: new Date().toLocaleTimeString()
-    });
-    if (state.systemErrors.length > 20) state.systemErrors.pop();
+    // El re-login silencioso en segundo plano no debe llenar el panel de alertas
+    if (action !== "profile_login") {
+      state.systemErrors.unshift({
+        action: action,
+        error: err.message || String(err),
+        time: new Date().toLocaleTimeString()
+      });
+      if (state.systemErrors.length > 20) state.systemErrors.pop();
+    }
     if (window.checkTallerAlertas) setTimeout(window.checkTallerAlertas, 100);
     if (err.name === 'AbortError') {
       throw new Error("La conexión con Google Sheets tardó demasiado. Revisa tu internet o vuelve a intentar.");
@@ -1831,6 +1871,9 @@ function reportsView() {
   const finishedOrders = state.data?.finishedOrders || [];
   const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
 
+  // Filtro de tipo de vista (default: completed)
+  const viewType = state.reportsViewType || 'completed'; // 'completed' | 'active' | 'overdue' | 'all'
+
   // Filtro de fecha seleccionado para reportes (default: mes)
   const currentFilter = state.reportsDateFilter || 'month';
 
@@ -1854,6 +1897,16 @@ function reportsView() {
         const lastM = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
         const lastY = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
         return d.getMonth() === lastM && d.getFullYear() === lastY;
+      } else if (currentFilter === 'custom') {
+        const from = state.reportsDateFrom ? safeParseDate(state.reportsDateFrom) : null;
+        const to = state.reportsDateTo ? safeParseDate(state.reportsDateTo) : null;
+        if (from && d < from) return false;
+        if (to) {
+          const toEnd = new Date(to.getTime());
+          toEnd.setHours(23, 59, 59, 999);
+          if (d > toEnd) return false;
+        }
+        return from || to;
       }
       return true; // 'all'
     });
@@ -1861,13 +1914,9 @@ function reportsView() {
 
   const periodFinishedOrders = filterByPeriod(finishedOrders);
 
-  // Casos de Septiembre (conteo robusto)
-  const septOrders = allOrders.filter(o => {
-    const rawDate = String(o.entrega || o.fechaEntrega || o.creado || "");
-    return rawDate.includes("-09-") || rawDate.includes("/09/") || rawDate.includes("/9/") ||
-           (o.entrega && safeParseDate(o.entrega)?.getMonth() === 8);
-  });
-  const casesThisMonth = septOrders.length || (activeOrders.length + periodFinishedOrders.length);
+  // Casos del período seleccionado (activos + completados del filtro vigente)
+  const periodActiveOrders = filterByPeriod(activeOrders);
+  const casesThisPeriod = periodActiveOrders.length + periodFinishedOrders.length;
 
   // Cumplimiento a tiempo
   const onTimeFinished = periodFinishedOrders.filter(o => {
@@ -1881,10 +1930,15 @@ function reportsView() {
   const durations = periodFinishedOrders.map(o => Number(o.duracionRealMin || 0)).filter(d => d > 0);
   const avgMins = durations.length ? Math.round(durations.reduce((a,b)=>a+b, 0) / durations.length) : 0;
 
-  // Trabajadores Reales de Creaciones JJ
+  // Trabajadores reales + cualquier responsable con pedidos en el período
+  // (incluye ex-personal como Eloy: solo aparece si tiene pedidos en el filtro de fecha)
   const realTeam = getRealTeamList();
+  const observedWorkers = [...new Set([...activeOrders, ...periodFinishedOrders]
+    .map(o => String(o.responsable || "").trim())
+    .filter(Boolean))];
+  const allWorkers = [...new Set([...realTeam, ...observedWorkers])];
   const workerStats = {};
-  realTeam.forEach(w => {
+  allWorkers.forEach(w => {
     workerStats[w] = { name: w, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
   });
 
@@ -1909,14 +1963,58 @@ function reportsView() {
 
   return `
     <div style="max-width:1100px; margin:0 auto; padding-bottom:30px;">
+      <!-- Filtros de Tipo de Vista y Fecha -->
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <button type="button" class="secondary-button" onclick="window.setReportsViewType('completed')" style="background:${viewType === 'completed' ? '#10b981; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
+          <i class="fas fa-check-circle"></i> Completados (${periodFinishedOrders.length})
+        </button>
+        <button type="button" class="secondary-button" onclick="window.setReportsViewType('active')" style="background:${viewType === 'active' ? '#3b82f6; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
+          <i class="fas fa-bolt"></i> Activos (${periodActiveOrders.length})
+        </button>
+        <button type="button" class="secondary-button" onclick="window.setReportsViewType('overdue')" style="background:${viewType === 'overdue' ? '#ef4444; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
+          <i class="fas fa-exclamation-circle"></i> Rezagados (${overdueOrders.length})
+        </button>
+        <button type="button" class="secondary-button" onclick="window.setReportsViewType('all')" style="background:${viewType === 'all' ? '#8b5cf6; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
+          <i class="fas fa-layer-group"></i> Todos (${casesThisPeriod})
+        </button>
+        
+        <!-- Filtro de Fecha Personalizado -->
+        <div style="display:flex; gap:4px; align-items:center; margin-left:auto;">
+          <select id="reports-date-filter" onchange="window.setReportsDateFilter(this.value)" style="padding:6px 8px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            <option value="today" ${currentFilter === 'today' ? 'selected' : ''}>Hoy</option>
+            <option value="week" ${currentFilter === 'week' ? 'selected' : ''}>Esta semana</option>
+            <option value="month" ${currentFilter === 'month' ? 'selected' : ''}>Este mes</option>
+            <option value="last_month" ${currentFilter === 'last_month' ? 'selected' : ''}>Mes anterior</option>
+            <option value="custom" ${currentFilter === 'custom' ? 'selected' : ''}>Rango personalizado</option>
+            <option value="all" ${currentFilter === 'all' ? 'selected' : ''}>Todo el historial</option>
+          </select>
+        </div>
+      </div>
+
+      ${currentFilter === 'custom' ? `
+        <div style="background:var(--bg-main); padding:12px; border-radius:8px; border:1px solid var(--border-color); margin-bottom:16px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="flex:1;">
+              <label style="font-size:11px; font-weight:bold; color:var(--text-muted);">Desde:</label>
+              <input type="date" id="custom-date-from" value="${state.reportsDateFrom || ''}" onchange="window.setCustomDateFrom(this.value)" style="padding:4px 6px; border-radius:6px; border:1px solid var(--border-color); width:100%;">
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:11px; font-weight:bold; color:var(--text-muted);">Hasta:</label>
+              <input type="date" id="custom-date-to" value="${state.reportsDateTo || ''}" onchange="window.setCustomDateTo(this.value)" style="padding:4px 6px; border-radius:6px; border:1px solid var(--border-color); width:100%;">
+            </div>
+            <button type="button" class="primary-button" onclick="window.applyCustomDateFilter()" style="padding:6px 12px; font-size:12px;">Aplicar Filtro</button>
+          </div>
+        </div>
+      ` : ''}
+
       <!-- KPIs Superiores Interactivos -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:20px;">
         <div class="sics-metric-card">
           <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; margin-bottom:4px;">
-            <i class="fas fa-calendar-check"></i> CASOS DEL MES
+            <i class="fas fa-calendar-check"></i> CASOS DEL PERÍODO
           </div>
-          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${casesThisMonth}</div>
-          <div style="font-size:11px; color:var(--text-muted);">Total registrados en septiembre 2026</div>
+          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${casesThisPeriod}</div>
+          <div style="font-size:11px; color:var(--text-muted);">${periodActiveOrders.length} activos + ${periodFinishedOrders.length} completados</div>
         </div>
 
         <div class="sics-metric-card">
@@ -1945,6 +2043,61 @@ function reportsView() {
           </div>
           <div style="font-size:28px; font-weight:900; color:var(--text-main);">${avgMins} <span style="font-size:14px; font-weight:bold; color:var(--text-muted);">min</span></div>
           <div style="font-size:11px; color:var(--text-muted);">Por orden física finalizada</div>
+        </div>
+      </div>
+
+      <!-- Detalles de Pedidos según Filtro -->
+      <div class="sics-table-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <h3 style="margin:0; font-size:16px; color:var(--text-main);">
+              ${viewType === 'completed' ? '✅ Pedidos Completados' : 
+                viewType === 'active' ? '⚡ Pedidos Activos' : 
+                viewType === 'overdue' ? '🚨 Pedidos Rezagados' : '📋 Todos los Pedidos'}
+            </h3>
+            <div style="font-size:11.5px; color:var(--text-muted);">
+              ${viewType === 'completed' ? `Órdenes finalizadas en el período seleccionado (${periodFinishedOrders.length})` :
+                viewType === 'active' ? `Órdenes actualmente en producción (${periodActiveOrders.length})` :
+                viewType === 'overdue' ? `Órdenes con entrega vencida (${overdueOrders.length})` :
+                `Todos los casos del período (${casesThisPeriod})`}
+            </div>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="sics-data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>Responsable</th>
+                <th>Entrega</th>
+                <th>Estado</th>
+                <th>Tiempo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(viewType === 'completed' ? periodFinishedOrders : 
+                 viewType === 'active' ? periodActiveOrders : 
+                 viewType === 'overdue' ? overdueOrders : 
+                 [...periodActiveOrders, ...periodFinishedOrders]).map(o => `
+                <tr onclick="navigate('team'); setTimeout(() => document.querySelector('[data-id=\"${escapeHtml(o.id)}\"]')?.click(), 100);" style="cursor:pointer;">
+                  <td style="font-family:monospace; font-weight:bold;">${escapeHtml(o.id)}</td>
+                  <td style="font-weight:bold;">${escapeHtml(o.cliente)}</td>
+                  <td>${escapeHtml(o.tipo)}</td>
+                  <td>${escapeHtml(o.responsable)}</td>
+                  <td>${escapeHtml(formatDate(o.entrega))}</td>
+                  <td>
+                    <span style="padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:bold; background:${o.estado === 'Terminado' || o.estado === 'Entregado' ? 'rgba(16,185,129,0.2); color:#10b981;' : o.estado === 'En proceso' ? 'rgba(59,130,246,0.2); color:#3b82f6;' : 'rgba(245,158,11,0.2); color:#f59e0b;'}">
+                      ${escapeHtml(o.estado)}
+                    </span>
+                  </td>
+                  <td style="font-weight:bold;">${o.duracionRealMin ? o.duracionRealMin + ' min' : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1989,6 +2142,15 @@ function reportsView() {
             <button type="button" class="secondary-button" onclick="window.setReportsPeriod('month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Este Mes</button>
             <button type="button" class="secondary-button" onclick="window.setReportsPeriod('last_month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'last_month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Mes Pasado</button>
             <button type="button" class="secondary-button" onclick="window.setReportsPeriod('all')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'all' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📂 Todo</button>
+            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('custom')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'custom' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📊 Rango</button>
+            ${currentFilter === 'custom' ? `
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; width:100%; margin-top:6px;">
+                <input type="date" id="reports-date-from" value="${escapeHtml(state.reportsDateFrom || '')}" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:11px;">
+                <span style="color:var(--text-muted); font-size:11px;">hasta</span>
+                <input type="date" id="reports-date-to" value="${escapeHtml(state.reportsDateTo || '')}" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:11px;">
+                <button type="button" class="primary-button" onclick="window.applyCustomRange()" style="font-size:11px; padding:4px 12px; background:#8b5cf6; border:none;">Aplicar</button>
+              </div>
+            ` : ''}
           </div>
         </div>
 
@@ -2004,7 +2166,7 @@ function reportsView() {
               </tr>
             </thead>
             <tbody>
-              ${realTeam.map(w => {
+              ${allWorkers.map(w => {
                 const st = workerStats[w];
                 const avg = st.finishedCount ? Math.round(st.totalMins / st.finishedCount) : 0;
                 return `
@@ -2013,10 +2175,10 @@ function reportsView() {
                       <i class="fas fa-user-circle" style="color:#9ca3af;"></i> ${escapeHtml(w)}
                     </td>
                     <td style="text-align:center;">
-                      ${st.active > 0 ? `<span class="tab-badge" style="background:#0ea5e9; color:white;">${st.active}</span>` : '<span style="color:var(--text-muted);">-</span>'}
+                      ${st.active > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w)}','active')" style="background:#0ea5e9; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver órdenes activas">${st.active} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
                     </td>
                     <td style="text-align:center;">
-                      ${st.overdue > 0 ? `<span class="tab-badge" style="background:#ef4444; color:white;">${st.overdue}</span>` : '<span style="color:var(--text-muted);">-</span>'}
+                      ${st.overdue > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w)}','overdue')" style="background:#ef4444; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver rezagados">${st.overdue} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
                     </td>
                     <td style="text-align:center;">
                       ${st.finished > 0 ? `
@@ -2042,6 +2204,56 @@ function reportsView() {
 window.setReportsPeriod = function(period) {
   state.reportsDateFilter = period;
   if (typeof render === "function") render();
+};
+
+window.applyCustomRange = function() {
+  state.reportsDateFrom = document.getElementById("reports-date-from")?.value || "";
+  state.reportsDateTo = document.getElementById("reports-date-to")?.value || "";
+  if (!state.reportsDateFrom && !state.reportsDateTo) {
+    showToast("Selecciona al menos una fecha del rango.");
+    return;
+  }
+  state.reportsDateFilter = "custom";
+  if (typeof render === "function") render();
+  showToast("📊 Filtro aplicado: " + (state.reportsDateFrom || 'inicio') + " → " + (state.reportsDateTo || 'hoy'));
+};
+
+window.openWorkerOrdersModal = function(workerName, mode) {
+  const allOrders = state.data?.allOrders || [];
+  const isActiveOrder = (o) => !(o.cerrado === "Sí" || ["Terminado", "Entregado", "Cancelado"].includes(String(o.estado || "")));
+  const list = allOrders
+    .filter(o => String(o.responsable || "").trim().toLowerCase() === String(workerName).toLowerCase())
+    .filter(o => mode === 'overdue' ? (isActiveOrder(o) && priority(o) === 'overdue') : isActiveOrder(o));
+
+  const title = mode === 'overdue'
+    ? `⏳ Pedidos Rezagados de ${escapeHtml(workerName)}`
+    : `🔧 Órdenes Activas de ${escapeHtml(workerName)}`;
+  const subtitle = mode === 'overdue'
+    ? `${list.length} pedido(s) vencido(s) que requieren atención.`
+    : `${list.length} orden(es) en mesa de trabajo o bandeja.`;
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0;">${title}</h2>
+        <div style="font-size:12px; color:var(--text-muted);">${subtitle}</div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="max-height:420px; overflow-y:auto; margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+      ${list.length ? list.map(o => `
+        <div style="background:var(--bg-main); border:1px solid ${mode === 'overdue' ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}; border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <div>
+            <strong style="color:var(--text-main); font-size:13px;">${escapeHtml(o.id)} - ${escapeHtml(o.cliente)}</strong>
+            ${mode === 'overdue' ? '<span style="color:#ef4444; font-size:11px; font-weight:bold; margin-left:8px;">⏳ Vencido</span>' : ''}
+            <div style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(o.tipo || o.motivo || '')} ${o.motivo && o.motivo !== o.tipo ? '| ' + escapeHtml(o.motivo) : ''}</div>
+            <div style="font-size:11px; color:${mode === 'overdue' ? '#ef4444' : '#38bdf8'};">Entrega: ${escapeHtml(o.entrega || 'No definida')}</div>
+          </div>
+          <button type="button" class="secondary-button" onclick="closeModal(); window.openOrderDetail('${escapeHtml(o.id)}')" style="font-size:10.5px; padding:2px 8px;">Ver Ficha</button>
+        </div>
+      `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Sin pedidos en esta categoría para ${escapeHtml(workerName)}.</div>`}
+    </div>
+  `);
 };
 
 window.filterOverdueDirect = function() {
@@ -2602,7 +2814,9 @@ function settingsView() {
               ` : ''}
             </div>
             <div style="display:flex; flex-direction:column; gap:8px;">
-              ${users.map(u => `
+              ${users.map(u => {
+                const isActive = u.active !== false && u.activo !== false;
+                return `
                 <div style="background:var(--bg-main); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
                   <div>
                     <strong style="color:var(--text-main);">${escapeHtml(u.name || u.nombre)}</strong>
@@ -2610,9 +2824,19 @@ function settingsView() {
                       ${escapeHtml(u.role || u.rol || 'Trabajador')}
                     </span>
                   </div>
-                  <span style="font-size:11px; color:#10b981; font-weight:bold;">● Activo</span>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:11px; ${isActive ? 'color:#10b981;' : 'color:#ef4444;'} font-weight:bold;">
+                      ${isActive ? '● Activo' : '○ Inactivo'}
+                    </span>
+                    ${isLead() ? `
+                      <button type="button" class="secondary-button" onclick="window.toggleUserStatus('${escapeHtml(u.name || u.nombre)}', ${isActive})" style="font-size:10px; padding:3px 8px; background:${isActive ? '#f59e0b' : '#10b981'}; color:white; border:none; border-radius:4px; cursor:pointer;">
+                        ${isActive ? '⏸️ Desactivar' : '▶️ Activar'}
+                      </button>
+                    ` : ''}
+                  </div>
                 </div>
-              `).join('')}
+              `;
+              }).join('')}
             </div>
           </div>
         </div>
@@ -3144,6 +3368,16 @@ function detail(order) {
         <strong style="color:var(--text-main);">${escapeHtml(order.telefono || "No registrado")}</strong>
       </div>
 
+      ${isLead() ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px; background:rgba(2,132,199,.1); padding:8px; border-radius:6px;">
+          <span style="font-weight:700; color:#0284c7; font-size:12px;">📅 FECHA/HORA ENTREGA:</span>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="date" id="order-entrega-input" value="${order.entrega ? new Date(order.entrega).toISOString().split('T')[0] : ''}" style="padding:4px 6px; border-radius:6px; border:1px solid #0284c7;">
+            <button type="button" class="secondary-button" id="save-entrega-btn" onclick="saveOrderEntrega('${escapeHtml(order.id)}')" data-action="save-entrega" data-id="${escapeHtml(order.id)}" style="padding:4px 6px; font-size:11px; background:#0284c7;">💾 Guardar</button>
+          </div>
+        </div>
+      ` : ''}
+
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
         <span style="font-weight:700; color:var(--text-muted); font-size:12px;">⏱️ TIEMPO INVERTIDO (MIN):</span>
         ${isLead() ? `
@@ -3326,6 +3560,52 @@ window.saveOrderDuration = async function(orderId) {
     showToast(`⏱️ Duración actualizada a ${val} min.`);
     if (btn) {
       btn.disabled = false;
+      btn.textContent = "✅ Guardado";
+      setTimeout(() => { if (btn) btn.textContent = "💾 Min"; }, 2000);
+    }
+    await refresh(false);
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "💾 Min";
+    }
+    alert(`Error al guardar duración: ${err.message}`);
+  }
+};
+
+window.saveOrderEntrega = async function(orderId) {
+  const input = document.getElementById("order-entrega-input");
+  const btn = document.getElementById("save-entrega-btn");
+  const val = input?.value;
+  if (!val) {
+    alert("Por favor selecciona una fecha de entrega válida.");
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
+  }
+  try {
+    await api("profile_update_order", { id: orderId, changes: { entrega: val } });
+    const allTarget = [...(state.data.finishedOrders || []), ...(state.data.allOrders || []), ...(state.data.myOrders || [])];
+    allTarget.forEach(o => {
+      if (String(o.id).trim() === String(orderId).trim()) o.entrega = val;
+    });
+    showToast(`📅 Fecha de entrega actualizada a ${val}.`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "✅ Guardado";
+      setTimeout(() => { if (btn) btn.textContent = "💾 Guardar"; }, 2000);
+    }
+    await refresh(false);
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "💾 Guardar";
+    }
+    alert(`Error al guardar fecha de entrega: ${err.message}`);
+  }
+};
       btn.textContent = "✅ Guardado";
       setTimeout(() => { if (btn) btn.textContent = "💾 Min"; }, 2000);
     }
@@ -4946,6 +5226,18 @@ window.checkTallerAlertas = function() {
   const nowMs = now.getTime();
   const alerts = [];
 
+  // A0. Sugerencias pendientes del equipo (visibles para gerencia)
+  (state.data?.sugerencias || []).filter(s => s.estado === "Pendiente").slice(0, 5).forEach(s => {
+    alerts.push({
+      tipo: "sugerencia",
+      icono: '💡',
+      titulo: `Sugerencia de ${s.usuario || 'equipo'}`,
+      desc: s.comentario,
+      meta: String(s.fecha || '').slice(0, 10) + (s.fotoUrl ? ' · 📷 captura adjunta' : ''),
+      urgencia: "media"
+    });
+  });
+
   // A. Errores de API / Sistema registrados
   (state.systemErrors || []).forEach(errItem => {
     alerts.push({
@@ -5022,7 +5314,7 @@ window.checkTallerAlertas = function() {
     if (bellIcon) bellIcon.classList.add("ringing");
     if (notifCountText) notifCountText.innerText = `${count} activas`;
 
-    let html = "";
+    let html = SUGGESTION_BTN_HTML;
     alerts.forEach(al => {
       html += `
         <div class="notif-item" onclick="${al.orderId ? `detailById('${al.orderId}')` : ''}">
@@ -5049,7 +5341,109 @@ window.checkTallerAlertas = function() {
         <i class="fas fa-check-circle" style="color:#10b981; font-size:2.2rem; margin-bottom:8px;"></i><br/>
         <strong>Bandeja en calma.</strong> No hay alertas de retraso ni fallas técnicas en este momento.
       </div>
+      ${SUGGESTION_BTN_HTML}
     `;
+  }
+};
+
+// Botón flotante del canal de sugerencias dentro del panel de notificaciones
+const SUGGESTION_BTN_HTML = `
+  <div style="padding:10px; border-top:1px solid var(--border-color); text-align:center;">
+    <button type="button" onclick="window.openSuggestionModal()" style="background:rgba(139,92,246,0.15); color:#a78bfa; border:1px solid rgba(139,92,246,0.4); border-radius:8px; padding:6px 14px; font-size:11.5px; font-weight:bold; cursor:pointer; width:100%;">
+      💡 Sugerir una mejora al sistema
+    </button>
+  </div>
+`;
+
+// MODAL: CANAL DE SUGERENCIAS PARA TODO EL EQUIPO
+window.openSuggestionModal = function() {
+  const userName = state.session?.name || state.session?.nombre || "Equipo";
+  const notifDropdown = document.getElementById("notifDropdown");
+  if (notifDropdown) notifDropdown.style.display = "none";
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h2 style="margin:0;">💡 Sugerir una Mejora</h2>
+        <div style="font-size:12px; color:var(--text-muted);">Tu idea llega directo a gerencia. Enviando como: <strong>${escapeHtml(userName)}</strong></div>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="suggestion-form" class="form-grid" style="margin-top:12px;">
+      <label class="field">
+        <span class="field-label">¿QUÉ MEJORARÍAS O QUÉ NO FUNCIONA?:</span>
+        <textarea id="suggestion-text" rows="4" placeholder="Ej: En la pantalla de pedidos los botones se ven muy pequeños en mi teléfono..." style="resize:vertical;"></textarea>
+      </label>
+      <div class="physical-invoice-box" style="margin-bottom:10px;">
+        <div class="physical-invoice-header">
+          <span style="font-size:11px; font-weight:800; color:#a78bfa; text-transform:uppercase;">📷 Captura de pantalla (opcional):</span>
+          <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+            📁 Adjuntar
+            <input type="file" id="suggestion-file" accept="image/*" style="display:none;">
+          </label>
+        </div>
+        <div id="suggestion-preview" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+          <img id="suggestion-thumb" src="" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #a78bfa;">
+          <span style="font-size:11px; color:#10b981; font-weight:bold;">Captura adjunta ✓</span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" id="suggestion-submit-btn" style="flex:2; background:#8b5cf6; color:white; font-weight:800; border:none;">📨 Enviar a Gerencia</button>
+      </div>
+    </form>
+  `);
+
+  let sugBase64 = "";
+  const fileInp = document.getElementById("suggestion-file");
+  if (fileInp) {
+    fileInp.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        sugBase64 = ev.target.result;
+        const thumb = document.getElementById("suggestion-thumb");
+        const prev = document.getElementById("suggestion-preview");
+        if (thumb) thumb.src = sugBase64;
+        if (prev) prev.style.display = "flex";
+      };
+      r.readAsDataURL(f);
+    });
+  }
+
+  const form = document.getElementById("suggestion-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const comment = document.getElementById("suggestion-text")?.value.trim() || "";
+      if (!comment && !sugBase64) {
+        showToast("Escribe un comentario o adjunta una captura.");
+        return;
+      }
+      const btn = document.getElementById("suggestion-submit-btn");
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...'; }
+      try {
+        let fotoFinal = sugBase64;
+        if (fotoFinal && window.compressImageForOcr) {
+          try { fotoFinal = await window.compressImageForOcr(fotoFinal, 1200, 0.7); } catch (eC) {}
+        }
+        await api("profile_create_suggestion", {
+          user: userName,
+          comentario: comment,
+          fotoBase64: fotoFinal
+        });
+        closeModal();
+        if (window.Swal) {
+          Swal.fire({ title: "¡Gracias! 💡", text: "Tu sugerencia fue enviada a gerencia.", icon: "success", confirmButtonColor: "#8b5cf6" });
+        } else {
+          showToast("✅ Sugerencia enviada a gerencia.");
+        }
+      } catch (err) {
+        if (btn) { btn.disabled = false; btn.innerHTML = "📨 Enviar a Gerencia"; }
+        showToast("⚠️ " + err.message);
+      }
+    });
   }
 };
 
@@ -5410,6 +5804,9 @@ window.openExpressOrderModal = function() {
           expressInvoiceBase64 = ev.target.result;
           previewImg.src = expressInvoiceBase64;
           previewWrap.style.display = "flex";
+          if (typeof window.triggerOcrForExpressInvoice === "function") {
+            window.triggerOcrForExpressInvoice(expressInvoiceBase64);
+          }
         };
         r.readAsDataURL(f);
       };
@@ -7146,6 +7543,9 @@ window.openNewCashCloseModal = function() {
           photoRespaldoBase64 = ev.target.result;
           pImg.src = photoRespaldoBase64;
           pBox.style.display = "flex";
+          if (typeof window.triggerOcrForCashClose === "function") {
+            window.triggerOcrForCashClose(photoRespaldoBase64);
+          }
         };
         r.readAsDataURL(f);
       };
@@ -7322,9 +7722,12 @@ function inventoryView() {
                   </div>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; font-size:11.5px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; font-size:11.5px; gap:6px;">
                   <span style="color:#9ca3af;"><i class="fas fa-truck" style="font-size:10px;"></i> ${escapeHtml(item.proveedor || 'Proveedor')}</span>
-                  <strong style="color:#10b981;">$${Number(item.precioUSD).toFixed(2)}</strong>
+                  <span style="display:flex; align-items:center; gap:8px;">
+                    <strong style="color:#10b981;">$${Number(item.precioUSD).toFixed(2)}</strong>
+                    <button type="button" title="Editar insumo (stock, precio, proveedor)" onclick="window.editInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:11px;">✏️</button>
+                  </span>
                 </div>
               </div>
             `;
@@ -7340,6 +7743,111 @@ window.setInventoryTab = function(tab) {
   if (typeof render === "function") render();
 };
 
+window.setReportsViewType = function(type) {
+  state.reportsViewType = type;
+  if (typeof render === "function") render();
+};
+
+window.setReportsDateFilter = function(filter) {
+  state.reportsDateFilter = filter;
+  if (typeof render === "function") render();
+};
+
+window.setCustomDateFrom = function(date) {
+  state.reportsDateFrom = date;
+};
+
+window.setCustomDateTo = function(date) {
+  state.reportsDateTo = date;
+};
+
+window.applyCustomDateFilter = function() {
+  state.reportsDateFilter = 'custom';
+  if (typeof render === "function") render();
+};
+
+window.toggleUserStatus = async function(userName, currentActive) {
+  try {
+    await api("profile_toggle_user", { name: userName, active: !currentActive });
+    await refresh(false);
+    showToast(`Usuario ${!currentActive ? 'activado' : 'desactivado'} exitosamente.`);
+  } catch (err) {
+    alert(`Error al cambiar estado: ${err.message}`);
+  }
+};
+
+window.openReportIssueModal = function() {
+  Swal.fire({
+    title: "🐛 Reportar Problema al Sistema",
+    html: `
+      <div style="text-align:left; font-size:12px; line-height:1.5;">
+        <p style="margin-bottom:12px;">Si encuentras algún error, bug o comportamiento inesperado en el sistema, por favor repórtalo para que podamos corregirlo:</p>
+        <label style="display:block; margin-bottom:6px; font-weight:bold;">¿Qué problema experimentas?</label>
+        <textarea id="issue-description" class="swal2-input" rows="3" placeholder="Describe el problema detalladamente..."></textarea>
+        
+        <label style="display:block; margin-top:12px; margin-bottom:6px; font-weight:bold;">¿En qué sección del sistema ocurre?</label>
+        <select id="issue-section" class="swal2-input">
+          <option value="">Selecciona una sección...</option>
+          <option value="login">Inicio de sesión</option>
+          <option value="pedidos">Gestión de pedidos</option>
+          <option value="mostrador">Mostrador Rápido</option>
+          <option value="inventario">Inventario</option>
+          <option value="caja">Cierre de Caja</option>
+          <option value="proveedores">Proveedores</option>
+          <option value="reportes">Reportes</option>
+          <option value="general">General / Otro</option>
+        </select>
+        
+        <label style="display:block; margin-top:12px; margin-bottom:6px; font-weight:bold;">Captura de pantalla (opcional):</label>
+        <input type="file" id="issue-screenshot" class="swal2-file" accept="image/*">
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: "📤 Enviar Reporte",
+    cancelButtonText: "Cancelar",
+    confirmButtonColor: "#ef4444",
+    preConfirm: async () => {
+      const description = document.getElementById("issue-description")?.value.trim();
+      const section = document.getElementById("issue-section")?.value;
+      const fileInput = document.getElementById("issue-screenshot");
+      
+      if (!description) {
+        Swal.showValidationMessage("Por favor describe el problema");
+        return false;
+      }
+      
+      let screenshotBase64 = "";
+      if (fileInput && fileInput.files[0]) {
+        screenshotBase64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(fileInput.files[0]);
+        });
+      }
+      
+      try {
+        await api("profile_create_suggestion", {
+          comentario: `[${section || 'General'}] ${description}`,
+          fotoBase64: screenshotBase64
+        });
+        return true;
+      } catch (err) {
+        Swal.showValidationMessage("Error al enviar: " + err.message);
+        return false;
+      }
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      Swal.fire({
+        title: "✅ Reporte Enviado",
+        text: "Gracias por ayudarnos a mejorar el sistema. Gerencia revisará tu reporte.",
+        icon: "success",
+        confirmButtonColor: "#10b981"
+      });
+    }
+  });
+};
+
 window.cycleInventoryStatus = function(id) {
   const list = getStoredInventory();
   const it = list.find(i => String(i.id) === String(id));
@@ -7351,6 +7859,138 @@ window.cycleInventoryStatus = function(id) {
   saveStoredInventory(list);
   showToast(`${it.producto}: ${it.estado}`);
   if (typeof render === "function") render();
+};
+
+window.editInventoryItem = function(id) {
+  const list = getStoredInventory();
+  const idx = list.findIndex(i => String(i.id) === String(id));
+  if (idx === -1) return;
+  const it = list[idx];
+
+  // Separar cantidad y unidad del texto actual (ej. "5 unidades" -> 5, "unidades")
+  const m = String(it.stockActual || "").match(/^([\d.,]+)\s*(.*)$/);
+  const curQty = m ? parseFloat(m[1].replace(",", ".")) : 0;
+  const curUnit = (m && m[2]) ? m[2] : "unidades";
+
+  Swal.fire({
+    title: "✏️ Editar Insumo",
+    html: `
+      <div style="text-align:left; font-size:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Producto:</label>
+        <input type="text" id="swal-inv-e-nombre" class="swal2-input" value="${escapeHtml(it.producto)}" style="margin:0 0 8px 0; width:100%; box-sizing:border-box;">
+        <div style="display:flex; gap:8px;">
+          <div style="flex:1;">
+            <label style="display:block; margin-bottom:4px; font-weight:bold;">Cantidad en Stock:</label>
+            <input type="number" id="swal-inv-e-cant" class="swal2-input" step="any" min="0" value="${curQty}" style="margin:0; width:100%; box-sizing:border-box;">
+          </div>
+          <div style="flex:1.2;">
+            <label style="display:block; margin-bottom:4px; font-weight:bold;">Unidad:</label>
+            <input type="text" id="swal-inv-e-unidad" class="swal2-input" value="${escapeHtml(curUnit)}" placeholder="unidades, pliegos, cajas..." style="margin:0; width:100%; box-sizing:border-box;">
+          </div>
+        </div>
+        <label style="display:block; margin:8px 0 4px 0; font-weight:bold;">Estado:</label>
+        <select id="swal-inv-e-estado" class="swal2-input" style="margin:0; width:100%; box-sizing:border-box;">
+          <option value="auto" ${it.estado ? '' : 'selected'}>Automático según cantidad</option>
+          <option value="Disponible" ${it.estado === 'Disponible' ? 'selected' : ''}>Disponible</option>
+          <option value="Bajo Stock" ${it.estado === 'Bajo Stock' ? 'selected' : ''}>Bajo Stock</option>
+          <option value="Agotado" ${it.estado === 'Agotado' ? 'selected' : ''}>Agotado</option>
+        </select>
+        <label style="display:block; margin:8px 0 4px 0; font-weight:bold;">Precio Estimado ($ USD):</label>
+        <input type="number" id="swal-inv-e-precio" class="swal2-input" step="0.01" min="0" value="${Number(it.precioUSD || 0).toFixed(2)}" style="margin:0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin:8px 0 4px 0; font-weight:bold;">Proveedor Habitual:</label>
+        <input type="text" id="swal-inv-e-prov" class="swal2-input" value="${escapeHtml(it.proveedor || '')}" style="margin:0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin:8px 0 4px 0; font-weight:bold;">Categoría:</label>
+        <input type="text" id="swal-inv-e-cat" class="swal2-input" value="${escapeHtml(it.categoria || 'General')}" style="margin:0; width:100%; box-sizing:border-box;">
+        <label style="display:block; margin:8px 0 4px 0; font-weight:bold;">Notas:</label>
+        <input type="text" id="swal-inv-e-notas" class="swal2-input" value="${escapeHtml(it.notas || '')}" placeholder="Ej. Urgente, pedir caja..." style="margin:0; width:100%; box-sizing:border-box;">
+      </div>
+    `,
+    showCancelButton: true,
+    showDenyButton: true,
+    denyButtonText: "🗑️ Eliminar",
+    denyButtonColor: "#ef4444",
+    confirmButtonText: "💾 Guardar Cambios",
+    confirmButtonColor: "#06b6d4",
+    cancelButtonText: "Cancelar",
+    focusConfirm: false,
+    preConfirm: () => {
+      const nombre = document.getElementById("swal-inv-e-nombre")?.value.trim();
+      const qtyRaw = document.getElementById("swal-inv-e-cant")?.value;
+      const qty = parseFloat(String(qtyRaw || "0").replace(",", "."));
+      if (!nombre) {
+        Swal.showValidationMessage("El nombre del insumo es obligatorio");
+        return false;
+      }
+      if (isNaN(qty) || qty < 0) {
+        Swal.showValidationMessage("La cantidad debe ser un número mayor o igual a 0");
+        return false;
+      }
+      return {
+        producto: nombre,
+        qty: qty,
+        unit: (document.getElementById("swal-inv-e-unidad")?.value.trim() || "unidades"),
+        estadoSel: document.getElementById("swal-inv-e-estado")?.value || "auto",
+        precioUSD: parseFloat(document.getElementById("swal-inv-e-precio")?.value || 0),
+        proveedor: (document.getElementById("swal-inv-e-prov")?.value.trim() || "Proveedor"),
+        categoria: (document.getElementById("swal-inv-e-cat")?.value.trim() || "General"),
+        notas: (document.getElementById("swal-inv-e-notas")?.value.trim() || "")
+      };
+    }
+  }).then(res => {
+    if (res.isDenied) {
+      Swal.fire({
+        title: `¿Eliminar "${it.producto}"?`,
+        text: "Esta acción no se puede deshacer.",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Sí, eliminar",
+        confirmButtonColor: "#ef4444",
+        cancelButtonText: "Cancelar"
+      }).then(d => {
+        if (d.isConfirmed) {
+          list.splice(idx, 1);
+          saveStoredInventory(list);
+          // Sincronizar con backend
+          api("profile_save_inventory_item", { id: it.id, producto: it.producto, stockActual: "", estado: "Eliminado" }).catch(()=>{});
+          showToast(`🗑️ "${it.producto}" eliminado del inventario.`);
+          if (typeof render === "function") render();
+        }
+      });
+      return;
+    }
+    if (res.isConfirmed && res.value) {
+      const v = res.value;
+      let estado;
+      if (v.estadoSel === "auto") {
+        estado = (v.qty <= 0) ? "Agotado" : (v.qty <= 2 ? "Bajo Stock" : "Disponible");
+      } else {
+        estado = v.estadoSel;
+      }
+      it.producto = v.producto;
+      it.stockActual = `${v.qty} ${v.unit}`;
+      it.estado = estado;
+      it.precioUSD = v.precioUSD;
+      it.proveedor = v.proveedor;
+      it.categoria = v.categoria;
+      it.notas = v.notas;
+      saveStoredInventory(list);
+      
+      // Sincronizar con backend
+      api("profile_save_inventory_item", {
+        id: it.id,
+        producto: it.producto,
+        categoria: it.categoria,
+        stockActual: it.stockActual,
+        estado: it.estado,
+        precioEstimadoUSD: it.precioUSD,
+        proveedorHabitual: it.proveedor,
+        notas: it.notas
+      }).catch(() => {});
+      
+      showToast(`✅ "${it.producto}" actualizado: ${it.stockActual} · ${estado}`);
+      if (typeof render === "function") render();
+    }
+  });
 };
 
 window.openNewInventoryModal = function() {
@@ -7600,7 +8240,29 @@ window.testGeminiConnection = async function() {
   }
 };
 
-// 3. MOTOR DE TRANSCRIPCIÓN CON IA (GEMINI VISION)
+// COMPRESOR DE IMAGEN EN EL NAVEGADOR PARA OCR ULTRA-RÁPIDO - OPTIMIZADO
+window.compressImageForOcr = function(dataUrl, maxDim = 1000, quality = 0.65) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    } catch (e) { resolve(dataUrl); }
+  });
+};
+
+// 3. MOTOR DE TRANSCRIPCIÓN CON IA (GEMINI VISION) - OPTIMIZADO PARA VELOCIDAD
 window.transcribePhysicalSheet = async function(base64Image, sheetType) {
   if (!base64Image) {
     throw new Error("No hay imagen cargada para transcribir.");
@@ -7647,7 +8309,9 @@ window.transcribePhysicalSheet = async function(base64Image, sheetType) {
     }
   }
 
-  const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+  // Comprimir imagen en el navegador: subida mucho más rápida a la API
+  const compressedDataUrl = await window.compressImageForOcr(base64Image);
+  const cleanBase64 = compressedDataUrl.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
   
   let promptText = "";
   if (sheetType === "caja") {
@@ -7700,7 +8364,8 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
       }],
       generationConfig: {
         temperature: 0.1,
-        response_mime_type: "application/json"
+        response_mime_type: "application/json",
+        thinkingConfig: { thinkingBudget: 0 }
       }
     };
 
@@ -7724,7 +8389,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
     console.warn("Fallo llamada directa Gemini, intentando vía backend:", directErr);
     try {
       const backendRes = await api("profile_ai_transcribe", {
-        imageBase64: base64Image,
+        imageBase64: compressedDataUrl,
         sheetType: sheetType,
         apiKey: apiKey
       });
@@ -7736,7 +8401,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 };
 
-// 4. HANDLERS INTERACTIVOS PARA JJ EXPRESS Y CIERRE DE CAJA
+// 4. HANDLERS INTERACTIVOS PARA JJ EXPRESS Y CIERRE DE CAJA - OPTIMIZADOS
 window.triggerOcrForExpressInvoice = async function(base64) {
   const container = document.getElementById("express-invoice-preview-wrap");
   if (!container) return;
@@ -7750,7 +8415,7 @@ window.triggerOcrForExpressInvoice = async function(base64) {
 
   banner.className = "ocr-scanning-banner";
   banner.style.display = "flex";
-  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Transcribiendo datos del recibo con IA (Gemini)...</span>';
+  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando recibo (2-5 seg)...</span>';
 
   try {
     const data = await window.transcribePhysicalSheet(base64, "express");
@@ -7772,7 +8437,7 @@ window.triggerOcrForExpressInvoice = async function(base64) {
       if (cInp) cInp.value = Number(data.costo);
     }
     if (data.abono !== undefined && data.abono !== null && !isNaN(Number(data.abono))) {
-      const aInp = document.getElementById("express-abono");
+      const aInp = document.getElementById("express-anticipo");
       if (aInp) aInp.value = Number(data.abono);
     }
     if (data.resta !== undefined && data.resta !== null && !isNaN(Number(data.resta))) {
@@ -7784,7 +8449,7 @@ window.triggerOcrForExpressInvoice = async function(base64) {
       if (mInp) mInp.value = data.motivo;
     }
     if (data.notasCobro) {
-      const nInp = document.getElementById("express-notas-cobro");
+      const nInp = document.getElementById("express-nota-pago");
       if (nInp) nInp.value = data.notasCobro;
     }
     if (data.fechaEntrega) {
@@ -7814,28 +8479,12 @@ window.triggerOcrForExpressInvoice = async function(base64) {
       }
     }
     if (data.tipo) {
-      const tipoSelect = document.getElementById("express-tipo-select");
-      if (tipoSelect) {
-        let matched = false;
-        for (let opt of tipoSelect.options) {
-          if (opt.value.toLowerCase().includes(data.tipo.toLowerCase()) || data.tipo.toLowerCase().includes(opt.value.toLowerCase())) {
-            tipoSelect.value = opt.value;
-            matched = true;
-            break;
-          }
-        }
-        if (!matched && data.tipo) {
-          const newOpt = document.createElement("option");
-          newOpt.value = data.tipo;
-          newOpt.textContent = data.tipo;
-          tipoSelect.appendChild(newOpt);
-          tipoSelect.value = data.tipo;
-        }
-      }
+      const firstTipoInp = document.querySelector("#express-items-list .subitem-row .swal-item-tipo");
+      if (firstTipoInp) firstTipoInp.value = data.tipo;
     }
 
-    if (typeof window.calcExpressBalance === "function") {
-      window.calcExpressBalance();
+    if (typeof window.recalcExpressPayment === "function") {
+      window.recalcExpressPayment();
     }
 
     banner.className = "ocr-verified-banner";
@@ -7862,7 +8511,7 @@ window.triggerOcrForCashClose = async function(base64) {
 
   banner.className = "ocr-scanning-banner";
   banner.style.display = "flex";
-  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Transcribiendo planilla de arqueo con IA (Gemini)...</span>';
+  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando planilla (3-6 seg)...</span>';
 
   try {
     const data = await window.transcribePhysicalSheet(base64, "caja");
