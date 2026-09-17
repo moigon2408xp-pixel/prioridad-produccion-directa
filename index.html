@@ -1,6 +1,14 @@
 <!doctype html>
 <html lang="es">
 <head>
+  <script>
+    window.__ERRORS__ = [];
+    window.onerror = function(msg, url, line, col, error) {
+      window.__ERRORS__.push({ msg: msg, line: line, col: col, url: url, stack: error ? error.stack : '' });
+      document.title = "JSERROR: " + line + ": " + msg;
+    };
+  </script>
+
 <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#1a1a2e"/>
@@ -12,7 +20,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link rel="stylesheet" href="./styles.css?v=78"/>
+  <link rel="stylesheet" href="./styles.css?v=79"/>
   <title>Creaciones JJ – Prioridad Producción</title>
   <!-- CSS crítico: oculta workspace ANTES de que corra cualquier JS -->
   <style>
@@ -140,9 +148,13 @@
           </button>
 
           <!-- Perfil Usuario -->
-          <button type="button" class="user-pill" id="userPillBtn" title="Perfil y Sesión Activa">
+          <!-- Perfil Usuario y Autogestión de PIN -->
+          <button type="button" class="user-pill" id="userPillBtn" title="Perfil activo (Clic para cambiar tu PIN)" onclick="if (window.openChangePinModal) window.openChangePinModal();">
             <i class="fas fa-user"></i>
             <span id="userPillName">Usuario</span>
+          </button>
+          <button type="button" class="btn-change-pin-header" onclick="if (window.openChangePinModal) window.openChangePinModal();" title="Cambiar mi PIN o contraseña personal">
+            <i class="fas fa-key"></i>
           </button>
 
           <!-- Botón Salir -->
@@ -240,7 +252,7 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script src="./app-registrar-fix.js?v=78"></script>
+  <script src="./app-registrar-fix.js?v=79"></script>
 
   <script>
     /* ---- PWA y Registro de Service Worker para PC / Móvil ---- */
