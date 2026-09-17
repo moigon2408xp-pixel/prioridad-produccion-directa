@@ -1,5 +1,5 @@
 /**
- * CONFIGURACIÓN Y SERVICIO DE NOTIFICACIONES FIREBASE PUSH
+ * CONFIGURACIÃ“N Y SERVICIO DE NOTIFICACIONES FIREBASE PUSH
  * Creaciones JJ - Ochoa & Risquez
  */
 window.initFirebaseNotifications = async function () {
@@ -25,7 +25,7 @@ window.initFirebaseNotifications = async function () {
       return false;
     }
   } catch (err) {
-    console.error("Error solicitando permisos de notificación:", err);
+    console.error("Error solicitando permisos de notificaciÃ³n:", err);
     return false;
   }
 };
