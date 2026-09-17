@@ -12,7 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link rel="stylesheet" href="./styles.css?v=76"/>
+  <link rel="stylesheet" href="./styles.css?v=77"/>
   <title>Creaciones JJ – Prioridad Producción</title>
   <!-- CSS crítico: oculta workspace ANTES de que corra cualquier JS -->
   <style>
@@ -85,8 +85,8 @@
     <section id="workspace" class="workspace">
       <!-- HEADER FLOTANTE STICKY (ESTILO SICS 2026) -->
       <header class="jj-main-header">
-        <a class="jj-header-brand" onclick="navigate('now')">
-          <i class="fas fa-crown jj-brand-icon"></i>
+        <a class="jj-header-brand" onclick="navigate('modules')">
+          <img src="./logo_creaciones_jj.png" class="jj-brand-logo-img" alt="Creaciones JJ">
           <div>
             <div class="jj-brand-title">Creaciones JJ</div>
             <div class="jj-brand-sub">Ochoa &amp; Risquez · Taller</div>
@@ -150,7 +150,32 @@
             <i class="fas fa-power-off"></i>
           </button>
         </div>
-      </header>
+            </header>
+
+      <!-- Fichas y Módulos de Navegación Interactiva estilo SICS -->
+      <nav id="sics-module-tabs" class="sics-module-tabs-bar">
+        <button type="button" class="sics-tab-btn active" data-screen="modules" onclick="navigate('modules')">
+          <i class="fas fa-th-large"></i> <span>Módulos</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="now" onclick="navigate('now')">
+          <i class="fas fa-bolt"></i> <span>Mesa Activa</span> <span class="tab-badge" id="tabBadgeNow">0</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="team" onclick="navigate('team')">
+          <i class="fas fa-inbox"></i> <span>Bandeja Global</span> <span class="tab-badge" id="tabBadgeTeam">0</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="reports" onclick="navigate('reports')">
+          <i class="fas fa-chart-line"></i> <span>Reportes &amp; Avance</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="schedules" onclick="navigate('schedules')">
+          <i class="fas fa-calendar-alt"></i> <span>Horarios</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="history" onclick="navigate('history')">
+          <i class="fas fa-check-double"></i> <span>Historial</span>
+        </button>
+        <button type="button" class="sics-tab-btn" data-screen="settings" onclick="navigate('settings')">
+          <i class="fas fa-cog"></i> <span>Ajustes</span>
+        </button>
+      </nav>
 
       <!-- Copia de Seguridad -->
       <div class="backup-container">
@@ -183,11 +208,30 @@
     </section>
   </div>
 
+  
+  <!-- Datalist Autocompletado de Trabajos SICS -->
+  <datalist id="subitem-tipos-list">
+    <option value="Topper 3D">
+    <option value="Topper Sencillo">
+    <option value="Stickers / Calcomanías">
+    <option value="Taza Sublimada">
+    <option value="Invitación Digital">
+    <option value="Invitación Física / Tarjetas">
+    <option value="Letras 3D">
+    <option value="Maqueta Escolar">
+    <option value="Caja Sorpresa / Cotillón">
+    <option value="Banderines / Guirnaldas">
+    <option value="Cuadro Personalizado">
+    <option value="Estampado / Franela">
+    <option value="Chapa / Pin">
+    <option value="Corte Vinil">
+  </datalist>
+
   <dialog id="modal" class="modal"></dialog>
   <div id="toast" class="toast" role="status"></div>
 
   <script src="./firebase-config.js"></script>
-  <script src="./app-registrar-fix.js?v=76"></script>
+  <script src="./app-registrar-fix.js?v=77"></script>
 
   <script>
     /* ---- PWA y Registro de Service Worker para PC / Móvil ---- */
