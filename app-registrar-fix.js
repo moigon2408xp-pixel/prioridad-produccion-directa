@@ -4975,47 +4975,48 @@ function doLogin(e) {
   const nameInput = document.getElementById("login-name");
   const pinInput  = document.getElementById("login-pin");
   const errEl     = document.getElementById("login-error");
+  const btnEl     = document.getElementById("login-btn-manual");
   
   const nameVal = (nameInput?.value || "").trim();
   const pinVal  = (pinInput?.value || "").trim();
 
   if (!nameVal || !pinVal) {
-    if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN de 6 dígitos.";
+    if (errEl) errEl.textContent = "Ingresa tu nombre y tu PIN personal.";
     return false;
   }
 
-  const normName = nameVal.toLowerCase();
-  let userRole = "trabajador";
-  if (normName.includes("mois") || normName.includes("manag") || normName.includes("jef") || normName.includes("admin")) {
-    userRole = "manager";
+  // Deshabilitar botón durante la verificación
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "Verificando...";
   }
 
-  const instantSession = {
-    name: nameVal,
-    nombre: nameVal,
-    role: userRole,
-    rol: userRole,
-    token: "session_instant_" + Date.now()
-  };
-
-  state.session = instantSession;
-  store.set("pp_profile_session", instantSession);
-
-  // TRANSICIÓN INSTANTÁNEA A LA PANTALLA DE TRABAJO (0 milisegundos)
-  showWorkspace();
-  render();
-
-  // Sincronización en segundo plano sin bloquear la interfaz
+  // Verificar primero con el backend antes de permitir acceso
   api("profile_login", { name: nameVal, pin: pinVal }).then((res) => {
     if (res && res.session) {
       state.session = res.session;
       store.set("pp_profile_session", res.session);
+      showWorkspace();
       render();
+      refresh(false);
+    } else {
+      throw new Error("No se pudo iniciar sesión. Respuesta inválida del servidor.");
     }
   }).catch((err) => {
-    console.warn("Autenticación en segundo plano diferida:", err);
+    console.error("Error de autenticación:", err);
+    if (errEl) {
+      errEl.textContent = err.message || "Error al iniciar sesión. Verifica tus credenciales.";
+    }
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "Iniciar sesión";
+    }
   }).finally(() => {
-    refresh(false);
+    // Re-habilitar botón si hubo error
+    if (btnEl && btnEl.disabled && !state.session) {
+      btnEl.disabled = false;
+      btnEl.textContent = "Iniciar sesión";
+    }
   });
 
   return false;
