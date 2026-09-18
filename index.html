@@ -58,7 +58,7 @@
       </div>
 
       <!-- Formulario de inicio de sesión -->
-      <form id="login-form" class="unlock-form" onsubmit="event.preventDefault(); if (window.doLogin) window.doLogin(event); return false;">
+      <form id="login-form" class="unlock-form">
         <label for="login-name">Tu nombre</label>
         <input
           id="login-name"
@@ -75,7 +75,7 @@
           placeholder="Seis dígitos"
           required
         />
-        <button type="button" id="login-btn-manual" class="primary-button login-submit-btn" onclick="if (window.doLogin) window.doLogin(event);">
+        <button type="submit" id="login-btn-manual" class="primary-button login-submit-btn">
           Iniciar sesión
         </button>
         <button type="button" class="secondary-button pwa-install-btn" onclick="if (window.triggerPwaInstall) window.triggerPwaInstall();" style="margin-top:10px; width:100%; border:1px solid #3b82f6; background:rgba(59,130,246,0.12); color:#60a5fa; font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
