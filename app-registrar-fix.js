@@ -2868,6 +2868,23 @@ function settingsView() {
             <button type="button" class="secondary-button" onclick="resetDefaultTheme()" style="font-size:11px; padding:5px 10px;">
               🔄 Restablecer Colores por Defecto
             </button>
+            
+            <div style="margin-top:16px; padding-top:16px; border-top:1px dashed var(--border-color);">
+              <span style="font-size:12px; font-weight:bold; color:var(--text-main); display:block; margin-bottom:8px;">🤖 CONFIGURACIÓN DE OCR (Reconocimiento de Imágenes):</span>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
+                Para que funcione el OCR (escaneo de comandas y planillas), necesitas una API Key de Google Gemini Vision.
+              </div>
+              <label class="field" style="margin-bottom:8px;">
+                <span class="field-label">API Key de Google Gemini:</span>
+                <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." value="${escapeHtml(store.get('pp_gemini_api_key', ''))}" style="font-size:12px; padding:6px 8px;">
+              </label>
+              <button type="button" class="primary-button" onclick="window.saveGeminiApiKey()" style="font-size:11px; padding:6px 12px; background:#8b5cf6; border:none;">
+                💾 Guardar API Key
+              </button>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:6px;">
+                <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color:#8b5cf6;">🔗 Obtener API Key gratuita en Google AI Studio</a>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -7772,6 +7789,19 @@ window.toggleUserStatus = async function(userName, currentActive) {
   }
 };
 
+window.saveGeminiApiKey = function() {
+  const input = document.getElementById("gemini-api-key-input");
+  const apiKey = input?.value.trim();
+  
+  if (!apiKey) {
+    showToast("⚠️ Ingresa una API Key válida");
+    return;
+  }
+  
+  store.set("pp_gemini_api_key", apiKey);
+  showToast("✅ API Key de Gemini guardada. El OCR debería funcionar ahora.");
+};
+
 window.openReportIssueModal = function() {
   Swal.fire({
     title: "🐛 Reportar Problema al Sistema",
@@ -8373,7 +8403,12 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
 
     if (!response.ok) {
       const errJson = await response.json().catch(() => ({}));
-      throw new Error(errJson.error?.message || `HTTP ${response.status}`);
+      const errorMsg = errJson.error?.message || `HTTP ${response.status}`;
+      
+      if (response.status === 403 || response.status === 401) {
+        throw new Error("API Key inválida o no configurada. Ve a Ajustes > Personalización para configurar tu API Key de Google Gemini.");
+      }
+      throw new Error(errorMsg);
     }
 
     const data = await response.json();
@@ -8383,6 +8418,11 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
     return JSON.parse(rawText);
   } catch (directErr) {
     console.warn("Fallo llamada directa Gemini, intentando vía backend:", directErr);
+    
+    if (directErr.message && directErr.message.includes("API Key")) {
+      throw directErr; // Re-lanzar error de API key específico
+    }
+    
     try {
       const backendRes = await api("profile_ai_transcribe", {
         imageBase64: compressedDataUrl,
@@ -8392,7 +8432,9 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
       if (backendRes && backendRes.data) {
         return backendRes.data;
       }
-    } catch (bErr) {}
+    } catch (bErr) {
+      console.warn("Fallo backend también:", bErr);
+    }
     throw directErr;
   }
 };
@@ -8414,7 +8456,16 @@ window.triggerOcrForExpressInvoice = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando recibo (2-5 seg)...</span>';
 
   try {
-    const data = await window.transcribePhysicalSheet(base64, "express");
+    // Agregar timeout de 10 segundos
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 10000);
+    });
+
+    const data = await Promise.race([
+      window.transcribePhysicalSheet(base64, "express"),
+      timeoutPromise
+    ]);
+
     if (!data) {
       banner.style.display = "none";
       return;
@@ -8489,7 +8540,8 @@ window.triggerOcrForExpressInvoice = async function(base64) {
   } catch (err) {
     console.error("Error en transcripción OCR Express:", err);
     banner.className = "ocr-error-banner";
-    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>No se pudo transcribir automáticamente (${escapeHtml(err.message)}). Puedes llenar los campos manualmente.</span>`;
+    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>${err.message || "No se pudo transcribir automáticamente"} - Puedes llenar los campos manualmente.</span>`;
+    showToast("⚠️ OCR falló - Llena los campos manualmente");
   }
 };
 var triggerOcrForExpressInvoice = window.triggerOcrForExpressInvoice;
@@ -8510,7 +8562,16 @@ window.triggerOcrForCashClose = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando planilla (3-6 seg)...</span>';
 
   try {
-    const data = await window.transcribePhysicalSheet(base64, "caja");
+    // Agregar timeout de 10 segundos
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 10000);
+    });
+
+    const data = await Promise.race([
+      window.transcribePhysicalSheet(base64, "caja"),
+      timeoutPromise
+    ]);
+
     if (!data) {
       banner.style.display = "none";
       return;
