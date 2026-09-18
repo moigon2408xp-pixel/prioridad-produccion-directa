@@ -5023,9 +5023,16 @@ function doLogin(e) {
 }
 window.doLogin = doLogin;
 
-document.getElementById("login-btn-manual")?.addEventListener("click", doLogin);
-
+// Event listener del formulario de login
 document.getElementById("login-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  doLogin(e);
+  return false;
+});
+
+// Event listener del botón manual (backup)
+document.getElementById("login-btn-manual")?.addEventListener("click", (e) => {
   e.preventDefault();
   e.stopPropagation();
   doLogin(e);
