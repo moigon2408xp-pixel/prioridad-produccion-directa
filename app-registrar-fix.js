@@ -3606,18 +3606,6 @@ window.saveOrderEntrega = async function(orderId) {
     alert(`Error al guardar fecha de entrega: ${err.message}`);
   }
 };
-      btn.textContent = "✅ Guardado";
-      setTimeout(() => { if (btn) btn.textContent = "💾 Min"; }, 2000);
-    }
-    await refresh(false);
-  } catch (err) {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "💾 Min";
-    }
-    alert(`Error al guardar duración: ${err.message}`);
-  }
-};
 
 let activeMediaStream = null;
 
