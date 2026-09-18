@@ -1922,7 +1922,9 @@ function reportsView() {
   const onTimeFinished = periodFinishedOrders.filter(o => {
     const ent = safeParseDate(o.entrega);
     const cie = safeParseDate(o.fechaCierre);
-    return ent && cie ? cie <= ent : true;
+    // Solo cuenta como a tiempo si tiene ambas fechas y la fecha de cierre es <= fecha de entrega
+    if (!ent || !cie) return false;
+    return cie <= ent;
   });
   const complianceRate = periodFinishedOrders.length ? Math.round((onTimeFinished.length / periodFinishedOrders.length) * 100) : 100;
 
