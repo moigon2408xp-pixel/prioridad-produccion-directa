@@ -4088,17 +4088,9 @@ function openEditClientModal(client) {
 window.openEditClientModal = openEditClientModal;
 
 function openLearningGuideModal() {
-  openModal(`
-    <div class="modal-head">
-      <div>
-        <p class="eyebrow" style="color:var(--primary-color); margin:0;">CREACIONES JJ · MANUAL OFICIAL</p>
-        <h2 style="margin:2px 0 0 0;">🎓 Modo de Enseñanza y Guía del Sistema</h2>
-      </div>
-      <button class="close-button" data-action="close">×</button>
-    </div>
-
-    <div style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
-      
+  const isManager = state.session && (state.session.role === 'manager' || state.session.role === 'jefe' || state.session.role === 'jefa');
+  
+  const workerModules = `
       <!-- MÓDULO 1 -->
       <div class="guide-card">
         <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
@@ -4119,58 +4111,253 @@ function openLearningGuideModal() {
       <!-- MÓDULO 2 -->
       <div class="guide-card">
         <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
-          <span class="guide-step-number">2</span> Diferencia entre "Diseño" y "Producción"
+          <span class="guide-step-number">2</span> Pedido Rápido Mostrador (JJ Express)
         </h3>
         <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
-          Muchos confunden el estado de diseño con la fabricación:
+          Para registrar pedidos de mostrador en segundos:
         </p>
         <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
-          <li>🎨 <strong>Estado del Diseño (Pendiente / En proceso / Listo):</strong> Solo indica si el archivo digital de Silhouette / Illustrator ya está listo. <em>No cuenta tiempo de taller.</em></li>
-          <li>✂️ <strong>Estado de Producción (En proceso ➔ Terminado):</strong> Es el trabajo manual de taller. <em>Este es el que cuenta tus minutos y pedidos completados.</em></li>
+          <li>Presiona el botón ⚡ <strong>Mostrador Rápido</strong> en el header.</li>
+          <li>Completa: cliente, teléfono, tipo, motivo, cantidad, costo, anticipo, método de pago.</li>
+          <li><strong>OCR:</strong> Toma foto de la comanda física para transcripción automática.</li>
+          <li>Botón rápido para entregas a las 7:30 PM.</li>
+          <li>Sube fotos de referencia que el cliente envió por WhatsApp.</li>
         </ul>
       </div>
 
       <!-- MÓDULO 3 -->
       <div class="guide-card">
         <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
-          <span class="guide-step-number">3</span> Reasignaciones y Trabajo en Equipo
+          <span class="guide-step-number">3</span> Asistente de Voz (JJ-Bot)
         </h3>
         <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
-          Si un pedido no se puede terminar hoy porque te vas de vacaciones o finaliza tu turno:
+          Dicta pedidos por voz sin escribir:
         </p>
         <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
-          <li>Pulsa el botón morado <strong>👥 Reasignar</strong> en el detalle del pedido.</li>
-          <li>Ingresa los minutos que invertiste (ej: 45 min) y el avance que dejaste.</li>
-          <li>Tus 45 minutos quedarán reconocidos en tu reporte de nómina y tu compañero recibirá el pedido sin perder el avance.</li>
+          <li>Presiona el botón del robot 🤖 en la esquina inferior derecha.</li>
+          <li>Presiona el micrófono 🎙️ y dicta: <em>"Pedido para María de un topper de Spiderman para el lunes"</em></li>
+          <li>El sistema entiende lenguaje natural venezolano.</li>
+          <li>Si el micrófono falla, usa <strong>Win + H</strong> para dictado nativo de Windows.</li>
         </ul>
       </div>
 
       <!-- MÓDULO 4 -->
       <div class="guide-card">
         <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
-          <span class="guide-step-number">4</span> Cámara Directa y Propiedad Intelectual
+          <span class="guide-step-number">4</span> Buscador Spotlight (Ctrl + K)
         </h3>
         <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
-          Las fotos de evidencia de los toppers pertenecen exclusivamente a Creaciones JJ.
+          Busca cualquier cosa instantáneamente:
         </p>
         <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
-          <li>Usa el botón <strong>📸 Tomar Foto con Cámara Directa</strong> al completar el trabajo.</li>
-          <li>La foto viaja directamente a Google Drive en la nube sin guardarse en la memoria ni en la galería de tu celular personal.</li>
+          <li>Presiona <strong>Ctrl + K</strong> o el botón 🔍 en el header.</li>
+          <li>Busca pedidos por ID, cliente, tipo o motivo.</li>
+          <li>Busca clientes por nombre o teléfono.</li>
+          <li>Busca acciones: "crear pedido", "mi bandeja", "historial".</li>
+          <li>Navega con flechas ↑↓, Enter para seleccionar, Esc para cerrar.</li>
         </ul>
       </div>
 
       <!-- MÓDULO 5 -->
       <div class="guide-card">
         <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
-          <span class="guide-step-number">5</span> Notificación por WhatsApp Corporativo
+          <span class="guide-step-number">5</span> Reasignaciones y Trabajo en Equipo
         </h3>
         <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
-          Para avisar a clientes desde el número de la empresa:
+          Si un pedido no se puede terminar hoy:
         </p>
         <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
-          <li>En Historial, los pedidos listos tienen el botón verde <strong>📲 Notificar por WhatsApp</strong>.</li>
-          <li>Ofrece opciones directas para <strong>WhatsApp Web (Opera GX / Chrome)</strong>, <strong>App Móvil</strong> o <strong>Copiar Mensaje</strong>.</li>
-          <li>Al enviar, se marca automáticamente como notificado para que nadie repita el mensaje.</li>
+          <li>Pulsa el botón morado <strong>👥 Reasignar</strong> en el detalle del pedido.</li>
+          <li>Ingresa los minutos que invertiste (ej: 45 min) y el avance.</li>
+          <li>Tus minutos quedan reconocidos en tu reporte.</li>
+          <li>El compañero recibe el pedido sin perder el avance.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 6 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">6</span> Reportes y Estadísticas
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Revisa tu rendimiento en la pestaña "Reportes & Avance":
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li><strong>Pedidos Completados Hoy:</strong> Conteo de trabajos terminados.</li>
+          <li><strong>Tiempo Promedio:</strong> Duración media por pedido.</li>
+          <li><strong>Rezagados:</strong> Clic para filtrar pedidos demorados.</li>
+          <li><strong>Filtros:</strong> Mes en curso, mes anterior, o personalizado.</li>
+          <li><strong>Clic en tu contador:</strong> Modal con tus pedidos del día.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 7 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">7</span> Cambiar tu PIN Personal
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Gestiona tu seguridad:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Presiona el botón de llave 🔙 en el header.</li>
+          <li>Ingresa tu PIN actual y el nuevo PIN (4-6 dígitos).</li>
+          <li>El cambio se guarda automáticamente.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO 8 -->
+      <div class="guide-card">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number">8</span> Reportar Problemas
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Si encuentras un error:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Presiona el botón rojo 🐛 "Reportar Problema" en el header.</li>
+          <li>Describe el problema detalladamente.</li>
+          <li>Selecciona la sección donde ocurrió.</li>
+          <li>Adjunta captura de pantalla si es posible.</li>
+          <li>Gerencia revisará y corregirá el problema.</li>
+        </ul>
+      </div>
+  `;
+
+  const managerModules = `
+      <!-- MÓDULO GERENCIA 1 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G1</span> Gestión de Proveedores
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Control de cuentas por pagar:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Ve a la pestaña "Proveedores".</li>
+          <li>Registra notas de entrega con fotos (1-3+ hojas).</li>
+          <li>Conversión automática a tasa BCV.</li>
+          <li>Registra abonos parciales con fecha y referencia.</li>
+          <li>Alertas de vencimiento (5 días).</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO GERENCIA 2 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G2</span> Cierre de Caja
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Arqueo diario por turnos:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Ve a la pestaña "Cierre Caja".</li>
+          <li>Turno 1 (1:00 PM) y Turno 2 (8:00 PM).</li>
+          <li>Control de fondo inicial, POS, Pago Móvil, efectivo.</li>
+          <li>Conversión automática a tasa BCV.</li>
+          <li><strong>OCR:</strong> Toma foto de la planilla física para transcripción automática.</li>
+          <li>Foto de respaldo de planilla firmada.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO GERENCIA 3 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G3</span> Control de Costos
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Gestión financiera:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Asigna costo a pedidos (visible solo para gerencia).</li>
+          <li>Edita costos en pedidos terminados.</li>
+          <li>Revisa reportes financieros en "Reportes & Avance".</li>
+          <li>Filtra por período, trabajador o tipo de trabajo.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO GERENCIA 4 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G4</span> Gestión de Usuarios
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Control de accesos:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Ve a "Ajustes" → "Gestión de Usuarios".</li>
+          <li>Crea nuevos usuarios con nombre, rol y PIN.</li>
+          <li>Activa/desactiva usuarios (preserva historial).</li>
+          <li>Cambia roles: trabajador ↔ jefe/jefa ↔ manager.</li>
+          <li>Resetea PIN de usuarios si olvidan su clave.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO GERENCIA 5 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G5</span> Configuración del Sistema
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Ajustes globales:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li><strong>Tasa BCV:</strong> Actualiza diariamente en "Ajustes".</li>
+          <li><strong>API Keys:</strong> Configura Gemini Vision para OCR.</li>
+          <li><strong>Forzar Actualización:</strong> Transmite cambios a todos los dispositivos.</li>
+          <li><strong>Copias de Seguridad:</strong> Exporta/importa datos locales.</li>
+          <li><strong>Archivar:</strong> Mueve pedidos antiguos (>60 días) a histórico.</li>
+        </ul>
+      </div>
+
+      <!-- MÓDULO GERENCIA 6 -->
+      <div class="guide-card" style="border-left: 4px solid #f59e0b;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:var(--text-main); font-size:15px;">
+          <span class="guide-step-number" style="background:#f59e0b;">G6</span> Sugerencias del Equipo
+        </h3>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5;">
+          Canal de comunicación:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6;">
+          <li>Ve a "Ajustes" → "Sugerencias del Equipo".</li>
+          <li>Revisa sugerencias enviadas por trabajadores.</li>
+          <li>Cambia estado: Pendiente → Revisada → Implementada.</li>
+          <li>Responde a sugerencias para notificar al usuario.</li>
+        </ul>
+      </div>
+  `;
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow" style="color:var(--primary-color); margin:0;">CREACIONES JJ · MANUAL OFICIAL v78</p>
+        <h2 style="margin:2px 0 0 0;">🎓 Guía Completa del Sistema</h2>
+        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">
+          ${isManager ? '👔 Acceso de Gerencia' : '👷 Acceso de Trabajador'}
+        </p>
+      </div>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      
+      ${workerModules}
+
+      ${isManager ? managerModules : ''}
+
+      <!-- MÓDULO FINAL -->
+      <div class="guide-card" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white;">
+        <h3 style="display:flex; align-items:center; margin-bottom:8px; color:white; font-size:15px;">
+          <span class="guide-step-number" style="background:rgba(255,255,255,0.3); color:white;">💡</span> Recursos Adicionales
+        </h3>
+        <p style="font-size:13px; color:rgba(255,255,255,0.9); line-height:1.5;">
+          Para más información detallada, consulta los manuales completos:
+        </p>
+        <ul style="font-size:12px; margin-left:20px; margin-top:6px; line-height:1.6; color:rgba(255,255,255,0.9);">
+          <li>📖 <strong>MANUAL_TRABAJADORES.md</strong> - Guía completa para taller</li>
+          ${isManager ? '<li>🏢 <strong>MANUAL_GERENCIA.md</strong> - Guía exclusiva para gerencia</li>' : ''}
+          <li>🔧 <strong>SETUP_MANUAL.md</strong> - Guía de instalación</li>
+          <li>📊 <strong>README.md</strong> - Lista completa de funcionalidades</li>
         </ul>
       </div>
 
