@@ -89,22 +89,6 @@ if (!window._stopwatchInterval) {
   }, 30000); // 30 segundos para móvil
 }
 
-const modalBadge = document.getElementById('modal-live-stopwatch-badge');
-      if (modalBadge) {
-        const id = modalBadge.getAttribute('data-order-id');
-        const allTarget = [...(state.data?.allOrders || []), ...(state.data?.myOrders || [])];
-        const ord = allTarget.find(o => String(o.id) === String(id));
-        if (ord && ord.estado === 'En proceso') {
-          const m = getOrderElapsedMinutes(ord);
-          modalBadge.innerHTML = `⏱️ ${formatMinutesToHuman(m)}`;
-          const spanMins = document.getElementById('modal-live-stopwatch-text');
-          if (spanMins) spanMins.textContent = formatMinutesToHuman(m);
-        }
-      }
-    } catch(e) {}
-  }, 10000);
-}
-
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
  * Versión 11.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
