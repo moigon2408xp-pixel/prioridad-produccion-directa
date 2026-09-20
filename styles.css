@@ -741,14 +741,21 @@ body {
     padding: 8px 12px;
     gap: 8px;
     margin: 0 2% 12px 2%;
+    overflow-x: hidden; /* Prevenir desplazamiento horizontal */
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .jj-header-brand {
     flex-shrink: 0;
+    min-width: 0; /* Permitir que el texto se ajuste */
   }
 
   .jj-brand-title {
     font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .jj-brand-sub {
@@ -760,6 +767,7 @@ body {
     flex-wrap: nowrap;
     justify-content: flex-end;
     gap: 4px;
+    flex-shrink: 0;
   }
 
   .control-btn-circle {
