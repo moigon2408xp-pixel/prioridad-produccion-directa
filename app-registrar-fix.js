@@ -77,6 +77,17 @@ if (!window._stopwatchInterval) {
         const id = el.getAttribute('data-order-id');
         const allTarget = [...(state.data?.allOrders || []), ...(state.data?.myOrders || [])];
         const ord = allTarget.find(o => String(o.id) === String(id));
+        if (!ord) return;
+        
+        const mins = getOrderElapsedMinutes(ord);
+        const human = formatMinutesToHuman(mins);
+        el.textContent = human;
+      });
+    } catch(e) {
+      console.error("Error actualizando cronómetros:", e);
+    }
+  }, 30000); // 30 segundos para móvil
+}
         if (ord && ord.estado === 'En proceso') {
           const m = getOrderElapsedMinutes(ord);
           el.innerHTML = `<i class="fas fa-stopwatch fa-spin"></i> ${formatMinutesToHuman(m)}`;
@@ -1690,11 +1701,12 @@ function modulesView() {
   let debtAlert = '';
   if (leadUser) {
     const invoices = getStoredProvidersData();
+    const hoy = new Date();
     const overdueDebts = invoices.filter(inv => {
       const vence = new Date(inv.fechaVencimiento);
-      const hoy = new Date();
       const diasParaVencer = Math.ceil((vence - hoy) / (1000 * 60 * 60 * 24));
-      return diasParaVencer <= 5 && inv.saldoPendiente > 0;
+      // Alertar si: vencida, o vence en 5 días o menos, o tiene abono parcial y vence pronto
+      return (diasParaVencer <= 5 && inv.saldoPendiente > 0) || (inv.abonado > 0 && diasParaVencer <= 2);
     });
     
     if (overdueDebts.length > 0) {
@@ -1704,7 +1716,7 @@ function modulesView() {
             <div style="font-size:24px;">🚨</div>
             <div style="flex:1;">
               <div style="font-weight:bold; font-size:14px;">¡ALERTA DE DEUDAS VENCIDAS!</div>
-              <div style="font-size:12px; opacity:0.9;">Tienes ${overdueDebts.length} cuenta(s) por pagar vencida(s) o próximas a vencer.</div>
+              <div style="font-size:12px; opacity:0.9;">Tienes ${overdueDebts.length} cuenta(s) por pagar vencida(s), próximas a vencer o con abonos parciales pendientes.</div>
             </div>
             <button type="button" onclick="navigate('providers')" style="background:white; color:#ef4444; border:none; padding:6px 12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px;">Ver Deudas</button>
           </div>
@@ -2069,7 +2081,7 @@ function reportsView() {
             <i class="fas fa-calendar-check"></i> CASOS DEL PERÍODO
           </div>
           <div style="font-size:28px; font-weight:900; color:var(--text-main);">${casesThisPeriod}</div>
-          <div style="font-size:11px; color:var(--text-muted);">${periodActiveOrders.length} activos + ${periodFinishedOrders.length} completados</div>
+          <div style="font-size:11px; color:var(--text-muted);">${activeOrders.length} activos + ${periodFinishedOrders.length} completados</div>
         </div>
 
         <div class="sics-metric-card">
@@ -2159,13 +2171,14 @@ function reportsView() {
       <!-- Alerta Operativa si hay Rezagados -->
       ${overdueOrders.length ? `
         <div style="background:rgba(239,68,68,0.08); border:1.5px solid #ef4444; border-radius:12px; padding:16px; margin-bottom:24px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px; cursor:pointer;" onclick="window.toggleOverdueList()">
             <div style="font-size:13px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:8px;">
               <i class="fas fa-bell fa-bounce"></i> CASOS REZAGADOS QUE REQUIEREN ATENCIÓN (${overdueOrders.length})
+              <i class="fas fa-chevron-down" id="overdue-chevron" style="font-size:11px; margin-left:8px;"></i>
             </div>
             <span style="font-size:10.5px; background:#ef4444; color:white; padding:2px 8px; border-radius:10px; font-weight:bold;">ALERTA OPERATIVA</span>
           </div>
-          <div style="display:flex; flex-direction:column; gap:8px;">
+          <div id="overdue-list-container" style="display:none; display:flex; flex-direction:column; gap:8px;">
             ${overdueOrders.map(o => `
               <div style="background:rgba(0,0,0,0.3); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                 <div>
@@ -2769,7 +2782,7 @@ function settingsView() {
       <div class="jj-accordion-group">
 
         <!-- 1. CATÁLOGO DE MOTIVOS Y TEMÁTICAS -->
-        <div class="jj-accordion-item is-open" id="acc-motivos">
+        <div class="jj-accordion-item" id="acc-motivos">
           <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-motivos')">
             <div class="jj-accordion-title-wrap">
               <div class="jj-accordion-icon" style="background:rgba(14,165,233,0.15); color:#0ea5e9;">
@@ -2863,7 +2876,7 @@ function settingsView() {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <span style="font-size:12px; color:var(--text-muted);">Equipo real de Creaciones JJ</span>
               ${isLead() ? `
-                <button type="button" class="secondary-button" onclick="window.openCreateUserModal()" style="font-size:11px; padding:4px 10px; background:#10b981; color:white; border:none;">
+                <button type="button" class="secondary-button" onclick="formNewUser()" style="font-size:11px; padding:4px 10px; background:#10b981; color:white; border:none;">
                   + Crear Nuevo Perfil
                 </button>
               ` : ''}
@@ -5280,14 +5293,20 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "force-update") {
+    showToast("🔄 Iniciando actualización global del equipo...");
     if (confirm("¿Deseas forzar la actualización inmediata en todas las sesiones y teléfonos activos del taller?\n\nTodos los dispositivos del equipo recargarán automáticamente la versión más reciente.")) {
       try {
         const newVer = "v_" + Date.now();
         await api("profile_force_update", { version: newVer });
         store.set("pp_app_version", newVer);
-        showToast("🚀 Orden de actualización global enviada a todo el equipo.");
+        showToast("✅ Orden de actualización global enviada a todo el equipo exitosamente.");
         await refresh(false);
-      } catch (err) { alert(`Error al forzar actualización: ${err.message}`); }
+      } catch (err) { 
+        showToast("❌ Error al forzar actualización: " + err.message);
+        alert(`Error al forzar actualización: ${err.message}`); 
+      }
+    } else {
+      showToast("⏸️ Actualización cancelada por el usuario.");
     }
     return;
   }
@@ -5923,10 +5942,14 @@ window.openExpressOrderModal = function() {
       <div class="subitems-builder-box">
         <div class="subitems-builder-title">
           <span><i class="fas fa-cubes"></i> TRABAJOS SOLICITADOS</span>
+          <button type="button" class="secondary-button" id="express-toggle-multiple" onclick="window.toggleExpressMultiple()" style="padding:3px 8px; font-size:11px; background:#f59e0b; color:white; border:none; border-radius:6px; cursor:pointer;">
+            📁 Mostrar/Ocultar
+          </button>
           <button type="button" class="secondary-button" id="express-add-item-btn" style="padding:3px 8px; font-size:11px; background:#0ea5e9; color:white; border:none; border-radius:6px; cursor:pointer;">
             ➕ Otro Trabajo
           </button>
         </div>
+        <div id="express-multiple-container" style="display:none;">
         <!-- Chips rápidos -->
         <div class="subitems-chips-bar">
           <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
@@ -5947,6 +5970,7 @@ window.openExpressOrderModal = function() {
           </div>
         </div>
       </div>
+    </div>
 
       <!-- Selección Rápida de Entrega -->
       <div class="field">
@@ -6479,6 +6503,21 @@ window.toggleSpeechRecognition = function() {
     const transcript = event.results[0][0].transcript;
     const input = document.getElementById("jj-bot-input");
     if (input) input.value = transcript;
+    
+    // Intentar encontrar cliente en contactos frecuentes
+    const clients = state.data?.frequentClients || [];
+    let matchedClient = null;
+    
+    clients.forEach(c => {
+      if (transcript.toLowerCase().includes(c.name.toLowerCase())) {
+        matchedClient = c;
+      }
+    });
+    
+    if (matchedClient) {
+      showToast(`👤 Cliente detectado: ${matchedClient.name}`);
+    }
+    
     window.processVoiceTranscript(transcript);
   };
 
@@ -6512,12 +6551,42 @@ window.toggleSpeechRecognition = function() {
   }
 };
 
+window.printReport = function() {
+  window.print();
+};
+
+window.toggleOverdueList = function() {
+  const container = document.getElementById("overdue-list-container");
+  const chevron = document.getElementById("overdue-chevron");
+  if (container) {
+    const isHidden = container.style.display === "none";
+    container.style.display = isHidden ? "flex" : "none";
+    if (chevron) {
+      chevron.className = isHidden ? "fas fa-chevron-up" : "fas fa-chevron-down";
+    }
+  }
+};
+
+window.toggleExpressMultiple = function() {
+  const container = document.getElementById("express-multiple-container");
+  if (container) {
+    container.style.display = container.style.display === "none" ? "block" : "none";
+  }
+};
+
 window.startVoiceDictationForStandard = function() {
   const micBtn = document.getElementById("standard-mic-btn");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
-    alert("El dictado por voz no es soportado por este navegador. Usa Chrome o Edge.");
+    const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+    const isEdge = /Edge/.test(navigator.userAgent);
+    
+    if (isChrome || isEdge) {
+      alert("El reconocimiento de voz debería funcionar en este navegador. Verifica que tengas permisos de micrófono habilitados.");
+    } else {
+      alert("El dictado por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge para esta función.");
+    }
     return;
   }
 
@@ -6538,21 +6607,50 @@ window.startVoiceDictationForStandard = function() {
 
     rec.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
+      
+      // Intentar encontrar cliente en contactos frecuentes
+      const clients = state.data?.frequentClients || [];
+      let matchedClient = null;
+      
+      clients.forEach(c => {
+        if (transcript.toLowerCase().includes(c.name.toLowerCase())) {
+          matchedClient = c;
+        }
+      });
+      
       const parsed = parseMagicPasteText(transcript);
       
-      if (parsed.cliente) $("#input-cliente").value = parsed.cliente;
-      if (parsed.telefono) $("#input-telefono").value = parsed.telefono;
+      // Usar contacto frecuente si se encontró
+      if (matchedClient) {
+        $("#input-cliente").value = matchedClient.name;
+        $("#input-telefono").value = matchedClient.phone || "";
+        showToast(`👤 Cliente detectado: ${matchedClient.name}`);
+      } else if (parsed.cliente) {
+        $("#input-cliente").value = parsed.cliente;
+      }
+      
+      if (parsed.telefono && !matchedClient) $("#input-telefono").value = parsed.telefono;
       if (parsed.tipo) $("#input-tipo").value = parsed.tipo;
       if (parsed.motivo) $("#input-motivo").value = parsed.motivo;
       if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
       if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
+      
+      // Si hay múltiples trabajos detectados, no colapsar
+      if (parsed.multipleItems) {
+        const container = document.getElementById("multiple-work-container");
+        if (container) container.style.display = "block";
+      }
       
       showToast("✅ Dictado completado y campos llenados.");
     };
 
     rec.onerror = (event) => {
       console.error("Error en reconocimiento de voz:", event.error);
-      showToast("⚠️ Error en reconocimiento de voz.");
+      if (event.error === "not-allowed" || event.error === "permission-denied") {
+        showToast("❌ Permiso de micrófono denegado. Habilítalo en los ajustes del navegador.");
+      } else {
+        showToast("⚠️ Error en reconocimiento de voz: " + event.error);
+      }
     };
 
     rec.onend = () => {
@@ -6562,7 +6660,7 @@ window.startVoiceDictationForStandard = function() {
     rec.start();
   } catch(e) {
     console.error("Error al iniciar reconocimiento de voz:", e);
-    showToast("⚠️ No se pudo activar el micrófono.");
+    showToast("⚠️ No se pudo activar el micrófono. Verifica los permisos del navegador.");
   }
 };
 
@@ -6602,6 +6700,24 @@ window.startVoiceDictationForExpress = function() {
     rec.onresult = (e) => {
       if (micBtn) micBtn.classList.remove("listening");
       const text = e.results[0][0].transcript;
+      
+      // Intentar encontrar cliente en contactos frecuentes
+      const clients = state.data?.frequentClients || [];
+      let matchedClient = null;
+      
+      clients.forEach(c => {
+        if (text.toLowerCase().includes(c.name.toLowerCase())) {
+          matchedClient = c;
+        }
+      });
+      
+      // Usar contacto frecuente si se encontró
+      if (matchedClient) {
+        $("#express-cliente").value = matchedClient.name;
+        $("#express-telefono").value = matchedClient.phone || "";
+        showToast(`👤 Cliente detectado: ${matchedClient.name}`);
+      }
+      
       showToast(`Capturado: "${text}"`);
       window.parseAndFillExpressForm(text);
     };
@@ -7430,6 +7546,19 @@ window.openNewProviderInvoiceModal = function() {
     </div>
 
     <form id="new-prov-invoice-form" class="form-grid" style="margin-top:12px;">
+      <div style="background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; padding:12px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:12px; font-weight:bold; color:#10b981;">📷 OCR: Escanear Nota de Entrega</span>
+          <button type="button" class="secondary-button" id="btn-ocr-prov" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
+            📸 Escanear Nota
+          </button>
+        </div>
+        <div id="prov-ocr-preview" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+          <img id="prov-ocr-thumb" src="" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #10b981;">
+          <span style="font-size:11px; color:#10b981; font-weight:bold;">Nota escaneada ✓</span>
+        </div>
+      </div>
+
       <label class="field">
         <span class="field-label">PROVEEDOR:</span>
         <input type="text" id="prov-nombre" name="proveedor" list="prov-sugeridos" required placeholder="Ej. Americas, Blindac, Prodimarca, Patiño, Huepa...">
@@ -7506,6 +7635,47 @@ window.openNewProviderInvoiceModal = function() {
   const previewBox = document.getElementById("prov-photos-preview");
   const fileInp = document.getElementById("prov-file-input");
   const camBtn = document.getElementById("btn-add-prov-cam");
+  const ocrBtn = document.getElementById("btn-ocr-prov");
+
+  // Handler para OCR de nota de proveedor
+  if (ocrBtn) {
+    ocrBtn.addEventListener("click", async () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.capture = "environment";
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          const base64 = evt.target.result;
+          try {
+            showToast("🔍 Procesando nota con OCR...");
+            const result = await transcribePhysicalSheet(base64, "invoice");
+            
+            if (result && result.montoTotal) {
+              document.getElementById("prov-monto").value = result.montoTotal;
+            }
+            if (result && result.numeroNota) {
+              document.getElementById("prov-numero").value = result.numeroNota;
+            }
+            
+            // Mostrar preview
+            document.getElementById("prov-ocr-thumb").src = base64;
+            document.getElementById("prov-ocr-preview").style.display = "flex";
+            
+            showToast("✅ Nota procesada. Campos llenados automáticamente.");
+          } catch (err) {
+            showToast("⚠️ Error al procesar nota: " + err.message);
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    });
+  }
 
   const renderPhotoPreviews = () => {
     previewBox.innerHTML = uploadedPhotos.map((src, idx) => `
@@ -7805,9 +7975,77 @@ window.editCashClose = function(cashId) {
     return;
   }
   
-  // Aquí se puede implementar la lógica para editar el cierre
-  // Por ahora mostramos un mensaje
-  alert("Función de edición de cierre de caja en desarrollo. Por ahora puedes eliminar y recrear el cierre.");
+  // Modal de edición de cierre de caja
+  openModal(`
+    <div class="modal-head"><h2>✏️ Editar Cierre de Caja</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="edit-cash-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px; margin-bottom:12px;">
+        <div><strong>Fecha:</strong> ${escapeHtml(close.fecha)}</div>
+        <div><strong>Turno:</strong> ${escapeHtml(close.turno)}</div>
+        <div><strong>Responsable:</strong> ${escapeHtml(close.responsable || 'Gerencia')}</div>
+      </div>
+      
+      <label class="field">
+        <span class="field-label">Punto de Venta (Bs):</span>
+        <input type="number" id="edit-punto-bs" value="${close.totalPuntoBs}" min="0" step="0.01" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <label class="field">
+        <span class="field-label">Pago Móvil (Bs):</span>
+        <input type="number" id="edit-pago-movil-bs" value="${close.totalPagoMovilBs}" min="0" step="0.01" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <label class="field">
+        <span class="field-label">Efectivo (Bs):</span>
+        <input type="number" id="edit-efectivo-bs" value="${close.totalEfectivoBs}" min="0" step="0.01" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <label class="field">
+        <span class="field-label">Efectivo ($):</span>
+        <input type="number" id="edit-efectivo-usd" value="${close.totalEfectivoUSD}" min="0" step="0.01" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <label class="field">
+        <span class="field-label">Observaciones:</span>
+        <textarea id="edit-observaciones" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;" rows="2">${escapeHtml(close.observaciones || '')}</textarea>
+      </label>
+      
+      <div class="modal-footer" style="margin-top:16px;">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">Guardar Cambios</button>
+      </div>
+    </form>
+  `);
+  
+  document.getElementById("edit-cash-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const puntoBs = parseFloat(document.getElementById("edit-punto-bs").value);
+    const pmBs = parseFloat(document.getElementById("edit-pago-movil-bs").value);
+    const efBs = parseFloat(document.getElementById("edit-efectivo-bs").value);
+    const efUSD = parseFloat(document.getElementById("edit-efectivo-usd").value);
+    const obs = document.getElementById("edit-observaciones").value.trim();
+    
+    const tasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
+    const totalBs = puntoBs + pmBs + efBs;
+    const totalUSD = (totalBs / tasa) + efUSD;
+    
+    // Actualizar el cierre
+    close.totalPuntoBs = puntoBs;
+    close.totalPagoMovilBs = pmBs;
+    close.totalEfectivoBs = efBs;
+    close.totalEfectivoUSD = efUSD;
+    close.totalDiaBs = totalBs;
+    close.totalDiaUSD = totalUSD;
+    close.observaciones = obs;
+    
+    // Guardar cambios
+    const updatedCloses = closes.map(c => c.id === cashId ? close : c);
+    saveStoredCashCloses(updatedCloses);
+    
+    closeModal();
+    showToast("✅ Cierre de caja actualizado exitosamente.");
+    if (typeof render === "function") render();
+  });
 };
 
 window.deleteCashClose = function(cashId) {
@@ -8208,34 +8446,6 @@ window.openNewCashCloseModal = function() {
 // MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
 // =========================================================================
 function getStoredInventory() {
-  // Intentar obtener del backend primero para sincronización entre perfiles
-  try {
-    const cached = store.get("pp_inventory_items");
-    const lastSync = store.get("pp_inventory_last_sync", 0);
-    const now = Date.now();
-    
-    // Si el caché tiene menos de 5 minutos, usarlo
-    if (cached && lastSync && (now - lastSync) < 300000) {
-      return cached;
-    }
-    
-    // Intentar obtener del backend
-    if (window.PRIORIDAD_CONFIG?.appsScriptUrl) {
-      api("profile_get_inventory").then(res => {
-        if (res && res.items) {
-          store.set("pp_inventory_items", res.items);
-          store.set("pp_inventory_last_sync", now);
-        }
-      }).catch(() => {
-        // Si falla, usar caché local
-      });
-    }
-    
-    return cached || defaultItems;
-  } catch(e) {
-    return defaultItems;
-  }
-  
   const defaultItems = [
     { id: "INV-1", producto: "Silicón Frío 250cc", categoria: "Pegamentos", stockActual: "2 unidades", estado: "Bajo Stock", precioUSD: 5.00, proveedor: "Prodimarca", notas: "Uso diario en toppers" },
     { id: "INV-2", producto: "Silicón Frío 100cc", categoria: "Pegamentos", stockActual: "5 unidades", estado: "Disponible", precioUSD: 2.70, proveedor: "Prodimarca", notas: "" },
@@ -8830,17 +9040,34 @@ window.openChangePinModal = function() {
   }
 };
 
-// 2. CONFIGURACIÓN DE GEMINI API KEY
+// 2. CONFIGURACIÓN DE GEMINI API KEY (Persistente y compartida entre usuarios)
 window.getGeminiApiKey = function() {
-  return localStorage.getItem("jj_gemini_api_key") || "";
+  // Intentar obtener del localStorage primero (más rápido)
+  let key = localStorage.getItem("jj_gemini_api_key") || "";
+  
+  // Si no existe, intentar del almacenamiento persistente de la app
+  if (!key) {
+    key = store.get("jj_gemini_api_key") || "";
+  }
+  
+  return key;
 };
 
 window.setGeminiApiKey = function(key) {
   const clean = String(key || "").trim();
+  
+  // Guardar en localStorage (rápido, se usa durante la sesión)
   if (clean) {
     localStorage.setItem("jj_gemini_api_key", clean);
   } else {
     localStorage.removeItem("jj_gemini_api_key");
+  }
+  
+  // Guardar en almacenamiento persistente de la app (sobrevive limpiezas de caché)
+  if (clean) {
+    store.set("jj_gemini_api_key", clean);
+  } else {
+    store.remove("jj_gemini_api_key");
   }
 };
 
