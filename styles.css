@@ -735,17 +735,47 @@ body {
   .login-brand-name { font-size: 28px; }
   .login-logo { width: 110px; height: 110px; }
   
-  /* Mejoras móviles para Creaciones JJ */
+  /* Mejoras móviles para Creaciones JJ - Header compacto */
   .jj-main-header {
-    flex-direction: column;
-    padding: 12px;
-    gap: 10px;
+    flex-direction: row;
+    padding: 8px 12px;
+    gap: 8px;
+    margin: 0 2% 12px 2%;
   }
-  
+
+  .jj-header-brand {
+    flex-shrink: 0;
+  }
+
+  .jj-brand-title {
+    font-size: 16px;
+  }
+
+  .jj-brand-sub {
+    font-size: 11px;
+    display: none; /* Ocultar subtítulo en móvil para ahorrar espacio */
+  }
+
   .jj-header-controls {
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .control-btn-circle {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+
+  .user-pill {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  .jj-brand-logo-img {
+    width: 32px;
+    height: 32px;
   }
   
   .sics-module-tabs-bar {
@@ -1888,6 +1918,12 @@ body {
 .jj-header-brand:hover .jj-brand-logo-img {
   transform: scale(1.06);
   box-shadow: 0 4px 14px rgba(14, 165, 233, 0.4);
+}
+
+/* Animación para alertas pulsantes */
+@keyframes pulse-alert {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.02); }
 }
 
 /* Ocultar barra inferior fija clásica */
