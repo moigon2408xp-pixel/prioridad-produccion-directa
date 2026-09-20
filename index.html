@@ -198,23 +198,6 @@
         </button>
       </nav>
 
-      <!-- Copia de Seguridad -->
-      <div class="backup-container">
-        <button type="button" onclick="exportarBackup()">
-          📦 Exportar Copia de Seguridad
-        </button>
-        <label>
-          📥 Importar Copia de Seguridad
-          <input
-            type="file"
-            id="importInput"
-            accept=".json"
-            onchange="importarBackup(event)"
-            style="display:none;"
-          />
-        </label>
-      </div>
-
       <main id="screen" class="screen" aria-live="polite"></main>
 
       <nav id="app-nav" class="bottom-nav">
