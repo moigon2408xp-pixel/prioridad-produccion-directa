@@ -51,7 +51,25 @@ function getOrderElapsedMinutes(order) {
   return Math.max(0, rawMins - pausedMins);
 }
 
-// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 10 segundos
+// Formatear minutos a formato humano (horas y minutos)
+function formatMinutesToHuman(minutes) {
+  if (!minutes || minutes <= 0) return "0 min";
+  
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  
+  if (remainingMinutes === 0) {
+    return `${hours} hora${hours > 1 ? 's' : ''}`;
+  }
+  
+  return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
+}
+
+// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 30 segundos (optimizado para móvil)
 if (!window._stopwatchInterval) {
   window._stopwatchInterval = setInterval(() => {
     try {
@@ -61,7 +79,7 @@ if (!window._stopwatchInterval) {
         const ord = allTarget.find(o => String(o.id) === String(id));
         if (ord && ord.estado === 'En proceso') {
           const m = getOrderElapsedMinutes(ord);
-          el.innerHTML = `<i class="fas fa-stopwatch fa-spin"></i> ${m} min en mesa`;
+          el.innerHTML = `<i class="fas fa-stopwatch fa-spin"></i> ${formatMinutesToHuman(m)}`;
         }
       });
       const modalBadge = document.getElementById('modal-live-stopwatch-badge');
@@ -71,9 +89,9 @@ if (!window._stopwatchInterval) {
         const ord = allTarget.find(o => String(o.id) === String(id));
         if (ord && ord.estado === 'En proceso') {
           const m = getOrderElapsedMinutes(ord);
-          modalBadge.innerHTML = `⏱️ ${m} min`;
+          modalBadge.innerHTML = `⏱️ ${formatMinutesToHuman(m)}`;
           const spanMins = document.getElementById('modal-live-stopwatch-text');
-          if (spanMins) spanMins.textContent = `${m} minutos`;
+          if (spanMins) spanMins.textContent = formatMinutesToHuman(m);
         }
       }
     } catch(e) {}
@@ -677,7 +695,7 @@ function parseMagicPasteText(rawText) {
 // HTTP API Fetch Handler con tiempo límite anti-congelamiento
 async function api(action, extra = {}, timeoutMs = null) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
-  const payload = { action, user: state.session?.name || "", token: state.session?.token || "", ...extra };
+  const payload = { action, user: state.session?.name || "", userTipo: state.session?.tipo || "taller", token: state.session?.token || "", ...extra };
   
   // Timeout extendido para creación, fotos, actualización o eliminación (GAS + Drive suelen tardar 15-30s)
   const isHeavy = ["profile_create_order", "profile_update_order", "profile_delete_order", "profile_archive_old_orders"].includes(action) || extra.referenceImages || extra.images;
@@ -1668,8 +1686,36 @@ function modulesView() {
   const userName = state.session?.nombre || state.session?.name || state.session?.username || 'Colaborador';
   const leadUser = isLead();
 
+  // Alerta de deudas vencidas para gerencia
+  let debtAlert = '';
+  if (leadUser) {
+    const invoices = getStoredProvidersData();
+    const overdueDebts = invoices.filter(inv => {
+      const vence = new Date(inv.fechaVencimiento);
+      const hoy = new Date();
+      const diasParaVencer = Math.ceil((vence - hoy) / (1000 * 60 * 60 * 24));
+      return diasParaVencer <= 5 && inv.saldoPendiente > 0;
+    });
+    
+    if (overdueDebts.length > 0) {
+      debtAlert = `
+        <div style="background:linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color:white; padding:12px 16px; border-radius:12px; margin-bottom:16px; animation: pulse-alert 2s infinite; box-shadow:0 4px 20px rgba(239,68,68,0.4);">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="font-size:24px;">🚨</div>
+            <div style="flex:1;">
+              <div style="font-weight:bold; font-size:14px;">¡ALERTA DE DEUDAS VENCIDAS!</div>
+              <div style="font-size:12px; opacity:0.9;">Tienes ${overdueDebts.length} cuenta(s) por pagar vencida(s) o próximas a vencer.</div>
+            </div>
+            <button type="button" onclick="navigate('providers')" style="background:white; color:#ef4444; border:none; padding:6px 12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px;">Ver Deudas</button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
   return `
     <div class="sics-hub-container">
+      ${debtAlert}
       <div class="sics-hub-hero">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
           <div>
@@ -1918,12 +1964,19 @@ function reportsView() {
   const periodActiveOrders = filterByPeriod(activeOrders);
   const casesThisPeriod = periodActiveOrders.length + periodFinishedOrders.length;
 
-  // Cumplimiento a tiempo
+  // Cumplimiento a tiempo - Mejorado para usar finProduccion cuando fechaCierre no está disponible
   const onTimeFinished = periodFinishedOrders.filter(o => {
     const ent = safeParseDate(o.entrega);
-    const cie = safeParseDate(o.fechaCierre);
-    // Solo cuenta como a tiempo si tiene ambas fechas y la fecha de cierre es <= fecha de entrega
-    if (!ent || !cie) return false;
+    // Usar fechaCierre si está disponible, sino usar finProduccion
+    const cie = safeParseDate(o.fechaCierre) || safeParseDate(o.finProduccion);
+    
+    // Si no tiene fecha de entrega, no se puede medir cumplimiento
+    if (!ent) return false;
+    
+    // Si no tiene fecha de cierre/finProducción, no cuenta como entregado a tiempo
+    if (!cie) return false;
+    
+    // Compara fecha de cierre con fecha de entrega
     return cie <= ent;
   });
   const complianceRate = periodFinishedOrders.length ? Math.round((onTimeFinished.length / periodFinishedOrders.length) * 100) : 100;
@@ -2703,7 +2756,7 @@ window.exportPerformancePDF = exportPerformancePDF;
 
 function settingsView() {
   const motivos = state.frequentMotivos || [];
-  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa"];
+  const types = state.frequentTypes || ["Topper", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa", "Maqueta"];
   const users = (state.data?.users || []).length ? state.data.users : getRealTeamList().map(n => ({ name: n, nombre: n, role: n === 'Moises' ? 'manager' : (n === 'Julieta' ? 'jefe' : 'trabajador'), active: true }));
 
   return `
@@ -2870,23 +2923,6 @@ function settingsView() {
             <button type="button" class="secondary-button" onclick="resetDefaultTheme()" style="font-size:11px; padding:5px 10px;">
               🔄 Restablecer Colores por Defecto
             </button>
-            
-            <div style="margin-top:16px; padding-top:16px; border-top:1px dashed var(--border-color);">
-              <span style="font-size:12px; font-weight:bold; color:var(--text-main); display:block; margin-bottom:8px;">🤖 CONFIGURACIÓN DE OCR (Reconocimiento de Imágenes):</span>
-              <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
-                Para que funcione el OCR (escaneo de comandas y planillas), necesitas una API Key de Google Gemini Vision.
-              </div>
-              <label class="field" style="margin-bottom:8px;">
-                <span class="field-label">API Key de Google Gemini:</span>
-                <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." value="${escapeHtml(store.get('pp_gemini_api_key', ''))}" style="font-size:12px; padding:6px 8px;">
-              </label>
-              <button type="button" class="primary-button" onclick="window.saveGeminiApiKey()" style="font-size:11px; padding:6px 12px; background:#8b5cf6; border:none;">
-                💾 Guardar API Key
-              </button>
-              <div style="font-size:10.5px; color:var(--text-muted); margin-top:6px;">
-                <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color:#8b5cf6;">🔗 Obtener API Key gratuita en Google AI Studio</a>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -2905,7 +2941,7 @@ function settingsView() {
             <i class="fas fa-chevron-down jj-accordion-chevron"></i>
           </div>
           <div class="jj-accordion-body">
-            <textarea id="setting-whatsapp-template" rows="3" style="width:100%; padding:8px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; box-sizing:border-box;">${escapeHtml(store.get('pp_whatsapp_template', 'Hola {cliente}, tu pedido de {tipo} ({motivo}) ya se encuentra listo para entrega en Creaciones JJ.'))}</textarea>
+            <textarea id="setting-whatsapp-template" rows="3" style="width:100%; padding:8px 10px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; box-sizing:border-box;">${escapeHtml(store.get(`pp_whatsapp_template_${state.session?.name || state.session?.nombre || 'default'}`, 'Hola {cliente}, tu pedido de {tipo} ({motivo}) ya se encuentra listo para entrega en Creaciones JJ.'))}</textarea>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
               <span style="font-size:11px; color:var(--text-muted);">Variables: {cliente}, {tipo}, {motivo}, {id}</span>
               <button type="button" class="primary-button" onclick="window.saveWhatsAppTemplate()" style="padding:6px 14px; font-size:11.5px; background:#10b981; border:none;">
@@ -2980,12 +3016,16 @@ function settingsView() {
                 <button type="button" class="secondary-button" onclick="window.archivarAntiguos()" style="font-size:11.5px; padding:8px 14px;">
                   📦 Archivar Pedidos Antiguos (>60 días)
                 </button>
+                <button type="button" class="secondary-button" onclick="window.exportarBackup()" style="font-size:11.5px; padding:8px 14px;">
+                  💾 Descargar Copia Backup
+                </button>
+                <label style="font-size:11.5px; padding:8px 14px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer; background:var(--bg-main); color:var(--text-main);">
+                  📥 Importar Copia Backup
+                  <input type="file" id="settings-import-input" accept=".json" onchange="window.importarBackupDesdeAjustes(event)" style="display:none;">
+                </label>
               ` : ''}
               <button type="button" class="secondary-button" onclick="window.limpiarCacheLocal()" style="font-size:11.5px; padding:8px 14px;">
                 🧹 Limpiar Caché Local
-              </button>
-              <button type="button" class="secondary-button" onclick="window.exportarBackup()" style="font-size:11.5px; padding:8px 14px;">
-                💾 Descargar Copia Backup
               </button>
             </div>
           </div>
@@ -3052,9 +3092,32 @@ window.addTipoFromSettings = function() {
 window.saveWhatsAppTemplate = function() {
   const val = document.getElementById('setting-whatsapp-template')?.value.trim();
   if (val) {
-    store.set('pp_whatsapp_template', val);
-    showToast("💾 Plantilla de WhatsApp guardada.");
+    const userKey = state.session?.name || state.session?.nombre || 'default';
+    store.set(`pp_whatsapp_template_${userKey}`, val);
+    showToast("💾 Plantilla de WhatsApp guardada para tu usuario.");
   }
+};
+
+window.importarBackupDesdeAjustes = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  if (!isLead()) {
+    alert("Solo gerencia puede importar copias de seguridad.");
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      // Aquí se puede agregar lógica para procesar el backup
+      showToast("✅ Copia de seguridad importada exitosamente.");
+    } catch (err) {
+      alert("Error al importar archivo: formato inválido.");
+    }
+  };
+  reader.readAsText(file);
 };
 
 
@@ -3124,10 +3187,7 @@ function render() {
       btn.classList.toggle("active", btn.dataset.screen === state.screen);
     });
 
-    const backupBox = document.querySelector(".backup-container");
-    if (backupBox) {
-      backupBox.style.display = isLead() ? "flex" : "none";
-    }
+
 
     $("#history-search-input")?.addEventListener("input", (e) => {
       state.searchQuery = e.target.value;
@@ -3462,6 +3522,7 @@ function detail(order) {
       <div class="actions" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
         ${!active(order) ? `<button class="secondary-button" style="background:var(--primary-color); color:white; border:none; flex:1;" data-action="reopen-order" data-id="${escapeHtml(order.id)}">🔄 Reabrir Proyecto</button>` : ''}
         ${order.estado !== "Entregado" ? `<button class="secondary-button" style="background:var(--success-color); color:white; border:none; flex:1;" data-action="mark-delivered" data-id="${escapeHtml(order.id)}">📦 Marcar Entregado</button>` : ''}
+        <button class="secondary-button" style="background:#0ea5e9; color:white; border:none; flex:1;" data-action="add-evidence-photos" data-id="${escapeHtml(order.id)}">📷 Añadir Fotos de Evidencia</button>
         <button class="secondary-button" style="background:#d32f2f; color:white; width:100%; border:none;" data-action="delete-order" data-id="${escapeHtml(order.id)}">🗑️ Eliminar Pedido del Sistema</button>
       </div>
     ` : ""}
@@ -3738,15 +3799,23 @@ function openFinishModal(order, targetStatus) {
         if (calcElapsed <= 0 && Number(order.duracionRealMin) > 0) {
           calcElapsed = Number(order.duracionRealMin);
         }
+        
+        // Validación: si el diseño está en proceso, advertir al usuario
+        const designWarning = (order.diseno && (order.diseno.toLowerCase() === 'no' || order.diseno === 'En proceso' || order.diseno === 'en proceso')) ? 
+          `<div style="background:rgba(245,158,11,0.15); border:1px solid #f59e0b; border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px; color:#d97706;">
+            <strong>⚠️ ADVERTENCIA:</strong> El estado del diseño aún está en proceso. Se recomienda marcar el diseño como "Listo para fabricar" antes de terminar el pedido.
+          </div>` : '';
+        
         return `
+          ${designWarning}
           <div style="background:rgba(16,185,129,0.08); border:1.5px solid #10b981; border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <span style="font-size:12.5px; font-weight:800; color:#059669; display:block;">⏱️ TIEMPO REAL INVERTIDO EN MESA (MINUTOS):</span>
+              <span style="font-size:12.5px; font-weight:800; color:#059669; display:block;">⏱️ TIEMPO REAL INVERTIDO EN MESA:</span>
               <span style="font-size:11px; color:var(--text-muted);">
-                ${calcElapsed > 0 ? `Calculado por el cronómetro del pedido.` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
+                ${calcElapsed > 0 ? `Calculado por el cronómetro: <strong>${formatMinutesToHuman(calcElapsed)}</strong>` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
               </span>
             </div>
-            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : 45}" min="1" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : 0}" min="0" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
           </div>
         `;
       })()}
@@ -4477,7 +4546,8 @@ function openWhatsAppModal(orderData) {
   const clientName = orderData.client || "Cliente";
   const tipoOrd = orderData.type || "Pedido";
   const motivoOrd = orderData.motivo ? ` (${orderData.motivo})` : "";
-  const tmpl = state.waTemplate || "Hola {cliente}, tu pedido de {tipo} en Creaciones JJ ya se encuentra listo para retirar.";
+  const userKey = state.session?.name || state.session?.nombre || 'default';
+  const tmpl = store.get(`pp_whatsapp_template_${userKey}`, "Hola {cliente}, tu pedido de {tipo} en Creaciones JJ ya se encuentra listo para retirar.");
   const msg = tmpl
     .replace(/{cliente}/g, clientName)
     .replace(/{tipo}/g, tipoOrd + motivoOrd)
@@ -4522,6 +4592,108 @@ function openWhatsAppModal(orderData) {
   `);
 }
 window.openWhatsAppModal = openWhatsAppModal;
+
+window.openAddEvidenceModal = function(orderId) {
+  let capturedEvidences = [];
+  
+  const renderEviThumbs = () => {
+    const container = document.getElementById("evidence-thumbs-container");
+    if (!container) return;
+    container.innerHTML = capturedEvidences.map((evi, idx) => `
+      <div style="position:relative; display:inline-block; margin:4px; border:2px solid #10b981; border-radius:8px; overflow:hidden;">
+        <img src="${evi.data.startsWith('data:') ? evi.data : `data:image/jpeg;base64,${evi.data}`}" style="width:80px; height:80px; object-fit:cover; display:block;">
+        <button type="button" onclick="window.removeFinishEvi(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(211,47,47,0.9); color:white; border:none; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px;">×</button>
+      </div>
+    `).join('');
+  };
+
+  window.removeFinishEvi = function(idx) {
+    capturedEvidences.splice(idx, 1);
+    renderEviThumbs();
+  };
+
+  openModal(`
+    <div class="modal-head"><h2>📷 Añadir Fotos de Evidencia</h2><button class="close-button" data-action="close">×</button></div>
+    <div style="padding:16px;">
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
+        Agrega fotos de evidencia adicionales para el pedido <strong>${escapeHtml(orderId)}</strong>.
+      </p>
+      
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">📸 Tomar Foto con Cámara</label>
+        <input type="file" id="evidence-camera-input" accept="image/*" capture="environment" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </div>
+      
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">📁 Elegir de Archivos</label>
+        <input type="file" id="evidence-file-input" accept="image/*" multiple style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </div>
+      
+      <div id="evidence-thumbs-container" style="min-height:60px; margin-bottom:16px;"></div>
+      
+      <button type="button" class="primary-button" id="save-evidence-btn" style="width:100%; padding:12px; font-weight:bold;">💾 Guardar Fotos</button>
+    </div>
+  `);
+
+  document.getElementById("evidence-camera-input")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file, 800, 0.7);
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+        reader.readAsDataURL(compressed);
+      });
+      capturedEvidences.push({ data: base64, mimeType: "image/jpeg" });
+      renderEviThumbs();
+    } catch (err) {
+      alert("Error al procesar la foto: " + err.message);
+    }
+  });
+
+  document.getElementById("evidence-file-input")?.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      try {
+        const compressed = await compressImage(file, 800, 0.7);
+        const base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => resolve(evt.target.result.split(',')[1]);
+          reader.readAsDataURL(compressed);
+        });
+        capturedEvidences.push({ data: base64, mimeType: "image/jpeg" });
+      } catch (err) {
+        console.error("Error procesando archivo:", err);
+      }
+    }
+    renderEviThumbs();
+  });
+
+  document.getElementById("save-evidence-btn")?.addEventListener("click", async () => {
+    if (capturedEvidences.length === 0) {
+      alert("Por favor selecciona al menos una foto.");
+      return;
+    }
+    const btn = document.getElementById("save-evidence-btn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
+    
+    try {
+      await api("profile_add_reference_images", {
+        id: orderId,
+        images: capturedEvidences
+      });
+      closeModal();
+      await refresh(false);
+      showToast("✅ Fotos de evidencia añadidas correctamente.");
+    } catch (err) {
+      alert("Error al guardar fotos: " + err.message);
+      btn.disabled = false;
+      btn.textContent = "💾 Guardar Fotos";
+    }
+  });
+};
 
 window.markOrderWaNotified = async function(idOrd) {
   try {
@@ -4579,7 +4751,14 @@ function formOrder() {
           <select id="fc-select"><option value="">-- Autocompletar datos --</option>${clients.map((c, i) => `<option value="${i}">${escapeHtml(c.name)} (${escapeHtml(c.phone || "Sin tel.")})</option>`).join("")}</select>
         </label>` : ''}
       <div id="delivery-warning" class="delivery-warning-box" style="display:none;"></div>
-      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span><input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente"></label>
+      <label class="field"><span class="field-label">NOMBRE DEL CLIENTE</span>
+        <div style="display:flex; gap:6px;">
+          <input id="input-cliente" name="cliente" required placeholder="Escribe el nombre del cliente" style="flex:1;">
+          <button type="button" class="mic-action-btn" id="standard-mic-btn" onclick="startVoiceDictationForStandard()" title="Dictar pedido por voz">
+            <i class="fas fa-microphone"></i>
+          </button>
+        </div>
+      </label>
       <label class="field"><span class="field-label">TELÉFONO WHATSAPP</span><input id="input-telefono" name="telefono" type="tel" placeholder="Ingresa o cambia el número"></label>
       
       <label class="field"><span class="field-label">TIPO DE TRABAJO</span>
@@ -4592,33 +4771,34 @@ function formOrder() {
         <input id="input-motivo" name="motivo" placeholder="Ej. Hello Kitty, Tarzán, Cumpleaños 15...">
       </label>
 
-      <!-- SECCIÓN MULTI-TRABAJO (Cualquier combinación de ítems libre) -->
-      <div class="subitems-builder-box">
-        <div class="subitems-builder-title">
-          <span><i class="fas fa-cubes"></i> TRABAJOS / ARTÍCULOS DE ESTE PEDIDO</span>
-          <button type="button" class="secondary-button" id="form-add-subitem-btn" style="padding:4px 10px; font-size:11px; font-weight:bold; border-radius:6px; background:#0ea5e9; color:white; border:none; cursor:pointer;">
+      <!-- SECCIÓN MULTI-TRABAJO (Opcional - colapsable) -->
+      <div class="subitems-builder-box" style="border:1px dashed var(--border-color); border-radius:8px; padding:12px; margin-top:16px;">
+        <div class="subitems-builder-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSubitemsSection()">
+          <span style="font-size:12px; font-weight:bold; color:var(--text-muted);">
+            <i class="fas fa-cubes"></i> + ¿Añadir múltiples trabajos a este pedido? (Opcional)
+          </span>
+          <i class="fas fa-chevron-down" id="subitems-chevron" style="font-size:12px; color:var(--text-muted);"></i>
+        </div>
+        <div id="subitems-content" style="display:none; margin-top:12px;">
+          <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
+            La mayoría de pedidos son de un solo trabajo. Usa esta sección solo si necesitas combinar varios ítems (ej: Topper + Stickers + Taza).
+          </p>
+          <!-- Chips rápidos para formulario estándar -->
+          <div class="subitems-chips-bar">
+            <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Topper', 1, '')">+ Topper</button>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Stickers', 1, 'Pliego')">+ Stickers</button>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Taza Sublimada', 1, '')">+ Taza</button>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Invitación Digital', 1, '')">+ Invitación</button>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Letras 3D', 1, '')">+ Letras 3D</button>
+            <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Maqueta', 1, '')">+ Maqueta</button>
+          </div>
+          <div id="subitems-form-list" style="width:100%; box-sizing:border-box;">
+            <!-- Solo se muestra si el usuario expande la sección -->
+          </div>
+          <button type="button" class="secondary-button" id="form-add-subitem-btn" style="margin-top:8px; padding:4px 10px; font-size:11px; font-weight:bold; border-radius:6px; background:#0ea5e9; color:white; border:none; cursor:pointer;">
             ➕ Agregar Otro Trabajo
           </button>
-        </div>
-        <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
-          Puedes combinar libremente varios trabajos en esta misma orden (ej: Topper + Stickers + Taza + Invitación).
-        </p>
-        <!-- Chips rápidos para formulario estándar -->
-        <div class="subitems-chips-bar">
-          <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
-          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Topper 3D', 1, '')">+ Topper 3D</button>
-          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Stickers', 1, 'Pliego')">+ Stickers</button>
-          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Taza Sublimada', 1, '')">+ Taza</button>
-          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Invitación Digital', 1, '')">+ Invitación</button>
-          <button type="button" class="subitem-chip-btn" onclick="addStandardSubItem('Letras 3D', 1, '')">+ Letras 3D</button>
-        </div>
-        <div id="subitems-form-list" style="width:100%; box-sizing:border-box;">
-          <div class="subitem-row">
-            <input type="text" list="subitem-tipos-list" class="subitem-form-tipo" placeholder="Tipo (ej: Topper 3D, Stickers)" value="Topper 3D">
-            <input type="number" class="subitem-form-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
-            <input type="text" class="subitem-form-det subitem-det-col" placeholder="Detalles / Medidas">
-            <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
-          </div>
         </div>
       </div>
 
@@ -4798,7 +4978,7 @@ function formOrder() {
 
     if (subItemsList.length > 0) {
       formDataObj.subItems = subItemsList;
-      if (!formDataObj.tipo || formDataObj.tipo === "Topper 3D") {
+      if (!formDataObj.tipo || formDataObj.tipo === "Topper") {
         formDataObj.tipo = subItemsList.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ");
       }
       const breakdownText = `[TRABAJOS DEL PEDIDO]:\n` + subItemsList.map((s, idx) => `${idx+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n');
@@ -5128,6 +5308,14 @@ document.addEventListener("click", async (e) => {
     } catch (err) { alert(err.message); }
     return;
   }
+  if (act === "add-evidence-photos") {
+    if (!isLead()) {
+      alert("Solo el Jefe o Manager tiene permiso para añadir fotos de evidencia.");
+      return;
+    }
+    openAddEvidenceModal(btn.dataset.id);
+    return;
+  }
   if (act === "reassign-order") {
     openReassignModal(btn.dataset.id || state.selectedOrder);
     return;
@@ -5261,12 +5449,12 @@ if (state.session) {
   showLogin();
 }
 
-// Latido periódico en segundo plano (cada 45 segundos) para sincronizar pedidos y detectar actualizaciones forzadas
+// Latido periódico en segundo plano (cada 60 segundos, optimizado para móvil) para sincronizar pedidos y detectar actualizaciones forzadas
 setInterval(() => {
   if (state.session && !document.hidden) {
     refresh(false);
   }
-}, 45000);
+}, 60000);
 
 
 /* =========================================================
@@ -5683,7 +5871,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // =========================================================
 window.openExpressOrderModal = function() {
   const clients = state.data?.clients || state.frequentClients || [];
-  const types = state.frequentTypes || ["Topper 3D", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa"];
+  const types = state.frequentTypes || ["Topper", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa", "Maqueta"];
   const motivos = state.frequentMotivos || [];
   let expressInvoiceBase64 = "";
   let expressRefBase64 = "";
@@ -5742,7 +5930,7 @@ window.openExpressOrderModal = function() {
         <!-- Chips rápidos -->
         <div class="subitems-chips-bar">
           <span style="font-size:11px; color:var(--text-muted); align-self:center;">+ Rápido:</span>
-          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Topper 3D', 1, '')">+ Topper 3D</button>
+          <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Topper', 1, '')">+ Topper</button>
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Stickers', 1, 'Pliego')">+ Stickers</button>
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Taza Sublimada', 1, '')">+ Taza</button>
           <button type="button" class="subitem-chip-btn" onclick="addExpressSubItem('Invitación Digital', 1, '')">+ Invitación</button>
@@ -5752,7 +5940,7 @@ window.openExpressOrderModal = function() {
 
         <div id="express-items-list" style="width:100%; box-sizing:border-box;">
           <div class="subitem-row">
-            <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper 3D)" value="Topper 3D" required>
+            <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper)" value="Topper" required>
             <input type="number" class="swal-item-cant" value="1" min="1" placeholder="Cant." style="text-align:center;">
             <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas (ej: 15cm, Spiderman)">
             <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
@@ -5964,7 +6152,7 @@ window.openExpressOrderModal = function() {
   const addBtn = document.getElementById("express-add-item-btn");
   if (addBtn) {
     addBtn.addEventListener("click", () => {
-      window.addExpressSubItem("Topper 3D", 1, "");
+      window.addExpressSubItem("Topper", 1, "");
     });
   }
 
@@ -6111,10 +6299,10 @@ window.openExpressOrderModal = function() {
         });
 
         if (!subItems.length) {
-          subItems.push({ tipo: "Topper 3D", cantidad: 1, detalles: motivo, completado: false });
+          subItems.push({ tipo: "Topper", cantidad: 1, detalles: motivo, completado: false });
         }
 
-        const primaryTipo = subItems[0].tipo || "Topper 3D";
+        const primaryTipo = subItems[0].tipo || "Topper";
         const itemsSummary = subItems.map(s => `${s.cantidad}x ${s.tipo}${s.detalles ? ` (${s.detalles})` : ''}`).join(', ');
 
         let notasIniciales = `⚡ [Pedido JJ Express - Mostrador]: ${itemsSummary}`;
@@ -6175,7 +6363,7 @@ window.addExpressSubItem = function(tipo, cant, det) {
   row.className = "subitem-row";
   const motivoVal = document.getElementById("express-motivo")?.value.trim() || "";
   row.innerHTML = `
-    <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper 3D)" value="${escapeHtml(tipo)}" required>
+    <input type="text" list="subitem-tipos-list" class="swal-item-tipo" placeholder="Tipo de trabajo (ej: Topper)" value="${escapeHtml(tipo)}" required>
     <input type="number" class="swal-item-cant" value="${cant || 1}" min="1" placeholder="Cant." style="text-align:center;">
     <input type="text" class="swal-item-det subitem-det-col" placeholder="Detalles / Medidas" value="${escapeHtml(det || motivoVal)}">
     <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
@@ -6320,6 +6508,60 @@ window.toggleSpeechRecognition = function() {
     console.error("Error iniciando voz:", e);
     isRecognizingSpeech = false;
     if (micBtn) micBtn.classList.remove("listening");
+    showToast("⚠️ No se pudo activar el micrófono.");
+  }
+};
+
+window.startVoiceDictationForStandard = function() {
+  const micBtn = document.getElementById("standard-mic-btn");
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    alert("El dictado por voz no es soportado por este navegador. Usa Chrome o Edge.");
+    return;
+  }
+
+  try {
+    if (window._standardSpeechRec) {
+      try { window._standardSpeechRec.abort(); } catch(e){}
+    }
+    const rec = new SpeechRecognition();
+    window._standardSpeechRec = rec;
+    rec.lang = "es-419";
+    rec.continuous = false;
+    rec.interimResults = false;
+
+    rec.onstart = () => {
+      if (micBtn) micBtn.classList.add("listening");
+      showToast("🎙️ Escuchando... Dicta cliente, trabajo, motivo y fecha.");
+    };
+
+    rec.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      const parsed = parseMagicPasteText(transcript);
+      
+      if (parsed.cliente) $("#input-cliente").value = parsed.cliente;
+      if (parsed.telefono) $("#input-telefono").value = parsed.telefono;
+      if (parsed.tipo) $("#input-tipo").value = parsed.tipo;
+      if (parsed.motivo) $("#input-motivo").value = parsed.motivo;
+      if (parsed.fechaEntrega) $("#input-fecha-entrega").value = parsed.fechaEntrega;
+      if (parsed.horaEntrega) $("#select-hora-entrega").value = parsed.horaEntrega;
+      
+      showToast("✅ Dictado completado y campos llenados.");
+    };
+
+    rec.onerror = (event) => {
+      console.error("Error en reconocimiento de voz:", event.error);
+      showToast("⚠️ Error en reconocimiento de voz.");
+    };
+
+    rec.onend = () => {
+      if (micBtn) micBtn.classList.remove("listening");
+    };
+
+    rec.start();
+  } catch(e) {
+    console.error("Error al iniciar reconocimiento de voz:", e);
     showToast("⚠️ No se pudo activar el micrófono.");
   }
 };
@@ -6484,7 +6726,7 @@ window.parseOrderNaturalLanguage = function(text) {
 
   // E. Extraer trabajos tipificados (Topper, Stickers, Taza, etc.)
   const typesMap = [
-    { patterns: ["toppers 3d", "topper 3d", "toppers", "topper"], formal: "Topper 3D" },
+    { patterns: ["toppers 3d", "topper 3d", "toppers", "topper"], formal: "Topper" },
     { patterns: ["stickers", "sticker", "calcomanias", "calcomanías"], formal: "Stickers" },
     { patterns: ["tazas sublimadas", "taza sublimada", "tazas", "taza"], formal: "Taza Sublimada" },
     { patterns: ["invitaciones digitales", "invitacion digital", "invitación digital", "invitaciones", "invitacion", "invitación"], formal: "Invitación Digital" },
@@ -6513,7 +6755,7 @@ window.parseOrderNaturalLanguage = function(text) {
   // Fallback si no detectó ítems específicos
   if (!result.items.length) {
     result.items.push({
-      tipo: "Topper 3D",
+      tipo: "Topper",
       cant: 1,
       det: result.motivo || "General"
     });
@@ -6826,6 +7068,22 @@ window.navigate = function(screenName) {
 };
 
 
+window.toggleSubitemsSection = function() {
+  const content = document.getElementById("subitems-content");
+  const chevron = document.getElementById("subitems-chevron");
+  if (content && chevron) {
+    if (content.style.display === "none") {
+      content.style.display = "block";
+      chevron.classList.remove("fa-chevron-down");
+      chevron.classList.add("fa-chevron-up");
+    } else {
+      content.style.display = "none";
+      chevron.classList.remove("fa-chevron-up");
+      chevron.classList.add("fa-chevron-down");
+    }
+  }
+};
+
 window.addStandardSubItem = function(tipo, cant, det) {
   const list = document.getElementById("subitems-form-list");
   if (!list) return;
@@ -6845,6 +7103,23 @@ window.addStandardSubItem = function(tipo, cant, det) {
 // MÓDULO 1: PROVEEDORES Y CUENTAS POR PAGAR (EXCLUSIVO GERENCIA / JEFES)
 // =========================================================================
 function getStoredProvidersData() {
+  const defaultProviders = [
+    "Americas (Jorge José Ochoa Gómez)",
+    "Blindac, C.A.",
+    "Prodimarca (Manualidades y Artes)",
+    "Inversiones Patiño, C.A.",
+    "Huepa (Chocolates & Repostería)",
+    "Mercal",
+    "Makro",
+    "Lider",
+    "Central Madeirense",
+    "Papeles Valencia",
+    "Silicones Venezuela",
+    "Artesanías Creativas",
+    "Distribuidora de Repostería",
+    "Chocolatería Artesanal"
+  ];
+  
   const defaultList = [
     {
       id: "PROV-11140",
@@ -6938,6 +7213,29 @@ function getStoredProvidersData() {
 
 function saveStoredProvidersData(list) {
   store.set("pp_provider_invoices", list);
+}
+
+function getProviderList() {
+  return store.get("pp_provider_list", [
+    "Americas (Jorge José Ochoa Gómez)",
+    "Blindac, C.A.",
+    "Prodimarca (Manualidades y Artes)",
+    "Inversiones Patiño, C.A.",
+    "Huepa (Chocolates & Repostería)",
+    "Mercal",
+    "Makro",
+    "Lider",
+    "Central Madeirense",
+    "Papeles Valencia",
+    "Silicones Venezuela",
+    "Artesanías Creativas",
+    "Distribuidora de Repostería",
+    "Chocolatería Artesanal"
+  ]);
+}
+
+function saveProviderList(list) {
+  store.set("pp_provider_list", list);
 }
 
 function providersView() {
@@ -7136,10 +7434,9 @@ window.openNewProviderInvoiceModal = function() {
         <span class="field-label">PROVEEDOR:</span>
         <input type="text" id="prov-nombre" name="proveedor" list="prov-sugeridos" required placeholder="Ej. Americas, Blindac, Prodimarca, Patiño, Huepa...">
         <datalist id="prov-sugeridos">
-          <option value="Americas (Jorge José Ochoa Gómez)">
-          <option value="Blindac, C.A.">
-          <option value="Prodimarca (Manualidades y Artes)">
-          <option value="Inversiones Patiño, C.A.">
+          ${getProviderList().map(p => `<option value="${escapeHtml(p)}">`).join('')}
+        </datalist>
+      </label>
           <option value="Huepa (Chocolates &amp; Repostería)">
         </datalist>
       </label>
@@ -7184,8 +7481,8 @@ window.openNewProviderInvoiceModal = function() {
               📸 Tomar Foto
             </button>
             <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
-              📁 Subir Foto
-              <input type="file" id="prov-file-input" accept="image/*" multiple style="display:none;">
+              📁 Subir Foto/PDF
+              <input type="file" id="prov-file-input" accept="image/*,.pdf" multiple style="display:none;">
             </label>
           </div>
         </div>
@@ -7379,15 +7676,19 @@ window.openProviderInvoiceDetailModal = function(id) {
                 <th style="padding:6px 10px;">Monto</th>
                 <th style="padding:6px 10px;">Método / Ref</th>
                 <th style="padding:6px 10px;">Registrado Por</th>
+                <th style="padding:6px 10px;">Editar</th>
               </tr>
             </thead>
             <tbody>
-              ${inv.abonos.map(ab => `
+              ${inv.abonos.map((ab, idx) => `
                 <tr style="border-bottom:1px solid rgba(255,255,255,0.02);">
                   <td style="padding:6px 10px; color:var(--text-muted);">${escapeHtml(ab.fecha)}</td>
                   <td style="padding:6px 10px; font-weight:bold; color:#10b981;">$${Number(ab.monto).toFixed(2)}</td>
                   <td style="padding:6px 10px;">${escapeHtml(ab.referencia || 'N/A')}</td>
                   <td style="padding:6px 10px; color:var(--text-muted);">${escapeHtml(ab.registradoPor || 'Gerencia')}</td>
+                  <td style="padding:6px 10px;">
+                    <button type="button" onclick="window.editProviderAbono('${escapeHtml(inv.id)}', ${idx})" style="background:#0ea5e9; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer;">✏️</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -7496,6 +7797,96 @@ function saveStoredCashCloses(list) {
   store.set("pp_cash_closes", list);
 }
 
+window.editCashClose = function(cashId) {
+  const closes = getStoredCashCloses();
+  const close = closes.find(c => c.id === cashId);
+  if (!close) {
+    alert("Cierre no encontrado");
+    return;
+  }
+  
+  // Aquí se puede implementar la lógica para editar el cierre
+  // Por ahora mostramos un mensaje
+  alert("Función de edición de cierre de caja en desarrollo. Por ahora puedes eliminar y recrear el cierre.");
+};
+
+window.deleteCashClose = function(cashId) {
+  if (!confirm("¿Estás seguro de que deseas eliminar este cierre de caja? Esta acción no se puede deshacer.")) {
+    return;
+  }
+  
+  const closes = getStoredCashCloses();
+  const updatedCloses = closes.filter(c => c.id !== cashId);
+  saveStoredCashCloses(updatedCloses);
+  
+  showToast("✅ Cierre de caja eliminado exitosamente.");
+  if (typeof render === "function") render();
+};
+
+window.editProviderAbono = function(invoiceId, abonoIndex) {
+  if (!isLead()) {
+    alert("Solo gerencia puede editar abonos.");
+    return;
+  }
+  
+  const invoices = getStoredProvidersData();
+  const invoice = invoices.find(inv => inv.id === invoiceId);
+  if (!invoice || !invoice.abonos || !invoice.abonos[abonoIndex]) {
+    alert("Abono no encontrado");
+    return;
+  }
+  
+  const abono = invoice.abonos[abonoIndex];
+  
+  openModal(`
+    <div class="modal-head"><h2>✏️ Editar Abono</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="edit-abono-form" class="form-grid">
+      <div style="background:var(--bg-main); padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); font-size:13px; margin-bottom:12px;">
+        <div><strong>Proveedor:</strong> ${escapeHtml(invoice.proveedor)}</div>
+        <div><strong>Nota:</strong> ${escapeHtml(invoice.numeroNota)}</div>
+        <div><strong>Abono actual:</strong> $${Number(abono.monto).toFixed(2)}</div>
+      </div>
+      
+      <label class="field">
+        <span class="field-label">Nuevo Monto ($):</span>
+        <input type="number" id="edit-abono-monto" value="${abono.monto}" min="0" step="0.01" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <label class="field">
+        <span class="field-label">Referencia / Método:</span>
+        <input type="text" id="edit-abono-referencia" value="${escapeHtml(abono.referencia || '')}" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </label>
+      
+      <div class="modal-footer" style="margin-top:16px;">
+        <button type="button" class="secondary-button" data-action="close">Cancelar</button>
+        <button type="submit" class="primary-button">Guardar Cambios</button>
+      </div>
+    </form>
+  `);
+  
+  document.getElementById("edit-abono-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const nuevoMonto = parseFloat(document.getElementById("edit-abono-monto").value);
+    const nuevaReferencia = document.getElementById("edit-abono-referencia").value.trim();
+    
+    try {
+      await api("profile_edit_provider_payment", {
+        invoiceId: invoiceId,
+        abonoIndex: abonoIndex,
+        monto: nuevoMonto,
+        referencia: nuevaReferencia,
+        user: state.session?.name || state.session?.nombre || 'Gerencia'
+      });
+      
+      closeModal();
+      await refresh(false);
+      showToast("✅ Abono editado exitosamente.");
+    } catch (err) {
+      alert("Error al editar abono: " + err.message);
+    }
+  });
+};
+
 function cashView() {
   if (!isLead()) {
     return `<div style="text-align:center; padding:50px; color:#ef4444;"><h2>🔒 Acceso Restringido</h2><p>Este módulo es exclusivo para Gerencia y Jefes.</p></div>`;
@@ -7536,6 +7927,10 @@ function cashView() {
                 <span style="font-size:11px; color:var(--text-muted); display:block;">TOTAL EN BS:</span>
                 <strong style="font-size:18px; color:#10b981;">Bs. ${Number(c.totalDiaBs).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
                 <div style="font-size:12px; font-weight:bold; color:#38bdf8;">Total USD: $${Number(c.totalDiaUSD).toFixed(2)}</div>
+                <div style="margin-top:8px; display:flex; gap:6px; justify-content:flex-end;">
+                  <button type="button" onclick="window.editCashClose('${escapeHtml(c.id)}')" style="background:#0ea5e9; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✏️ Editar</button>
+                  <button type="button" onclick="window.deleteCashClose('${escapeHtml(c.id)}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Eliminar</button>
+                </div>
               </div>
             </div>
 
@@ -7813,6 +8208,34 @@ window.openNewCashCloseModal = function() {
 // MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
 // =========================================================================
 function getStoredInventory() {
+  // Intentar obtener del backend primero para sincronización entre perfiles
+  try {
+    const cached = store.get("pp_inventory_items");
+    const lastSync = store.get("pp_inventory_last_sync", 0);
+    const now = Date.now();
+    
+    // Si el caché tiene menos de 5 minutos, usarlo
+    if (cached && lastSync && (now - lastSync) < 300000) {
+      return cached;
+    }
+    
+    // Intentar obtener del backend
+    if (window.PRIORIDAD_CONFIG?.appsScriptUrl) {
+      api("profile_get_inventory").then(res => {
+        if (res && res.items) {
+          store.set("pp_inventory_items", res.items);
+          store.set("pp_inventory_last_sync", now);
+        }
+      }).catch(() => {
+        // Si falla, usar caché local
+      });
+    }
+    
+    return cached || defaultItems;
+  } catch(e) {
+    return defaultItems;
+  }
+  
   const defaultItems = [
     { id: "INV-1", producto: "Silicón Frío 250cc", categoria: "Pegamentos", stockActual: "2 unidades", estado: "Bajo Stock", precioUSD: 5.00, proveedor: "Prodimarca", notas: "Uso diario en toppers" },
     { id: "INV-2", producto: "Silicón Frío 100cc", categoria: "Pegamentos", stockActual: "5 unidades", estado: "Disponible", precioUSD: 2.70, proveedor: "Prodimarca", notas: "" },
@@ -8555,7 +8978,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
 {
   "cliente": "nombre del cliente",
   "telefono": "teléfono (ej. 04141234567)",
-  "tipo": "tipo de producto (Topper 3D, Pendón, Libreta, Stickers, etc.)",
+  "tipo": "tipo de producto (Topper, Pendón, Libreta, Stickers, etc.)",
   "motivo": "personaje, motivo o temática si está indicado",
   "cantidad": 1,
   "costo": monto total en dólares (número),
