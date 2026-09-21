@@ -55,18 +55,20 @@ function getOrderElapsedMinutes(order) {
 function formatMinutesToHuman(minutes) {
   if (!minutes || minutes <= 0) return "0 min";
   
-  if (minutes < 60) {
-    return `${minutes} min`;
+  // Siempre mostrar en formato horas y minutos cuando es mayor a 60 minutos
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    
+    if (remainingMinutes === 0) {
+      return `${hours} hora${hours > 1 ? 's' : ''}`;
+    }
+    
+    return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
   }
   
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  
-  if (remainingMinutes === 0) {
-    return `${hours} hora${hours > 1 ? 's' : ''}`;
-  }
-  
-  return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
+  // Solo minutos si es menos de 60
+  return `${minutes} min`;
 }
 
 // Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 30 segundos (optimizado para móvil)
@@ -470,7 +472,7 @@ const active = (order) => {
 const operable = (order) => active(order);
 const isLead = () => {
   const r = String(state.session?.role || "").toLowerCase().trim();
-  return ["manager", "jefe", "jefa"].includes(r);
+  return ["manager", "jefe", "jefa", "recepcionista"].includes(r);
 };
 
 function formatRoleLabel(roleStr) {
@@ -765,7 +767,8 @@ async function refresh(showMessage = true) {
       users: (rawData.allUsers || rawData.users || []).map(normalizeUser),
       dailyPerformance: rawData.dailyPerformance || {},
       schedules: rawSchedules,
-      horarios: rawSchedules
+      horarios: rawSchedules,
+      inventory: rawData.inventory || []
     };
     
     state.waTemplate = rawData.waTemplate || state.waTemplate;
@@ -782,10 +785,11 @@ async function refresh(showMessage = true) {
     const localVer = store.get("pp_app_version", "");
     if (serverVer && localVer && serverVer !== localVer) {
       store.set("pp_app_version", serverVer);
-      showToast("🚀 Nueva actualización del taller recibida. Recargando...", 3000);
+      showToast("🚀 Nueva actualización del taller recibida. Recargando...", 5000);
+      showToast("📱 Actualización forzada por gerencia: los datos se actualizarán automáticamente.", 4000);
       setTimeout(() => {
         window.location.reload(true);
-      }, 1200);
+      }, 2000);
       return;
     }
     if (serverVer) {
@@ -1036,7 +1040,9 @@ function nowView() {
   const urgentOrders = sortOrdersByUrgency(
     (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'now')
   );
-  const criticalBanner = (overdueOrders.length > 0 || urgentOrders.length > 0) ? `
+  // Solo mostrar banner crítico a gerencia/jefes (no a trabajadores)
+  const showCriticalBanner = isLead();
+  const criticalBanner = showCriticalBanner && (overdueOrders.length > 0 || urgentOrders.length > 0) ? `
     <div class="critical-banner">
       <div class="critical-banner-inner">
         ${overdueOrders.length > 0 ? `<span class="banner-overdue">\ud83d\udea8 ${overdueOrders.length} RETRASADO${overdueOrders.length>1?'S':''}</span>` : ''}
@@ -2025,8 +2031,13 @@ function reportsView() {
           <i class="fas fa-layer-group"></i> Todos (${casesThisPeriod})
         </button>
         
+        <!-- Botón de imprimir/descargar PDF -->
+        <button type="button" class="secondary-button" onclick="window.printReport()" style="background:#6366f1; color:white; font-weight:bold; font-size:12px; padding:6px 12px; margin-left:auto;">
+          <i class="fas fa-print"></i> Imprimir PDF
+        </button>
+        
         <!-- Filtro de Fecha Personalizado -->
-        <div style="display:flex; gap:4px; align-items:center; margin-left:auto;">
+        <div style="display:flex; gap:4px; align-items:center;">
           <select id="reports-date-filter" onchange="window.setReportsDateFilter(this.value)" style="padding:6px 8px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
             <option value="today" ${currentFilter === 'today' ? 'selected' : ''}>Hoy</option>
             <option value="week" ${currentFilter === 'week' ? 'selected' : ''}>Esta semana</option>
@@ -2109,9 +2120,12 @@ function reportsView() {
                 `Todos los casos del período (${casesThisPeriod})`}
             </div>
           </div>
+          <button type="button" class="secondary-button" onclick="window.toggleReportOrdersCollapse()" style="font-size:11px; padding:4px 8px;">
+            <i class="fas fa-chevron-${state.reportOrdersCollapsed ? 'up' : 'down'}" id="report-collapse-icon"></i> <span id="report-collapse-text">${state.reportOrdersCollapsed ? 'Mostrar lista' : 'Ocultar lista'}</span>
+          </button>
         </div>
 
-        <div style="overflow-x:auto;">
+        <div id="report-orders-list" style="overflow-x:auto; display:${state.reportOrdersCollapsed ? 'none' : 'block'};">
           <table class="sics-data-table">
             <thead>
               <tr>
@@ -2148,8 +2162,8 @@ function reportsView() {
         </div>
       </div>
 
-      <!-- Alerta Operativa si hay Rezagados -->
-      ${overdueOrders.length ? `
+      <!-- Alerta Operativa si hay Rezagados (solo gerencia/jefes) -->
+      ${isLead() && overdueOrders.length ? `
         <div style="background:rgba(239,68,68,0.08); border:1.5px solid #ef4444; border-radius:12px; padding:16px; margin-bottom:24px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px; cursor:pointer;" onclick="window.toggleOverdueList()">
             <div style="font-size:13px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:8px;">
@@ -5029,6 +5043,7 @@ function formNewUser() {
         <select name="role">
           <option value="trabajador">Trabajador (Hombre)</option>
           <option value="trabajadora">Trabajadora (Mujer)</option>
+          <option value="recepcionista">Recepcionista (Atención al cliente)</option>
           <option value="jefe">Jefe (Administrador Hombre)</option>
           <option value="jefa">Jefa (Administradora Mujer)</option>
           <option value="manager">Manager / Jefatura General</option>
@@ -5273,21 +5288,53 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "force-update") {
-    showToast("🔄 Iniciando actualización global del equipo...");
-    if (confirm("¿Deseas forzar la actualización inmediata en todas las sesiones y teléfonos activos del taller?\n\nTodos los dispositivos del equipo recargarán automáticamente la versión más reciente.")) {
+    // Mostrar modal de confirmación mejorado
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index:10000;';
+    modal.innerHTML = `
+      <div style="background:var(--bg-card); border-radius:12px; padding:24px; max-width:400px; box-shadow:0 10px 40px rgba(0,0,0,0.4);">
+        <h3 style="margin:0 0 12px 0; color:#ef4444; font-size:18px;">
+          <i class="fas fa-rocket"></i> Forzar Actualización Global
+        </h3>
+        <p style="margin:0 0 16px 0; color:var(--text-main); font-size:14px; line-height:1.5;">
+          ¿Deseas forzar la actualización inmediata en todas las sesiones y teléfonos activos del taller?
+        </p>
+        <p style="margin:0 0 20px 0; color:var(--text-muted); font-size:12px; line-height:1.4;">
+          <strong>⚠️ Todos los dispositivos del equipo recargarán automáticamente la versión más reciente.</strong><br>
+          Los trabajadores verán una notificación y sus pantallas se actualizarán.
+        </p>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button id="cancel-force-update" style="padding:8px 16px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main); cursor:pointer; font-size:13px;">
+            Cancelar
+          </button>
+          <button id="confirm-force-update" style="padding:8px 16px; border-radius:6px; border:none; background:#ef4444; color:white; cursor:pointer; font-size:13px; font-weight:bold;">
+            <i class="fas fa-check"></i> Confirmar Actualización
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    document.getElementById('cancel-force-update').onclick = () => {
+      document.body.removeChild(modal);
+      showToast("⏸️ Actualización cancelada por el usuario.");
+    };
+    
+    document.getElementById('confirm-force-update').onclick = async () => {
+      document.body.removeChild(modal);
+      showToast("🔄 Iniciando actualización global del equipo...");
       try {
         const newVer = "v_" + Date.now();
         await api("profile_force_update", { version: newVer });
         store.set("pp_app_version", newVer);
         showToast("✅ Orden de actualización global enviada a todo el equipo exitosamente.");
+        showToast("📱 Los dispositivos del equipo recargarán automáticamente.");
         await refresh(false);
       } catch (err) { 
         showToast("❌ Error al forzar actualización: " + err.message);
         alert(`Error al forzar actualización: ${err.message}`); 
       }
-    } else {
-      showToast("⏸️ Actualización cancelada por el usuario.");
-    }
+    };
     return;
   }
   if (act === "mark-delivered") {
@@ -5347,10 +5394,13 @@ function showLogin() {
   const workspaceEl = document.getElementById("workspace");
   if (loginEl)     { loginEl.style.setProperty("display", "flex", "important"); }
   if (workspaceEl) { workspaceEl.style.setProperty("display", "none", "important"); }
-  
+
   // Limpiar campos del formulario de login
   const nameInput = document.getElementById("login-name");
   const pinInput = document.getElementById("login-pin");
+  const btnEl = document.getElementById("login-btn-manual");
+  const errEl = document.getElementById("login-error");
+  
   if (nameInput) {
     nameInput.value = "";
     nameInput.autocomplete = "off";
@@ -5358,6 +5408,13 @@ function showLogin() {
   if (pinInput) {
     pinInput.value = "";
     pinInput.autocomplete = "off";
+  }
+  if (btnEl) {
+    btnEl.disabled = false;
+    btnEl.textContent = "Iniciar sesión";
+  }
+  if (errEl) {
+    errEl.textContent = "";
   }
 }
 
@@ -7572,14 +7629,17 @@ window.openNewProviderInvoiceModal = function() {
     <form id="new-prov-invoice-form" class="form-grid" style="margin-top:12px;">
       <div style="background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; padding:12px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:12px; font-weight:bold; color:#10b981;">📷 OCR: Escanear Nota de Entrega</span>
+          <div>
+            <span style="font-size:12px; font-weight:bold; color:#10b981;">📷 OCR: Escanear Nota de Entrega</span>
+            <div style="font-size:10px; color:#6b7280; margin-top:2px;">⚠️ Los campos pueden editarse manualmente después del escaneo</div>
+          </div>
           <button type="button" class="secondary-button" id="btn-ocr-prov" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
             📸 Escanear Nota
           </button>
         </div>
         <div id="prov-ocr-preview" style="display:none; margin-top:8px; align-items:center; gap:8px;">
           <img id="prov-ocr-thumb" src="" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #10b981;">
-          <span style="font-size:11px; color:#10b981; font-weight:bold;">Nota escaneada ✓</span>
+          <span style="font-size:11px; color:#10b981; font-weight:bold;">Nota escaneada ✓ (Puedes editar los campos)</span>
         </div>
       </div>
 
@@ -7685,12 +7745,15 @@ window.openNewProviderInvoiceModal = function() {
             if (result && result.numeroNota) {
               document.getElementById("prov-numero").value = result.numeroNota;
             }
+            if (result && result.proveedor) {
+              document.getElementById("prov-nombre").value = result.proveedor;
+            }
             
             // Mostrar preview
             document.getElementById("prov-ocr-thumb").src = base64;
             document.getElementById("prov-ocr-preview").style.display = "flex";
             
-            showToast("✅ Nota procesada. Campos llenados automáticamente.");
+            showToast("✅ Nota procesada. Campos llenados automáticamente. Puedes editarlos manualmente.");
           } catch (err) {
             showToast("⚠️ Error al procesar nota: " + err.message);
           }
@@ -8482,7 +8545,16 @@ function getStoredInventory() {
     { id: "INV-9", producto: "Cartulinas Construcción College", categoria: "Papelería", stockActual: "15 pliegos", estado: "Bajo Stock", precioUSD: 0.50, proveedor: "Prodimarca", notas: "Colores surtidos" },
     { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
   ];
-  return store.get("pp_inventory_items", defaultItems);
+  
+  // Intentar cargar desde el backend primero para sincronización en tiempo real
+  const cachedItems = store.get("pp_inventory_items", defaultItems);
+  
+  // Si hay datos en el estado desde el backend, usarlos
+  if (state.data?.inventory && state.data.inventory.length > 0) {
+    return state.data.inventory;
+  }
+  
+  return cachedItems;
 }
 
 function saveStoredInventory(list) {
@@ -8605,6 +8677,17 @@ window.setInventoryTab = function(tab) {
 window.setReportsViewType = function(type) {
   state.reportsViewType = type;
   if (typeof render === "function") render();
+  // Restaurar estado colapsado después de renderizar
+  setTimeout(() => {
+    if (state.reportOrdersCollapsed) {
+      const list = document.getElementById('report-orders-list');
+      const icon = document.getElementById('report-collapse-icon');
+      const text = document.getElementById('report-collapse-text');
+      if (list) list.style.display = 'none';
+      if (icon) icon.className = 'fas fa-chevron-up';
+      if (text) text.textContent = 'Mostrar lista';
+    }
+  }, 0);
 };
 
 window.setReportsDateFilter = function(filter) {
@@ -8623,6 +8706,23 @@ window.setCustomDateTo = function(date) {
 window.applyCustomDateFilter = function() {
   state.reportsDateFilter = 'custom';
   if (typeof render === "function") render();
+};
+
+window.toggleReportOrdersCollapse = function() {
+  state.reportOrdersCollapsed = !state.reportOrdersCollapsed;
+  const list = document.getElementById('report-orders-list');
+  const icon = document.getElementById('report-collapse-icon');
+  const text = document.getElementById('report-collapse-text');
+  
+  if (list) {
+    list.style.display = state.reportOrdersCollapsed ? 'none' : 'block';
+  }
+  if (icon) {
+    icon.className = state.reportOrdersCollapsed ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+  }
+  if (text) {
+    text.textContent = state.reportOrdersCollapsed ? 'Mostrar lista' : 'Ocultar lista';
+  }
 };
 
 window.toggleUserStatus = async function(userName, currentActive) {
@@ -8729,6 +8829,19 @@ window.cycleInventoryStatus = function(id) {
   else it.estado = "Disponible";
 
   saveStoredInventory(list);
+
+  // Sincronizar con backend
+  api("profile_save_inventory_item", {
+    id: it.id,
+    producto: it.producto,
+    categoria: it.categoria,
+    stockActual: it.stockActual,
+    estado: it.estado,
+    precioEstimadoUSD: it.precioUSD,
+    proveedorHabitual: it.proveedor,
+    notas: it.notas
+  }).catch(() => {});
+
   showToast(`${it.producto}: ${it.estado}`);
   if (typeof render === "function") render();
 };
@@ -8898,7 +9011,7 @@ window.openNewInventoryModal = function() {
   }).then(res => {
     if (res.isConfirmed && res.value) {
       const list = getStoredInventory();
-      list.push({
+      const newItem = {
         id: "INV-" + Date.now(),
         producto: res.value.producto,
         categoria: res.value.categoria,
@@ -8907,8 +9020,22 @@ window.openNewInventoryModal = function() {
         precioUSD: res.value.precioUSD,
         proveedor: res.value.proveedor,
         notas: ""
-      });
+      };
+      list.push(newItem);
       saveStoredInventory(list);
+
+      // Sincronizar con backend
+      api("profile_save_inventory_item", {
+        id: newItem.id,
+        producto: newItem.producto,
+        categoria: newItem.categoria,
+        stockActual: newItem.stockActual,
+        estado: newItem.estado,
+        precioEstimadoUSD: newItem.precioUSD,
+        proveedorHabitual: newItem.proveedor,
+        notas: newItem.notas
+      }).catch(() => {});
+
       showToast(`✅ Insumo "${res.value.producto}" añadido.`);
       if (typeof render === "function") render();
     }
