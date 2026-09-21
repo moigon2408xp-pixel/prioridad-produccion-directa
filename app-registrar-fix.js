@@ -475,6 +475,24 @@ const isLead = () => {
   return ["manager", "jefe", "jefa", "recepcionista"].includes(r);
 };
 
+const canSeeOrderAlert = (order) => {
+  const r = String(state.session?.role || "").toLowerCase().trim();
+  const currentUser = String(state.session?.name || "").toLowerCase().trim();
+  const orderResp = String(order.responsable || "").toLowerCase().trim();
+  
+  // Gerencia, jefes y recepcionistas ven todas las alertas
+  if (["manager", "jefe", "jefa", "recepcionista"].includes(r)) {
+    return true;
+  }
+  
+  // Trabajadores solo ven alertas de sus propios pedidos
+  if (r === "trabajador" || r === "trabajadora") {
+    return currentUser === orderResp;
+  }
+  
+  return false;
+};
+
 function formatRoleLabel(roleStr) {
   const r = String(roleStr || "").toLowerCase().trim();
   if (r === "jefe") return "Jefe";
@@ -941,6 +959,8 @@ function orderCard(order, position) {
               }
             } else if (order.estado === 'Pausado') {
               return `<span style="background:rgba(245,158,11,0.15); color:#d97706; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-pause-circle"></i> Pausado</span>`;
+            } else if (order.duracionRealMin && Number(order.duracionRealMin) > 0) {
+              return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-stopwatch"></i> ${order.duracionRealMin} min</span>`;
             }
             return '';
           })()}
@@ -1035,10 +1055,10 @@ function nowView() {
     (state.data.allOrders || []).filter(o => active(o) && ["overdue", "now"].includes(priority(o)))
   );
   const overdueOrders = sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'overdue')
+    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'overdue' && canSeeOrderAlert(o))
   );
   const urgentOrders = sortOrdersByUrgency(
-    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'now')
+    (state.data.allOrders || []).filter(o => active(o) && priority(o) === 'now' && canSeeOrderAlert(o))
   );
   // Solo mostrar banner crítico a gerencia/jefes (no a trabajadores)
   const showCriticalBanner = isLead();
@@ -1677,7 +1697,7 @@ function getGreetingTime() {
 function modulesView() {
   const allOrders = state.data?.allOrders || [];
   const activeOrders = allOrders.filter(active);
-  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
+  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue' && canSeeOrderAlert(o));
   const finishedOrders = state.data?.finishedOrders || [];
   const myActiveOrders = (state.data?.myOrders || []).filter(active);
   const userName = state.session?.nombre || state.session?.name || state.session?.username || 'Colaborador';
@@ -1913,7 +1933,7 @@ function reportsView() {
   const allOrders = state.data?.allOrders || [];
   const activeOrders = allOrders.filter(active);
   const finishedOrders = state.data?.finishedOrders || [];
-  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue');
+  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue' && canSeeOrderAlert(o));
 
   // Filtro de tipo de vista (default: completed)
   const viewType = state.reportsViewType || 'completed'; // 'completed' | 'active' | 'overdue' | 'all'
@@ -6549,14 +6569,23 @@ window.toggleSpeechRecognition = function() {
         text: "El reconocimiento por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge."
       });
     } else {
-      alert("El dictado por voz no es soportado por este navegador.");
+      alert("El dictado por voz no es soportado por este navegador. Usa Google Chrome o Microsoft Edge.");
     }
     return;
   }
 
   // Verificar contexto seguro HTTPS
   if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    showToast("⚠️ El micrófono requiere conexión segura HTTPS o localhost.");
+    if (typeof Swal !== "undefined") {
+      Swal.fire({
+        icon: "warning",
+        title: "Conexión no segura",
+        text: "El micrófono requiere conexión segura HTTPS. Google Apps Script Web Apps se ejecutan en HTTPS por defecto."
+      });
+    } else {
+      alert("El micrófono requiere conexión segura HTTPS o localhost.");
+    }
+    return;
   }
 
   if (!speechRecognitionInstance) {
@@ -7630,8 +7659,8 @@ window.openNewProviderInvoiceModal = function() {
       <div style="background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; padding:12px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <div>
-            <span style="font-size:12px; font-weight:bold; color:#10b981;">📷 OCR: Escanear Nota de Entrega</span>
-            <div style="font-size:10px; color:#6b7280; margin-top:2px;">⚠️ Los campos pueden editarse manualmente después del escaneo</div>
+            <span style="font-size:12px; font-weight:bold; color:#10b981;">📷 OCR: Escanear Nota de Entrega (OPCIONAL)</span>
+            <div style="font-size:10px; color:#6b7280; margin-top:2px;">⚠️ Puedes llenar todos los campos manualmente abajo sin escanear</div>
           </div>
           <button type="button" class="secondary-button" id="btn-ocr-prov" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
             📸 Escanear Nota
@@ -7643,14 +7672,16 @@ window.openNewProviderInvoiceModal = function() {
         </div>
       </div>
 
+      <div style="background:rgba(59,130,246,0.1); border:1px solid #3b82f6; border-radius:8px; padding:12px; margin-bottom:16px;">
+        <div style="font-size:11px; font-weight:bold; color:#3b82f6;">✏️ Entrada Manual</div>
+        <div style="font-size:10px; color:#6b7280; margin-top:2px;">Completa los campos abajo para registrar una nota manualmente. Todos los campos son editables.</div>
+      </div>
+
       <label class="field">
         <span class="field-label">PROVEEDOR:</span>
         <input type="text" id="prov-nombre" name="proveedor" list="prov-sugeridos" required placeholder="Ej. Americas, Blindac, Prodimarca, Patiño, Huepa...">
         <datalist id="prov-sugeridos">
           ${getProviderList().map(p => `<option value="${escapeHtml(p)}">`).join('')}
-        </datalist>
-      </label>
-          <option value="Huepa (Chocolates &amp; Repostería)">
         </datalist>
       </label>
 
@@ -8546,19 +8577,28 @@ function getStoredInventory() {
     { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
   ];
   
-  // Intentar cargar desde el backend primero para sincronización en tiempo real
-  const cachedItems = store.get("pp_inventory_items", defaultItems);
+  // Cargar datos guardados localmente
+  const cachedItems = store.get("pp_inventory_items", null);
   
-  // Si hay datos en el estado desde el backend, usarlos
+  // Si hay datos en el estado desde el backend, usarlos y guardar localmente
   if (state.data?.inventory && state.data.inventory.length > 0) {
+    store.set("pp_inventory_items", state.data.inventory);
     return state.data.inventory;
   }
   
-  return cachedItems;
+  // Si hay datos guardados localmente, usarlos
+  if (cachedItems && cachedItems.length > 0) {
+    return cachedItems;
+  }
+  
+  // Si no hay datos en ninguno, usar los datos por defecto
+  return defaultItems;
 }
 
 function saveStoredInventory(list) {
   store.set("pp_inventory_items", list);
+  // También guardar en el backend para sincronización
+  api("profile_save_inventory_list", { items: list }).catch(() => {});
 }
 
 function inventoryView() {
@@ -8723,6 +8763,131 @@ window.toggleReportOrdersCollapse = function() {
   if (text) {
     text.textContent = state.reportOrdersCollapsed ? 'Mostrar lista' : 'Ocultar lista';
   }
+};
+
+window.forzarActualizacionGlobal = function() {
+  handleSettingsAction("force-update");
+};
+
+window.printReport = function() {
+  const allOrders = state.data?.allOrders || [];
+  const finishedOrders = state.data?.finishedOrders || [];
+  const currentFilter = state.reportsDateFilter || 'month';
+  
+  // Filtrar por fecha
+  const filterByPeriod = (orderList) => {
+    const now = new Date();
+    return orderList.filter(o => {
+      const rawDate = o.fechaCierre || o.entrega || o.creado || "";
+      const d = safeParseDate(rawDate);
+      if (!d) return true;
+      if (currentFilter === 'today') {
+        return d.toDateString() === now.toDateString();
+      } else if (currentFilter === 'week') {
+        const oneWeekAgo = new Date(now.getTime() - 7 * 86400000);
+        return d >= oneWeekAgo && d <= now;
+      } else if (currentFilter === 'month') {
+        return (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) ||
+               String(rawDate).includes("-09-") || String(rawDate).includes("/09/") || String(rawDate).includes("/9/");
+      } else if (currentFilter === 'last_month') {
+        const lastM = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+        const lastY = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        return d.getMonth() === lastM && d.getFullYear() === lastY;
+      } else if (currentFilter === 'custom') {
+        const from = state.reportsDateFrom ? safeParseDate(state.reportsDateFrom) : null;
+        const to = state.reportsDateTo ? safeParseDate(state.reportsDateTo) : null;
+        if (from && d < from) return false;
+        if (to) {
+          const toEnd = new Date(to.getTime());
+          toEnd.setHours(23, 59, 59, 999);
+          if (d > toEnd) return false;
+        }
+        return from || to;
+      }
+      return true;
+    });
+  };
+  
+  const periodFinishedOrders = filterByPeriod(finishedOrders);
+  
+  // Generar contenido HTML para imprimir
+  const printContent = `
+    <html>
+    <head>
+      <title>Reporte de Pedidos Completados - Creaciones JJ</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+        h1 { text-align: center; color: #1e40af; margin-bottom: 5px; }
+        h2 { text-align: center; color: #6b7280; font-size: 14px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 12px; }
+        th { background-color: #f3f4f6; font-weight: bold; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .summary { background-color: #eff6ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .summary-item { display: inline-block; margin-right: 30px; font-size: 14px; }
+        .summary-label { font-weight: bold; color: #1e40af; }
+        .summary-value { color: #6b7280; }
+        .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #9ca3af; }
+        @media print { body { padding: 0; } }
+      </style>
+    </head>
+    <body>
+      <h1>📋 Reporte de Pedidos Completados</h1>
+      <h2>Creaciones JJ Ochoa & Risquez · Taller</h2>
+      
+      <div class="summary">
+        <div class="summary-item">
+          <span class="summary-label">Total completados:</span>
+          <span class="summary-value">${periodFinishedOrders.length}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Fecha del reporte:</span>
+          <span class="summary-value">${new Date().toLocaleDateString()}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Filtro:</span>
+          <span class="summary-value">${currentFilter === 'month' ? 'Este mes' : currentFilter === 'today' ? 'Hoy' : currentFilter === 'week' ? 'Esta semana' : currentFilter === 'custom' ? 'Personalizado' : 'Todo el historial'}</span>
+        </div>
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Cliente</th>
+            <th>Tipo</th>
+            <th>Responsable</th>
+            <th>Fecha Cierre</th>
+            <th>Tiempo (min)</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${periodFinishedOrders.map(o => `
+            <tr>
+              <td>${escapeHtml(o.id)}</td>
+              <td>${escapeHtml(o.cliente)}</td>
+              <td>${escapeHtml(o.tipo)}</td>
+              <td>${escapeHtml(o.responsable)}</td>
+              <td>${escapeHtml(formatDate(o.fechaCierre))}</td>
+              <td>${o.duracionRealMin || 0} min</td>
+              <td>${escapeHtml(o.estado)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      
+      <div class="footer">
+        Reporte generado automáticamente por Creaciones JJ - Sistema de Gestión de Producción
+      </div>
+    </body>
+    </html>
+  `;
+  
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(printContent);
+  printWindow.document.close();
+  printWindow.print();
 };
 
 window.toggleUserStatus = async function(userName, currentActive) {
