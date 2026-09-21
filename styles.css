@@ -735,17 +735,17 @@ body {
   .login-brand-name { font-size: 28px; }
   .login-logo { width: 110px; height: 110px; }
   
-  /* Mejoras móviles para Creaciones JJ - Header compacto */
+  /* Mejoras móviles para Creaciones JJ - Header minimalista */
   .jj-main-header {
     flex-direction: row;
-    padding: 8px 10px;
-    gap: 6px;
-    margin: 0 1% 10px 1%;
-    overflow-x: hidden;
-    width: 98%;
+    padding: 6px 8px;
+    gap: 4px;
+    margin: 0 0 8px 0;
+    overflow: hidden;
+    width: 100%;
     box-sizing: border-box;
     align-items: center;
-    min-height: 50px;
+    min-height: 44px;
   }
 
   .jj-header-brand {
@@ -754,22 +754,17 @@ body {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
 
   .jj-brand-logo-img {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     flex-shrink: 0;
   }
 
   .jj-brand-title {
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.1;
-    max-width: 100px;
+    display: none;
   }
 
   .jj-brand-sub {
@@ -779,23 +774,23 @@ body {
   .jj-header-controls {
     flex-wrap: nowrap;
     justify-content: flex-end;
-    gap: 4px;
+    gap: 3px;
     flex-shrink: 0;
     flex: 1;
-    overflow-x: auto;
+    overflow: hidden;
   }
 
   .control-btn-circle {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     font-size: 13px;
     flex-shrink: 0;
   }
 
   .user-pill {
-    font-size: 11px;
-    padding: 3px 6px;
-    max-width: 80px;
+    font-size: 10px;
+    padding: 2px 5px;
+    max-width: 60px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -806,8 +801,8 @@ body {
   }
 
   .logout-btn-new {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     font-size: 13px;
   }
 }
@@ -2622,10 +2617,12 @@ dialog,
 }
 
 /* Ocultar pestañas gerenciales si el rol no es jefe/manager */
-body.role-trabajador .manager-only-tab {
+body.role-trabajador .manager-only-tab,
+body.role-trabajadora .manager-only-tab {
   display: none !important;
 }
-body.role-trabajador .manager-only-section {
+body.role-trabajador .manager-only-section,
+body.role-trabajadora .manager-only-section {
   display: none !important;
 }
 
