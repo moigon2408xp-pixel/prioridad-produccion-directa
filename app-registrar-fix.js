@@ -2258,485 +2258,6 @@ function reportsView() {
   `;
 }
 
-function financesView() {
-  const finishedOrders = state.data?.finishedOrders || [];
-  const currentFilter = state.financesDateFilter || 'month';
-  
-  // Helper de filtrado por fecha
-  const filterByPeriod = (orderList) => {
-    const now = new Date();
-    return orderList.filter(o => {
-      const rawDate = o.fechaCierre || o.finProduccion || o.creado || "";
-      const d = safeParseDate(rawDate);
-      if (!d) return true;
-      if (currentFilter === 'today') {
-        return d.toDateString() === now.toDateString();
-      } else if (currentFilter === 'week') {
-        const oneWeekAgo = new Date(now.getTime() - 7 * 86400000);
-        return d >= oneWeekAgo && d <= now;
-      } else if (currentFilter === 'month') {
-        return (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) ||
-               String(rawDate).includes("-09-") || String(rawDate).includes("/09/") || String(rawDate).includes("/9/");
-      } else if (currentFilter === 'last_month') {
-        const lastM = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
-        const lastY = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-        return d.getMonth() === lastM && d.getFullYear() === lastY;
-      } else if (currentFilter === 'custom') {
-        const from = state.financesDateFrom ? safeParseDate(state.financesDateFrom) : null;
-        const to = state.financesDateTo ? safeParseDate(state.financesDateTo) : null;
-        if (from && d < from) return false;
-        if (to) {
-          const toEnd = new Date(to.getTime());
-          toEnd.setHours(23, 59, 59, 999);
-          if (d > toEnd) return false;
-        }
-        return from || to;
-      }
-      return true;
-    });
-  };
-  
-  const periodOrders = filterByPeriod(finishedOrders);
-  
-  // Calcular ingresos totales
-  let totalRevenue = 0;
-  periodOrders.forEach(o => {
-    if (o.montoPedido) {
-      totalRevenue += Number(o.montoPedido || 0);
-    }
-  });
-  
-  return `
-    <div style="max-width:1100px; margin:0 auto; padding-bottom:30px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-        <div>
-          <h2 style="margin:0; font-size:20px; color:var(--text-main); display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-dollar-sign" style="color:#10b981;"></i> Finanzas de Pedidos
-          </h2>
-          <div style="font-size:12px; color:var(--text-muted);">Gestión de ingresos por pedidos completados (Solo Gerencia)</div>
-        </div>
-      </div>
-      
-      <!-- Selector de Período -->
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px;">
-        <button type="button" class="secondary-button" onclick="window.setFinancesPeriod('today')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'today' ? 'background:#10b981; color:white; font-weight:bold;' : ''}">📅 Hoy</button>
-        <button type="button" class="secondary-button" onclick="window.setFinancesPeriod('week')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'week' ? 'background:#10b981; color:white; font-weight:bold;' : ''}">📆 Esta Semana</button>
-        <button type="button" class="secondary-button" onclick="window.setFinancesPeriod('month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'month' ? 'background:#10b981; color:white; font-weight:bold;' : ''}">📅 Este Mes</button>
-        <button type="button" class="secondary-button" onclick="window.setFinancesPeriod('last_month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'last_month' ? 'background:#10b981; color:white; font-weight:bold;' : ''}">📅 Mes Anterior</button>
-        <button type="button" class="secondary-button" onclick="window.setFinancesPeriod('all')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'all' ? 'background:#10b981; color:white; font-weight:bold;' : ''}">📊 Todo el Historial</button>
-      </div>
-      
-      <!-- Resumen Financiero -->
-      <div class="sics-metric-card" style="margin-bottom:20px;">
-        <div style="font-size:11px; font-weight:700; color:#10b981; text-transform:uppercase; margin-bottom:4px;">
-          <i class="fas fa-chart-line"></i> INGRESOS TOTALES DEL PERÍODO
-        </div>
-        <div style="font-size:32px; font-weight:900; color:#10b981;">$${totalRevenue.toFixed(2)}</div>
-        <div style="font-size:11px; color:var(--text-muted);">${periodOrders.length} pedidos completados</div>
-      </div>
-      
-      <!-- Tabla de Pedidos -->
-      <div class="sics-table-card">
-        <div style="margin-bottom:14px;">
-          <h3 style="margin:0; font-size:16px; color:var(--text-main);">Pedidos Completados</h3>
-          <div style="font-size:11.5px; color:var(--text-muted);">Haz clic en el monto para editarlo</div>
-        </div>
-        <div style="overflow-x:auto;">
-          <table class="sics-data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Cliente</th>
-                <th>Tipo</th>
-                <th>Responsable</th>
-                <th>Fecha Cierre</th>
-                <th>Monto ($)</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${periodOrders.map(o => `
-                <tr>
-                  <td style="font-family:monospace; font-weight:bold;">${escapeHtml(o.id)}</td>
-                  <td style="font-weight:bold;">${escapeHtml(o.cliente)}</td>
-                  <td>${escapeHtml(o.tipo)}</td>
-                  <td>${escapeHtml(o.responsable)}</td>
-                  <td>${escapeHtml(formatDate(o.fechaCierre || o.finProduccion))}</td>
-                  <td>
-                    <input type="number" 
-                           value="${o.montoPedido || 0}" 
-                           step="0.01" 
-                           min="0"
-                           onchange="window.updateOrderMonto('${escapeHtml(o.id)}', this.value)"
-                           style="width:100px; padding:4px 6px; border-radius:6px; border:1px solid var(--border-color); text-align:right;">
-                  </td>
-                  <td>
-                    <button type="button" class="secondary-button" onclick="window.updateOrderMonto('${escapeHtml(o.id)}', document.querySelector('input[onchange*=\"${escapeHtml(o.id)}\"]').value)" style="font-size:10px; padding:4px 8px;">
-                      💾 Guardar
-                    </button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  `;
-}
-  const allOrders = state.data?.allOrders || [];
-  const activeOrders = allOrders.filter(active);
-  const finishedOrders = state.data?.finishedOrders || [];
-  const overdueOrders = activeOrders.filter(o => priority(o) === 'overdue' && canSeeOrderAlert(o));
-
-  // Filtro de tipo de vista (default: completed)
-  const viewType = state.reportsViewType || 'completed'; // 'completed' | 'active' | 'overdue' | 'all'
-
-  // Filtro de fecha seleccionado para reportes (default: mes)
-  const currentFilter = state.reportsDateFilter || 'month';
-
-  // Helper de filtrado por fecha
-  const filterByPeriod = (orderList) => {
-    const now = new Date();
-    return orderList.filter(o => {
-      const rawDate = o.fechaCierre || o.entrega || o.creado || "";
-      const d = safeParseDate(rawDate);
-      if (!d) return true;
-      if (currentFilter === 'today') {
-        return d.toDateString() === now.toDateString();
-      } else if (currentFilter === 'week') {
-        const oneWeekAgo = new Date(now.getTime() - 7 * 86400000);
-        return d >= oneWeekAgo && d <= now;
-      } else if (currentFilter === 'month') {
-        // Reconocer órdenes de septiembre 2026
-        return (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) ||
-               String(rawDate).includes("-09-") || String(rawDate).includes("/09/") || String(rawDate).includes("/9/");
-      } else if (currentFilter === 'last_month') {
-        const lastM = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
-        const lastY = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-        return d.getMonth() === lastM && d.getFullYear() === lastY;
-      } else if (currentFilter === 'custom') {
-        const from = state.reportsDateFrom ? safeParseDate(state.reportsDateFrom) : null;
-        const to = state.reportsDateTo ? safeParseDate(state.reportsDateTo) : null;
-        if (from && d < from) return false;
-        if (to) {
-          const toEnd = new Date(to.getTime());
-          toEnd.setHours(23, 59, 59, 999);
-          if (d > toEnd) return false;
-        }
-        return from || to;
-      }
-      return true; // 'all'
-    });
-  };
-
-  const periodFinishedOrders = filterByPeriod(finishedOrders);
-
-  // Casos del período seleccionado (activos + completados del filtro vigente)
-  const periodActiveOrders = filterByPeriod(activeOrders);
-  const casesThisPeriod = periodActiveOrders.length + periodFinishedOrders.length;
-
-  // Cumplimiento a tiempo - Mejorado para usar finProduccion cuando fechaCierre no está disponible
-  const onTimeFinished = periodFinishedOrders.filter(o => {
-    const ent = safeParseDate(o.entrega);
-    // Usar fechaCierre si está disponible, sino usar finProduccion
-    const cie = safeParseDate(o.fechaCierre) || safeParseDate(o.finProduccion);
-    
-    // Si no tiene fecha de entrega, no se puede medir cumplimiento
-    if (!ent) return false;
-    
-    // Si no tiene fecha de cierre/finProducción, no cuenta como entregado a tiempo
-    if (!cie) return false;
-    
-    // Compara fecha de cierre con fecha de entrega
-    return cie <= ent;
-  });
-  const complianceRate = periodFinishedOrders.length ? Math.round((onTimeFinished.length / periodFinishedOrders.length) * 100) : 100;
-
-  // Promedio en mesa
-  const durations = periodFinishedOrders.map(o => Number(o.duracionRealMin || 0)).filter(d => d > 0);
-  const avgMins = durations.length ? Math.round(durations.reduce((a,b)=>a+b, 0) / durations.length) : 0;
-
-  // Trabajadores reales + cualquier responsable con pedidos en el período
-  // (incluye ex-personal como Eloy: solo aparece si tiene pedidos en el filtro de fecha)
-  const realTeam = getRealTeamList();
-  const observedWorkers = [...new Set([...activeOrders, ...periodFinishedOrders]
-    .map(o => String(o.responsable || "").trim())
-    .filter(Boolean))];
-  const allWorkers = [...new Set([...realTeam, ...observedWorkers])];
-  const workerStats = {};
-  allWorkers.forEach(w => {
-    workerStats[w] = { name: w, active: 0, finished: 0, overdue: 0, totalMins: 0, finishedCount: 0 };
-  });
-
-  activeOrders.forEach(o => {
-    const resp = String(o.responsable || "").trim();
-    if (workerStats[resp]) {
-      workerStats[resp].active++;
-      if (priority(o) === 'overdue') workerStats[resp].overdue++;
-    }
-  });
-
-  periodFinishedOrders.forEach(o => {
-    const resp = String(o.responsable || "").trim();
-    if (workerStats[resp]) {
-      workerStats[resp].finished++;
-      if (o.duracionRealMin) {
-        workerStats[resp].totalMins += Number(o.duracionRealMin);
-        workerStats[resp].finishedCount++;
-      }
-    }
-  });
-
-  return `
-    <div style="max-width:1100px; margin:0 auto; padding-bottom:30px;">
-      <!-- Filtros de Tipo de Vista y Fecha -->
-      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
-        <button type="button" class="secondary-button" onclick="window.setReportsViewType('completed')" style="background:${viewType === 'completed' ? '#10b981; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
-          <i class="fas fa-check-circle"></i> Completados (${periodFinishedOrders.length})
-        </button>
-        <button type="button" class="secondary-button" onclick="window.setReportsViewType('active')" style="background:${viewType === 'active' ? '#3b82f6; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
-          <i class="fas fa-bolt"></i> Activos (${periodActiveOrders.length})
-        </button>
-        <button type="button" class="secondary-button" onclick="window.setReportsViewType('overdue')" style="background:${viewType === 'overdue' ? '#ef4444; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
-          <i class="fas fa-exclamation-circle"></i> Rezagados (${overdueOrders.length})
-        </button>
-        <button type="button" class="secondary-button" onclick="window.setReportsViewType('all')" style="background:${viewType === 'all' ? '#8b5cf6; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:6px 12px;">
-          <i class="fas fa-layer-group"></i> Todos (${casesThisPeriod})
-        </button>
-        
-        <!-- Botón de imprimir/descargar PDF -->
-        <button type="button" class="secondary-button" onclick="window.printReport()" style="background:#6366f1; color:white; font-weight:bold; font-size:12px; padding:6px 12px; margin-left:auto;">
-          <i class="fas fa-print"></i> Imprimir PDF
-        </button>
-        
-        <!-- Filtro de Fecha Personalizado -->
-        <div style="display:flex; gap:4px; align-items:center;">
-          <select id="reports-date-filter" onchange="window.setReportsDateFilter(this.value)" style="padding:6px 8px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
-            <option value="today" ${currentFilter === 'today' ? 'selected' : ''}>Hoy</option>
-            <option value="week" ${currentFilter === 'week' ? 'selected' : ''}>Esta semana</option>
-            <option value="month" ${currentFilter === 'month' ? 'selected' : ''}>Este mes</option>
-            <option value="last_month" ${currentFilter === 'last_month' ? 'selected' : ''}>Mes anterior</option>
-            <option value="custom" ${currentFilter === 'custom' ? 'selected' : ''}>Rango personalizado</option>
-            <option value="all" ${currentFilter === 'all' ? 'selected' : ''}>Todo el historial</option>
-          </select>
-        </div>
-      </div>
-
-      ${currentFilter === 'custom' ? `
-        <div style="background:var(--bg-main); padding:12px; border-radius:8px; border:1px solid var(--border-color); margin-bottom:16px;">
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <div style="flex:1;">
-              <label style="font-size:11px; font-weight:bold; color:var(--text-muted);">Desde:</label>
-              <input type="date" id="custom-date-from" value="${state.reportsDateFrom || ''}" onchange="window.setCustomDateFrom(this.value)" style="padding:4px 6px; border-radius:6px; border:1px solid var(--border-color); width:100%;">
-            </div>
-            <div style="flex:1;">
-              <label style="font-size:11px; font-weight:bold; color:var(--text-muted);">Hasta:</label>
-              <input type="date" id="custom-date-to" value="${state.reportsDateTo || ''}" onchange="window.setCustomDateTo(this.value)" style="padding:4px 6px; border-radius:6px; border:1px solid var(--border-color); width:100%;">
-            </div>
-            <button type="button" class="primary-button" onclick="window.applyCustomDateFilter()" style="padding:6px 12px; font-size:12px;">Aplicar Filtro</button>
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- KPIs Superiores Interactivos -->
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:20px;">
-        <div class="sics-metric-card">
-          <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; margin-bottom:4px;">
-            <i class="fas fa-calendar-check"></i> CASOS DEL PERÍODO
-          </div>
-          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${casesThisPeriod}</div>
-          <div style="font-size:11px; color:var(--text-muted);">${activeOrders.length} activos + ${periodFinishedOrders.length} completados</div>
-        </div>
-
-        <div class="sics-metric-card">
-          <div style="font-size:11px; font-weight:700; color:#10b981; text-transform:uppercase; margin-bottom:4px;">
-            <i class="fas fa-check-double"></i> CUMPLIMIENTO A TIEMPO
-          </div>
-          <div style="font-size:28px; font-weight:900; color:#10b981;">${complianceRate}%</div>
-          <div style="font-size:11px; color:var(--text-muted);">${onTimeFinished.length} de ${periodFinishedOrders.length} entregados en fecha</div>
-        </div>
-
-        <div class="sics-metric-card" onclick="window.filterOverdueDirect()" style="cursor:pointer; border-color:${overdueOrders.length ? '#ef4444' : 'var(--border-color)'}; box-shadow:${overdueOrders.length ? '0 0 16px rgba(239,68,68,0.2)' : 'none'};" title="Clic para ver pedidos rezagados">
-          <div style="font-size:11px; font-weight:700; color:#ef4444; text-transform:uppercase; margin-bottom:4px;">
-            <i class="fas fa-exclamation-circle"></i> CASOS REZAGADOS
-          </div>
-          <div style="font-size:28px; font-weight:900; color:${overdueOrders.length ? '#ef4444' : '#10b981'};">
-            ${overdueOrders.length} <i class="fas fa-arrow-right" style="font-size:14px; opacity:0.6;"></i>
-          </div>
-          <div style="font-size:11px; color:${overdueOrders.length ? '#ef4444' : 'var(--text-muted)'}; font-weight:bold;">
-            ${overdueOrders.length ? '⚠️ Requieren atención prioritaria (Clic)' : '¡Al día! Cero retrasos'}
-          </div>
-        </div>
-
-        <div class="sics-metric-card">
-          <div style="font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase; margin-bottom:4px;">
-            <i class="fas fa-stopwatch"></i> PROMEDIO EN MESA
-          </div>
-          <div style="font-size:28px; font-weight:900; color:var(--text-main);">${avgMins} <span style="font-size:14px; font-weight:bold; color:var(--text-muted);">min</span></div>
-          <div style="font-size:11px; color:var(--text-muted);">Por orden física finalizada</div>
-        </div>
-      </div>
-
-      <!-- Detalles de Pedidos según Filtro -->
-      <div class="sics-table-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
-          <div>
-            <h3 style="margin:0; font-size:16px; color:var(--text-main);">
-              ${viewType === 'completed' ? '✅ Pedidos Completados' : 
-                viewType === 'active' ? '⚡ Pedidos Activos' : 
-                viewType === 'overdue' ? '🚨 Pedidos Rezagados' : '📋 Todos los Pedidos'}
-            </h3>
-            <div style="font-size:11.5px; color:var(--text-muted);">
-              ${viewType === 'completed' ? `Órdenes finalizadas en el período seleccionado (${periodFinishedOrders.length})` :
-                viewType === 'active' ? `Órdenes actualmente en producción (${periodActiveOrders.length})` :
-                viewType === 'overdue' ? `Órdenes con entrega vencida (${overdueOrders.length})` :
-                `Todos los casos del período (${casesThisPeriod})`}
-            </div>
-          </div>
-          <button type="button" class="secondary-button" onclick="window.toggleReportOrdersCollapse()" style="font-size:11px; padding:4px 8px;">
-            <i class="fas fa-chevron-${state.reportOrdersCollapsed ? 'up' : 'down'}" id="report-collapse-icon"></i> <span id="report-collapse-text">${state.reportOrdersCollapsed ? 'Mostrar lista' : 'Ocultar lista'}</span>
-          </button>
-        </div>
-
-        <div id="report-orders-list" style="overflow-x:auto; display:${state.reportOrdersCollapsed ? 'none' : 'block'};">
-          <table class="sics-data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Cliente</th>
-                <th>Tipo</th>
-                <th>Responsable</th>
-                <th>Entrega</th>
-                <th>Estado</th>
-                <th>Tiempo</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(viewType === 'completed' ? periodFinishedOrders : 
-                 viewType === 'active' ? periodActiveOrders : 
-                 viewType === 'overdue' ? overdueOrders : 
-                 [...periodActiveOrders, ...periodFinishedOrders]).map(o => `
-                <tr onclick="navigate('team'); setTimeout(() => document.querySelector('[data-id=\"${escapeHtml(o.id)}\"]')?.click(), 100);" style="cursor:pointer;">
-                  <td style="font-family:monospace; font-weight:bold;">${escapeHtml(o.id)}</td>
-                  <td style="font-weight:bold;">${escapeHtml(o.cliente)}</td>
-                  <td>${escapeHtml(o.tipo)}</td>
-                  <td>${escapeHtml(o.responsable)}</td>
-                  <td>${escapeHtml(formatDate(o.entrega))}</td>
-                  <td>
-                    <span style="padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:bold; background:${o.estado === 'Terminado' || o.estado === 'Entregado' ? 'rgba(16,185,129,0.2); color:#10b981;' : o.estado === 'En proceso' ? 'rgba(59,130,246,0.2); color:#3b82f6;' : 'rgba(245,158,11,0.2); color:#f59e0b;'}">
-                      ${escapeHtml(o.estado)}
-                    </span>
-                  </td>
-                  <td style="font-weight:bold;">${o.duracionRealMin ? o.duracionRealMin + ' min' : '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Alerta Operativa si hay Rezagados (solo gerencia/jefes) -->
-      ${isLead() && overdueOrders.length ? `
-        <div style="background:rgba(239,68,68,0.08); border:1.5px solid #ef4444; border-radius:12px; padding:16px; margin-bottom:24px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px; cursor:pointer;" onclick="window.toggleOverdueList()">
-            <div style="font-size:13px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:8px;">
-              <i class="fas fa-bell fa-bounce"></i> CASOS REZAGADOS QUE REQUIEREN ATENCIÓN (${overdueOrders.length})
-              <i class="fas fa-chevron-down" id="overdue-chevron" style="font-size:11px; margin-left:8px;"></i>
-            </div>
-            <span style="font-size:10.5px; background:#ef4444; color:white; padding:2px 8px; border-radius:10px; font-weight:bold;">ALERTA OPERATIVA</span>
-          </div>
-          <div id="overdue-list-container" style="display:none; display:flex; flex-direction:column; gap:8px;">
-            ${overdueOrders.map(o => `
-              <div style="background:rgba(0,0,0,0.3); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                <div>
-                  <strong style="color:var(--text-main);">${escapeHtml(o.id)} - ${escapeHtml(o.cliente)}</strong>
-                  <span style="color:#ef4444; font-size:11px; font-weight:bold; margin-left:8px;">⏳ Vencido</span>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                    ${escapeHtml(o.motivo || o.tipo)} | Entrega: ${escapeHtml(o.entrega || 'No definida')} | Resp: <strong>${escapeHtml(o.responsable || 'Sin asignar')}</strong>
-                  </div>
-                </div>
-                <button type="button" class="primary-button" onclick="window.openOrderDetail('${escapeHtml(o.id)}')" style="background:#ef4444; color:white; border:none; padding:5px 12px; font-size:11px; font-weight:800; border-radius:6px; cursor:pointer;">
-                  ⚡ Atender Caso
-                </button>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- Selector de Período y Métricas por Trabajador -->
-      <div class="sics-table-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
-          <div style="font-size:14px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-users-cog" style="color:#8b5cf6;"></i> Métricas Operativas por Trabajador
-          </div>
-          <!-- Selector de Fechas -->
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('today')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'today' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Hoy</button>
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('week')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'week' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Esta Semana</button>
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Este Mes</button>
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('last_month')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'last_month' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📅 Mes Pasado</button>
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('all')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'all' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📂 Todo</button>
-            <button type="button" class="secondary-button" onclick="window.setReportsPeriod('custom')" style="font-size:11px; padding:4px 10px; ${currentFilter === 'custom' ? 'background:#8b5cf6; color:white; font-weight:bold;' : ''}">📊 Rango</button>
-            ${currentFilter === 'custom' ? `
-              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; width:100%; margin-top:6px;">
-                <input type="date" id="reports-date-from" value="${escapeHtml(state.reportsDateFrom || '')}" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:11px;">
-                <span style="color:var(--text-muted); font-size:11px;">hasta</span>
-                <input type="date" id="reports-date-to" value="${escapeHtml(state.reportsDateTo || '')}" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:11px;">
-                <button type="button" class="primary-button" onclick="window.applyCustomRange()" style="font-size:11px; padding:4px 12px; background:#8b5cf6; border:none;">Aplicar</button>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-
-        <div style="overflow-x:auto;">
-          <table class="sics-data-table">
-            <thead>
-              <tr>
-                <th style="text-align:left;">Colaborador</th>
-                <th style="text-align:center;">Órdenes Activas</th>
-                <th style="text-align:center;">Rezagados</th>
-                <th style="text-align:center;">Completados</th>
-                <th style="text-align:center;">Promedio en Mesa</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${allWorkers.map(w => {
-                const st = workerStats[w];
-                const avg = st.finishedCount ? Math.round(st.totalMins / st.finishedCount) : 0;
-                return `
-                  <tr>
-                    <td style="font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:8px;">
-                      <i class="fas fa-user-circle" style="color:#9ca3af;"></i> ${escapeHtml(w)}
-                    </td>
-                    <td style="text-align:center;">
-                      ${st.active > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w)}','active')" style="background:#0ea5e9; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver órdenes activas">${st.active} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
-                    </td>
-                    <td style="text-align:center;">
-                      ${st.overdue > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w)}','overdue')" style="background:#ef4444; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver rezagados">${st.overdue} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
-                    </td>
-                    <td style="text-align:center;">
-                      ${st.finished > 0 ? `
-                        <button type="button" onclick="window.openWorkerCompletedModal('${escapeHtml(w)}')" style="background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Clic para ver detalle de pedidos">
-                          ${st.finished} <i class="fas fa-external-link-alt" style="font-size:9px;"></i>
-                        </button>
-                      ` : '<span style="color:var(--text-muted);">0</span>'}
-                    </td>
-                    <td style="text-align:center; color:var(--text-muted); font-size:12px;">
-                      ${avg > 0 ? `${avg} min` : '-'}
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 window.setReportsPeriod = function(period) {
   state.reportsDateFilter = period;
   if (typeof render === "function") render();
@@ -5909,32 +5430,36 @@ window.clearAllCache = function() {
 // ============================================================
 // INICIALIZACIÓN — siempre decide qué vista es visible
 // ============================================================
-function showLogin() {
+function showLogin(clearFields = true) {
   const loginEl     = document.getElementById("login-view");
   const workspaceEl = document.getElementById("workspace");
   if (loginEl)     { loginEl.style.setProperty("display", "flex", "important"); }
   if (workspaceEl) { workspaceEl.style.setProperty("display", "none", "important"); }
 
-  // Limpiar campos del formulario de login
-  const nameInput = document.getElementById("login-name");
-  const pinInput = document.getElementById("login-pin");
-  const btnEl = document.getElementById("login-btn-manual");
-  const errEl = document.getElementById("login-error");
-  
-  if (nameInput) {
-    nameInput.value = "";
-    nameInput.autocomplete = "off";
-  }
-  if (pinInput) {
-    pinInput.value = "";
-    pinInput.autocomplete = "off";
-  }
-  if (btnEl) {
-    btnEl.disabled = false;
-    btnEl.textContent = "Iniciar sesión";
-  }
-  if (errEl) {
-    errEl.textContent = "";
+  // Solo limpiar campos si se solicita explícitamente (evita resetear mientras el usuario escribe)
+  if (clearFields) {
+    const nameInput = document.getElementById("login-name");
+    const pinInput = document.getElementById("login-pin");
+    const btnEl = document.getElementById("login-btn-manual");
+    const errEl = document.getElementById("login-error");
+
+    console.log("showLogin() llamado, limpiando campos");
+
+    if (nameInput) {
+      nameInput.value = "";
+      nameInput.autocomplete = "off";
+    }
+    if (pinInput) {
+      pinInput.value = "";
+      pinInput.autocomplete = "off";
+    }
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "Iniciar sesión";
+    }
+    if (errEl) {
+      errEl.textContent = "";
+    }
   }
 }
 
@@ -5978,6 +5503,7 @@ function doLogin(e) {
     if (res && res.session) {
       state.session = res.session;
       store.set("pp_profile_session", res.session);
+      console.log("Sesión guardada:", res.session);
       showWorkspace();
       render();
       refresh(false);
@@ -6036,18 +5562,6 @@ document.querySelectorAll(".nav-button").forEach((btn) => {
 
 // Aplicar tema y decidir vista inicial
 applyTheme();
-
-// Limpiar campos de login y verificar sesión
-const nameInput = document.getElementById("login-name");
-const pinInput = document.getElementById("login-pin");
-if (nameInput) {
-  nameInput.value = "";
-  nameInput.autocomplete = "off";
-}
-if (pinInput) {
-  pinInput.value = "";
-  pinInput.autocomplete = "off";
-}
 
 // Verificar si hay sesión guardada y limpiarla si es de un usuario diferente
 const savedSession = store.get("pp_profile_session", null);
