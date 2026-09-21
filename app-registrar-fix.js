@@ -2242,11 +2242,25 @@ function reportsView() {
               ${Object.values(workerStats).map(w => `
                 <tr>
                   <td style="font-weight:bold;">${escapeHtml(w.name)}</td>
-                  <td style="text-align:center;">${w.active}</td>
-                  <td style="text-align:center; color:${w.overdue > 0 ? '#ef4444' : 'inherit'}; font-weight:${w.overdue > 0 ? 'bold' : 'normal'};">${w.overdue}</td>
-                  <td style="text-align:center;">${w.finished}</td>
-                  <td style="text-align:center;">${w.finishedCount ? Math.round(w.totalMins / w.finishedCount) + ' min' : '-'}</td>
-                  <td style="text-align:center;">${w.totalMins + ' min'}</td>
+                  <td style="text-align:center;">
+                    ${w.active > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w.name)}','active')" style="background:#0ea5e9; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver órdenes activas">${w.active} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
+                  </td>
+                  <td style="text-align:center;">
+                    ${w.overdue > 0 ? `<button type="button" onclick="window.openWorkerOrdersModal('${escapeHtml(w.name)}','overdue')" style="background:#ef4444; color:white; border:none; border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Ver rezagados">${w.overdue} <i class="fas fa-external-link-alt" style="font-size:9px;"></i></button>` : '<span style="color:var(--text-muted);">-</span>'}
+                  </td>
+                  <td style="text-align:center;">
+                    ${w.finished > 0 ? `
+                      <button type="button" onclick="window.openWorkerCompletedModal('${escapeHtml(w.name)}')" style="background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); border-radius:12px; padding:2px 10px; font-weight:bold; font-size:11px; cursor:pointer;" title="Clic para ver detalle de pedidos">
+                        ${w.finished} <i class="fas fa-external-link-alt" style="font-size:9px;"></i>
+                      </button>
+                    ` : '<span style="color:var(--text-muted);">0</span>'}
+                  </td>
+                  <td style="text-align:center; color:var(--text-muted); font-size:12px;">
+                    ${w.finishedCount ? Math.round(w.totalMins / w.finishedCount) + ' min' : '-'}
+                  </td>
+                  <td style="text-align:center; color:var(--text-muted); font-size:12px;">
+                    ${w.totalMins + ' min'}
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -6575,15 +6589,22 @@ window.toggleSpeechRecognition = function() {
   const micBtn = document.getElementById("jj-mic-btn");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  if (!SpeechRecognition) {
+  // Detectar Opera específicamente
+  const isOpera = navigator.userAgent.includes('OPR') || navigator.userAgent.includes('Opera');
+
+  if (!SpeechRecognition || isOpera) {
     if (typeof Swal !== "undefined") {
       Swal.fire({
         icon: "warning",
         title: "Voz no disponible",
-        text: "El reconocimiento por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge."
+        html: isOpera 
+          ? "El navegador Opera no soporta el reconocimiento de voz nativo. Te recomendamos usar Google Chrome o Microsoft Edge para la función de dictado por voz."
+          : "El reconocimiento por voz no es soportado por este navegador. Te recomendamos usar Google Chrome o Microsoft Edge."
       });
     } else {
-      alert("El dictado por voz no es soportado por este navegador. Usa Google Chrome o Microsoft Edge.");
+      alert(isOpera 
+        ? "Opera no soporta reconocimiento de voz. Usa Google Chrome o Microsoft Edge."
+        : "El dictado por voz no es soportado por este navegador. Usa Google Chrome o Microsoft Edge.");
     }
     return;
   }
@@ -8803,6 +8824,7 @@ window.toggleReportOrdersCollapse = function() {
 };
 
 window.forzarActualizacionGlobal = function() {
+  console.log("forzarActualizacionGlobal llamado");
   handleSettingsAction("force-update");
 };
 
@@ -8885,9 +8907,9 @@ window.printReport = function() {
     </head>
     <body>
       <div class="logo-container">
-        <img src="./logo_creaciones_jj.png" alt="Creaciones JJ" class="logo-img" onerror="this.style.display='none'">
+        <img src="./logo_creaciones_jj.png" alt="Creaciones JJ" class="logo-img" onerror="this.src='./icons/icon-192.png'; this.onerror=null;">
       </div>
-      <h1>📋 Reporte de Pedidos Completados</h1>
+      <h1>Reporte de Pedidos Completados</h1>
       <h2>Creaciones JJ Ochoa & Risquez · Taller</h2>
       
       <div class="summary">
@@ -9467,7 +9489,7 @@ window.testGeminiConnection = async function() {
   }
   if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -9639,7 +9661,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const payload = {
       contents: [{
         parts: [
