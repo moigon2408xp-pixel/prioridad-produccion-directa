@@ -738,55 +738,79 @@ body {
   /* Mejoras móviles para Creaciones JJ - Header compacto */
   .jj-main-header {
     flex-direction: row;
-    padding: 10px 14px;
-    gap: 10px;
-    margin: 0 2% 12px 2%;
-    overflow-x: hidden; /* Prevenir desplazamiento horizontal */
-    width: 96%;
+    padding: 8px 10px;
+    gap: 6px;
+    margin: 0 1% 10px 1%;
+    overflow-x: hidden;
+    width: 98%;
     box-sizing: border-box;
     align-items: center;
+    min-height: 50px;
   }
 
   .jj-header-brand {
-    flex-shrink: 1;
-    min-width: 0; /* Permitir que el texto se ajuste */
-    flex: 1;
+    flex-shrink: 0;
+    min-width: auto;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .jj-brand-logo-img {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
   }
 
   .jj-brand-title {
-    font-size: 15px;
+    font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.2;
+    line-height: 1.1;
+    max-width: 100px;
   }
 
   .jj-brand-sub {
-    font-size: 10px;
-    display: none; /* Ocultar subtítulo en móvil para ahorrar espacio */
+    display: none;
   }
 
   .jj-header-controls {
     flex-wrap: nowrap;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
+    flex: 1;
+    overflow-x: auto;
   }
 
   .control-btn-circle {
-    width: 32px;
-    height: 32px;
-    font-size: 14px;
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+    flex-shrink: 0;
   }
 
   .user-pill {
-    font-size: 12px;
-    padding: 4px 8px;
+    font-size: 11px;
+    padding: 3px 6px;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .jj-brand-logo-img {
-    width: 32px;
-    height: 32px;
+  .btn-change-pin-header {
+    display: none;
+  }
+
+  .logout-btn-new {
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+  }
+}
   }
   
   .sics-module-tabs-bar {
