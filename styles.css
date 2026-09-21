@@ -1338,17 +1338,18 @@ body {
 
 /* Dropdown de Alertas */
 .dropdown-notif {
-  position: absolute;
-  top: 48px;
-  right: -70px;
-  width: 340px;
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 380px;
   max-width: 90vw;
+  max-height: 80vh;
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.18);
   border: 1px solid #e2e8f0;
   display: none;
-  z-index: 2000;
+  z-index: 9999;
   overflow: hidden;
   animation: sicsFadeIn 0.25s ease-out;
 }
