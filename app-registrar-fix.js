@@ -480,16 +480,22 @@ const canSeeOrderAlert = (order) => {
   const currentUser = String(state.session?.name || "").toLowerCase().trim();
   const orderResp = String(order.responsable || "").toLowerCase().trim();
   
+  console.log("canSeeOrderAlert check:", { role: r, currentUser, orderResp, match: currentUser === orderResp });
+  
   // Gerencia, jefes y recepcionistas ven todas las alertas
   if (["manager", "jefe", "jefa", "recepcionista"].includes(r)) {
+    console.log("User is lead, can see all alerts");
     return true;
   }
   
   // Trabajadores solo ven alertas de sus propios pedidos
   if (r === "trabajador" || r === "trabajadora") {
-    return currentUser === orderResp;
+    const canSee = currentUser === orderResp;
+    console.log("Worker can see alert:", canSee);
+    return canSee;
   }
   
+  console.log("User role not recognized, hiding alerts");
   return false;
 };
 
@@ -3020,7 +3026,50 @@ function settingsView() {
           </div>
         </div>
 
-        <!-- 6. MANTENIMIENTO Y HERRAMIENTAS -->
+        <!-- 6. GESTIÓN DE PROVEEDORES -->
+        <div class="jj-accordion-item" id="acc-proveedores">
+          <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-proveedores')">
+            <div class="jj-accordion-title-wrap">
+              <div class="jj-accordion-icon" style="background:rgba(16,185,129,0.15); color:#10b981;">
+                <i class="fas fa-truck"></i>
+              </div>
+              <div>
+                <h3 class="jj-accordion-title">Gestión de Proveedores</h3>
+                <div class="jj-accordion-sub">Lista de proveedores para OCR de notas de entrega</div>
+              </div>
+            </div>
+            <i class="fas fa-chevron-down jj-accordion-chevron"></i>
+          </div>
+          <div class="jj-accordion-body">
+            <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">
+              Agrega o edita proveedores en la lista para que el OCR pueda identificar automáticamente a qué proveedor corresponde cada nota de entrega.
+            </p>
+            <div class="field" style="margin-bottom:12px;">
+              <span class="field-label">AGREGAR NUEVO PROVEEDOR:</span>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="new-provider-input" placeholder="Ej. Proveedor XYZ C.A." style="flex:1;">
+                <button type="button" class="primary-button" onclick="window.addProvider()" style="background:#10b981; border:none; padding:8px 16px; font-weight:bold; cursor:pointer;">
+                  ➕ Agregar
+                </button>
+              </div>
+            </div>
+            <div style="margin-top:12px;">
+              <span class="field-label">LISTA DE PROVEEDORES:</span>
+              <div id="providers-list" style="margin-top:8px; max-height:200px; overflow-y:auto;">
+                ${getProviderList().map(p => `
+                  <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; background:var(--bg-main); border-radius:6px; margin-bottom:4px; border:1px solid var(--border-color);">
+                    <span style="font-size:12px;">${escapeHtml(p)}</span>
+                    <button type="button" onclick="window.removeProvider('${escapeHtml(p)}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">
+                      🗑️
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. MANTENIMIENTO Y HERRAMIENTAS -->
         <div class="jj-accordion-item" id="acc-mantenimiento">
           <div class="jj-accordion-header" onclick="window.toggleAccordion('acc-mantenimiento')">
             <div class="jj-accordion-title-wrap">
@@ -3921,6 +3970,7 @@ function openFinishModal(order, targetStatus) {
       }, 60000);
       closeModal();
       await refresh(false);
+      console.log("Pedido finalizado. duracionRealMin guardado:", Number(e.target.duracionManualMin?.value || 0));
       showToast("Pedido finalizado con éxito.");
     } catch (err) {
       btn.disabled = false;
@@ -5308,6 +5358,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "force-update") {
+    console.log("Iniciando force-update modal");
     // Mostrar modal de confirmación mejorado
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index:10000;';
@@ -5334,6 +5385,7 @@ document.addEventListener("click", async (e) => {
       </div>
     `;
     document.body.appendChild(modal);
+    console.log("Modal de force-update agregado al DOM");
     
     document.getElementById('cancel-force-update').onclick = () => {
       document.body.removeChild(modal);
@@ -8810,25 +8862,38 @@ window.printReport = function() {
   
   const periodFinishedOrders = filterByPeriod(finishedOrders);
   
+  // Calcular estadísticas por trabajador
+  const workerStats = {};
+  periodFinishedOrders.forEach(o => {
+    const resp = String(o.responsable || "").trim();
+    if (!workerStats[resp]) {
+      workerStats[resp] = { count: 0, totalMin: 0 };
+    }
+    workerStats[resp].count++;
+    workerStats[resp].totalMin += Number(o.duracionRealMin || 0);
+  });
+  
   // Generar contenido HTML para imprimir
   const printContent = `
     <html>
     <head>
       <title>Reporte de Pedidos Completados - Creaciones JJ</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-        h1 { text-align: center; color: #1e40af; margin-bottom: 5px; }
-        h2 { text-align: center; color: #6b7280; font-size: 14px; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 12px; }
-        th { background-color: #f3f4f6; font-weight: bold; }
+        body { font-family: Arial, sans-serif; padding: 15px; color: #333; font-size: 11px; }
+        h1 { text-align: center; color: #1e40af; margin: 0 0 5px 0; font-size: 16px; }
+        h2 { text-align: center; color: #6b7280; font-size: 12px; margin: 0 0 15px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 6px; text-align: left; }
+        th { background-color: #f3f4f6; font-weight: bold; font-size: 9px; }
         tr:nth-child(even) { background-color: #f9fafb; }
-        .summary { background-color: #eff6ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .summary-item { display: inline-block; margin-right: 30px; font-size: 14px; }
+        .summary { background-color: #eff6ff; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 10px; }
+        .summary-item { display: inline-block; margin-right: 20px; }
         .summary-label { font-weight: bold; color: #1e40af; }
         .summary-value { color: #6b7280; }
-        .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #9ca3af; }
-        @media print { body { padding: 0; } }
+        .worker-summary { margin-top: 15px; background-color: #fef3c7; padding: 10px; border-radius: 6px; }
+        .worker-item { display: inline-block; margin-right: 25px; }
+        .footer { margin-top: 20px; text-align: center; font-size: 9px; color: #9ca3af; }
+        @media print { body { padding: 5px; } }
       </style>
     </head>
     <body>
@@ -8837,11 +8902,11 @@ window.printReport = function() {
       
       <div class="summary">
         <div class="summary-item">
-          <span class="summary-label">Total completados:</span>
+          <span class="summary-label">Total:</span>
           <span class="summary-value">${periodFinishedOrders.length}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">Fecha del reporte:</span>
+          <span class="summary-label">Fecha:</span>
           <span class="summary-value">${new Date().toLocaleDateString()}</span>
         </div>
         <div class="summary-item">
@@ -8853,13 +8918,13 @@ window.printReport = function() {
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Cliente</th>
-            <th>Tipo</th>
-            <th>Responsable</th>
-            <th>Fecha Cierre</th>
-            <th>Tiempo (min)</th>
-            <th>Estado</th>
+            <th style="width: 12%;">ID</th>
+            <th style="width: 20%;">Cliente</th>
+            <th style="width: 15%;">Responsable</th>
+            <th style="width: 13%;">Fecha Cierre</th>
+            <th style="width: 10%;">Tiempo</th>
+            <th style="width: 10%;">Estado</th>
+            <th style="width: 20%;">Tipo</th>
           </tr>
         </thead>
         <tbody>
@@ -8867,15 +8932,25 @@ window.printReport = function() {
             <tr>
               <td>${escapeHtml(o.id)}</td>
               <td>${escapeHtml(o.cliente)}</td>
-              <td>${escapeHtml(o.tipo)}</td>
               <td>${escapeHtml(o.responsable)}</td>
               <td>${escapeHtml(formatDate(o.fechaCierre))}</td>
               <td>${o.duracionRealMin || 0} min</td>
               <td>${escapeHtml(o.estado)}</td>
+              <td>${escapeHtml(o.tipo)}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
+      
+      <div class="worker-summary">
+        <strong>Resumen por Trabajador:</strong><br><br>
+        ${Object.entries(workerStats).map(([worker, stats]) => `
+          <div class="worker-item">
+            <span class="summary-label">${escapeHtml(worker)}:</span>
+            <span class="summary-value">${stats.count} pedidos, ${stats.totalMin} min (${Math.round(stats.totalMin / 60)}h)</span>
+          </div>
+        `).join('')}
+      </div>
       
       <div class="footer">
         Reporte generado automáticamente por Creaciones JJ - Sistema de Gestión de Producción
@@ -9358,12 +9433,12 @@ window.openChangePinModal = function() {
 
 // 2. CONFIGURACIÓN DE GEMINI API KEY (Persistente y compartida entre usuarios)
 window.getGeminiApiKey = function() {
-  // Intentar obtener del localStorage primero (más rápido)
-  let key = localStorage.getItem("jj_gemini_api_key") || "";
+  // Intentar obtener del almacenamiento persistente de la app primero
+  let key = store.get("jj_gemini_api_key") || "";
   
-  // Si no existe, intentar del almacenamiento persistente de la app
+  // Si no existe, intentar del localStorage (fallback)
   if (!key) {
-    key = store.get("jj_gemini_api_key") || "";
+    key = localStorage.getItem("jj_gemini_api_key") || "";
   }
   
   return key;
@@ -9418,6 +9493,45 @@ window.testGeminiConnection = async function() {
     if (resEl) resEl.innerHTML = `<span style="color:#10b981; font-weight:bold;"><i class="fas fa-check-circle"></i> ¡Conexión Exitosa con Google Gemini! (${escapeHtml(text.trim())})</span>`;
   } catch (err) {
     if (resEl) resEl.innerHTML = `<span style="color:#ef4444; font-weight:bold;">❌ Error de conexión: ${escapeHtml(err.message)}</span>`;
+  }
+};
+
+window.addProvider = function() {
+  const input = document.getElementById("new-provider-input");
+  const name = input?.value?.trim();
+  if (!name) {
+    showToast("⚠️ Por favor ingresa el nombre del proveedor.");
+    return;
+  }
+  
+  const list = getProviderList();
+  if (list.includes(name)) {
+    showToast("⚠️ Ese proveedor ya existe en la lista.");
+    return;
+  }
+  
+  list.push(name);
+  saveProviderList(list);
+  showToast("✅ Proveedor agregado correctamente.");
+  
+  // Actualizar la lista en la UI
+  if (typeof render === "function") render();
+};
+
+window.removeProvider = function(name) {
+  if (!confirm(`¿Estás seguro de eliminar "${name}" de la lista de proveedores?`)) {
+    return;
+  }
+  
+  const list = getProviderList();
+  const index = list.indexOf(name);
+  if (index > -1) {
+    list.splice(index, 1);
+    saveProviderList(list);
+    showToast("✅ Proveedor eliminado.");
+    
+    // Actualizar la lista en la UI
+    if (typeof render === "function") render();
   }
 };
 
