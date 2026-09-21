@@ -807,13 +807,47 @@ async function refresh(showMessage = true) {
     // Detección de orden de actualización forzada por el Manager
     const serverVer = String(rawData.appVersion || rawData.version || "");
     const localVer = store.get("pp_app_version", "");
+    console.log("Version check - Server:", serverVer, "Local:", localVer);
+    
     if (serverVer && localVer && serverVer !== localVer) {
       store.set("pp_app_version", serverVer);
-      showToast("🚀 Nueva actualización del taller recibida. Recargando...", 5000);
-      showToast("📱 Actualización forzada por gerencia: los datos se actualizarán automáticamente.", 4000);
-      setTimeout(() => {
-        window.location.reload(true);
-      }, 2000);
+      console.log("Version mismatch detected, forcing reload");
+      
+      // Mostrar modal de actualización forzada
+      const updateModal = document.createElement('div');
+      updateModal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; justify-content:center; align-items:center; z-index:99999;';
+      updateModal.innerHTML = `
+        <div style="background:var(--bg-card); border-radius:16px; padding:32px; max-width:420px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+          <div style="font-size:48px; margin-bottom:16px;">🚀</div>
+          <h2 style="margin:0 0 12px 0; color:#0ea5e9; font-size:24px;">Actualización Forzada</h2>
+          <p style="margin:0 0 20px 0; color:var(--text-main); font-size:15px; line-height:1.5;">
+            Gerencia ha enviado una actualización obligatoria del sistema.
+          </p>
+          <p style="margin:0 0 24px 0; color:var(--text-muted); font-size:13px;">
+            La página se recargará automáticamente en <span id="countdown">5</span> segundos...
+          </p>
+          <div style="width:100%; height:4px; background:var(--border-color); border-radius:2px; overflow:hidden;">
+            <div id="progress-bar" style="width:0%; height:100%; background:#0ea5e9; transition:width 1s linear;"></div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(updateModal);
+      
+      let countdown = 5;
+      const countdownEl = document.getElementById('countdown');
+      const progressEl = document.getElementById('progress-bar');
+      
+      const updateInterval = setInterval(() => {
+        countdown--;
+        if (countdownEl) countdownEl.textContent = countdown;
+        if (progressEl) progressEl.style.width = ((5 - countdown) / 5 * 100) + '%';
+        
+        if (countdown <= 0) {
+          clearInterval(updateInterval);
+          window.location.reload(true);
+        }
+      }, 1000);
+      
       return;
     }
     if (serverVer) {
@@ -3855,9 +3889,12 @@ function openFinishModal(order, targetStatus) {
             calcElapsed = Math.max(0, Math.round((Date.now() - sMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
           }
         }
+        // Si el cronómetro está en 0 pero ya había un tiempo guardado, usar ese valor
         if (calcElapsed <= 0 && Number(order.duracionRealMin) > 0) {
           calcElapsed = Number(order.duracionRealMin);
         }
+        // Guardar el valor calculado en un atributo data para recuperarlo si el usuario lo borra
+        const storedElapsed = calcElapsed;
         
         // Validación: si el diseño está en proceso, advertir al usuario
         const designWarning = (order.diseno && (order.diseno.toLowerCase() === 'no' || order.diseno === 'En proceso' || order.diseno === 'en proceso')) ? 
@@ -3874,7 +3911,7 @@ function openFinishModal(order, targetStatus) {
                 ${calcElapsed > 0 ? `Calculado por el cronómetro: <strong>${formatMinutesToHuman(calcElapsed)}</strong>` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
               </span>
             </div>
-            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : 0}" min="0" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
           </div>
         `;
       })()}
@@ -3937,6 +3974,8 @@ function openFinishModal(order, targetStatus) {
     btn.textContent = "⏳ Guardando y subiendo evidencias...";
 
     const commentVal = e.target.comentarioCierre.value.trim() || "Completado sin observaciones adicionales.";
+    const manualVal = e.target.duracionManualMin?.value?.trim();
+    const finalDuration = manualVal ? Number(manualVal) : calcElapsed;
 
     try {
       await api("profile_update_order", {
@@ -3946,8 +3985,8 @@ function openFinishModal(order, targetStatus) {
         changes: {
           estado: targetStatus,
           comentarioCierre: commentVal,
-          duracionManualMin: Number(e.target.duracionManualMin?.value || 0),
-          duracionRealMin: Number(e.target.duracionManualMin?.value || 0),
+          duracionManualMin: finalDuration,
+          duracionRealMin: finalDuration,
           images: capturedEvidences
         }
       }, 60000);
@@ -6813,16 +6852,24 @@ window.startVoiceDictationForExpress = function() {
   const micBtn = document.getElementById("express-mic-btn");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  if (!SpeechRecognition) {
+  // Detectar Opera específicamente
+  const isOpera = navigator.userAgent.includes('OPR') || navigator.userAgent.includes('Opera');
+
+  if (!SpeechRecognition || isOpera) {
     if (typeof Swal !== "undefined") {
       Swal.fire({
-        icon: "info",
-        title: "Dictado por Voz",
-        html: `<p>En tu navegador puedes usar el atajo de Windows <strong>Win + H</strong> para dictar directamente con tu voz en el campo de texto.</p>
-               <p style="font-size:12px; color:#9ca3af; margin-top:8px;">Google Chrome y Edge también soportan el micrófono web nativo.</p>`
+        icon: isOpera ? "warning" : "info",
+        title: isOpera ? "Voz no disponible en Opera" : "Dictado por Voz",
+        html: isOpera 
+          ? `<p>El navegador Opera no soporta el reconocimiento de voz nativo.</p>
+             <p style="font-size:12px; color:#9ca3af; margin-top:8px;">Te recomendamos usar Google Chrome o Microsoft Edge para la función de dictado por voz.</p>`
+          : `<p>En tu navegador puedes usar el atajo de Windows <strong>Win + H</strong> para dictar directamente con tu voz en el campo de texto.</p>
+             <p style="font-size:12px; color:#9ca3af; margin-top:8px;">Google Chrome y Edge también soportan el micrófono web nativo.</p>`
       });
     } else {
-      alert("Dictado por voz: Usa Win + H en Windows para dictar directamente en el campo de texto.");
+      alert(isOpera 
+        ? "Opera no soporta reconocimiento de voz. Usa Google Chrome o Microsoft Edge."
+        : "Dictado por voz: Usa Win + H en Windows para dictar directamente en el campo de texto.");
     }
     return;
   }
@@ -8620,18 +8667,24 @@ function getStoredInventory() {
     { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
   ];
   
-  // Cargar datos guardados localmente
+  // Cargar datos guardados localmente (PRIORIDAD: cambios locales primero)
   const cachedItems = store.get("pp_inventory_items", null);
   
-  // Si hay datos en el estado desde el backend, usarlos y guardar localmente
+  // Si hay datos guardados localmente, usarlos primero (protege cambios locales)
+  if (cachedItems && cachedItems.length > 0) {
+    // Solo actualizar desde backend si el backend tiene datos más recientes
+    if (state.data?.inventory && state.data.inventory.length > 0) {
+      // Comparar timestamps o usar el backend si es explícitamente más reciente
+      // Por ahora, priorizar datos locales para evitar pérdida de cambios
+      return cachedItems;
+    }
+    return cachedItems;
+  }
+  
+  // Si no hay datos locales, usar datos del backend
   if (state.data?.inventory && state.data.inventory.length > 0) {
     store.set("pp_inventory_items", state.data.inventory);
     return state.data.inventory;
-  }
-  
-  // Si hay datos guardados localmente, usarlos
-  if (cachedItems && cachedItems.length > 0) {
-    return cachedItems;
   }
   
   // Si no hay datos en ninguno, usar los datos por defecto
@@ -9616,6 +9669,8 @@ window.transcribePhysicalSheet = async function(base64Image, sheetType) {
     }
   }
 
+  console.log("Gemini API Key configured:", apiKey ? "Yes" : "No");
+
   // Comprimir imagen en el navegador: subida mucho más rápida a la API
   const compressedDataUrl = await window.compressImageForOcr(base64Image);
   const cleanBase64 = compressedDataUrl.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
@@ -9662,6 +9717,8 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    console.log("Calling Gemini API with URL:", url.substring(0, 50) + "...");
+    
     const payload = {
       contents: [{
         parts: [
