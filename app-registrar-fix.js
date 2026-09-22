@@ -613,6 +613,14 @@ function parseMagicPasteText(rawText) {
     }
   }
   
+  // Validar que el cliente exista en la lista de clientes frecuentes
+  if (result.cliente) {
+    const clientExists = state.frequentClients?.some(c => c.name.toLowerCase() === result.cliente.toLowerCase());
+    if (!clientExists) {
+      console.log("Cliente no encontrado en lista frecuente:", result.cliente);
+    }
+  }
+  
   // 2. Teléfono / WhatsApp
   if (!result.telefono) {
     const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
@@ -657,6 +665,14 @@ function parseMagicPasteText(rawText) {
       else if (/maqueta/i.test(rawText)) result.tipo = "Maqueta";
       else if (/banderín|banderin/i.test(rawText)) result.tipo = "Banderín";
       else if (/caja/i.test(rawText)) result.tipo = "Caja Explosiva";
+    }
+  }
+  
+  // Validar que el tipo exista en la lista de tipos frecuentes
+  if (result.tipo) {
+    const typeExists = state.frequentTypes?.some(t => t.toLowerCase() === result.tipo.toLowerCase());
+    if (!typeExists) {
+      console.log("Tipo no encontrado en lista frecuente:", result.tipo);
     }
   }
   
@@ -712,8 +728,11 @@ function parseMagicPasteText(rawText) {
     let hourNum = parseInt(timeMatch[1], 10);
     const minStr = timeMatch[2] || "00";
     const ampm = timeMatch[3].toUpperCase();
-    if (hourNum < 10) hourNum = "0" + hourNum;
-    result.horaEntrega = `${hourNum}:${minStr} ${ampm}`;
+    
+    if (ampm === 'PM' && hourNum < 12) hourNum += 12;
+    if (ampm === 'AM' && hourNum === 12) hourNum = 0;
+    
+    result.horaEntrega = `${hourNum.toString().padStart(2, '0')}:${minStr} ${ampm}`;
   }
 
   return result;
@@ -803,8 +822,14 @@ async function refresh(showMessage = true) {
       schedules: rawSchedules,
       horarios: rawSchedules,
       inventory: rawData.inventory || [],
-      workshopPrices: rawData.workshopPrices || []
+      workshopPrices: rawData.workshopPrices || [],
+      geminiApiKey: rawData.geminiApiKey || ""
     };
+    
+    // Si hay API key del backend, usarla (prioridad sobre local)
+    if (rawData.geminiApiKey) {
+      window.setGeminiApiKey(rawData.geminiApiKey);
+    }
     
     state.waTemplate = rawData.waTemplate || state.waTemplate;
     state.offline = false;
@@ -1821,6 +1846,10 @@ function modulesView() {
           <div class="sics-metric-chip" onclick="navigate('history')" style="cursor:pointer;" title="Ver historial">
             <i class="fas fa-check-circle" style="color:#10b981;"></i>
             <span>Entregados: <strong>${finishedOrders.length}</strong></span>
+          </div>
+          <div class="sics-metric-chip" onclick="navigate('workshopPrices')" style="cursor:pointer;" title="Ver precios y medidas">
+            <i class="fas fa-dollar-sign" style="color:#10b981;"></i>
+            <span>Precios & Medidas</span>
           </div>
           ${leadUser ? `
             <div class="sics-metric-chip" onclick="navigate('providers')" style="cursor:pointer; border-color:#10b981;" title="Cuentas por pagar">
@@ -4012,9 +4041,12 @@ function openFinishModal(order, targetStatus) {
 
     const commentVal = e.target.comentarioCierre.value.trim() || "Completado sin observaciones adicionales.";
     const manualVal = e.target.duracionManualMin?.value?.trim();
+    // Si el usuario no ingresó manualmente, usar el valor calculado o almacenado
     const finalDuration = manualVal ? Number(manualVal) : calcElapsed;
 
     try {
+      console.log("Guardando orden con duración:", finalDuration, "minutos");
+      
       await api("profile_update_order", {
         id: order.id,
         user: state.session?.name || "Usuario",
@@ -8691,21 +8723,10 @@ window.openNewCashCloseModal = function() {
 // MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
 // =========================================================================
 function getStoredInventory() {
-  const defaultItems = [
-    { id: "INV-1", producto: "Silicón Frío 250cc", categoria: "Pegamentos", stockActual: "2 unidades", estado: "Bajo Stock", precioUSD: 5.00, proveedor: "Prodimarca", notas: "Uso diario en toppers" },
-    { id: "INV-2", producto: "Silicón Frío 100cc", categoria: "Pegamentos", stockActual: "5 unidades", estado: "Disponible", precioUSD: 2.70, proveedor: "Prodimarca", notas: "" },
-    { id: "INV-3", producto: "Silicón Frío 60cc", categoria: "Pegamentos", stockActual: "0 unidades", estado: "Agotado", precioUSD: 1.80, proveedor: "Prodimarca", notas: "Pedir caja" },
-    { id: "INV-4", producto: "Silicón en barra fino", categoria: "Pegamentos", stockActual: "0 unidades", estado: "Agotado", precioUSD: 0.40, proveedor: "Prodimarca", notas: "Urgente" },
-    { id: "INV-5", producto: "Silicón en barra grueso", categoria: "Pegamentos", stockActual: "10 unidades", estado: "Disponible", precioUSD: 0.70, proveedor: "Prodimarca", notas: "" },
-    { id: "INV-6", producto: "Pega Blanca 120cc", categoria: "Pegamentos", stockActual: "1 unidad", estado: "Bajo Stock", precioUSD: 1.30, proveedor: "Blindac", notas: "" },
-    { id: "INV-7", producto: "Paletas Polo Natural", categoria: "Papelería", stockActual: "0 paquetes", estado: "Agotado", precioUSD: 2.40, proveedor: "Blindac", notas: "Paletas de madera" },
-    { id: "INV-8", producto: "Creyones Pointer", categoria: "Papelería", stockActual: "4 cajas", estado: "Disponible", precioUSD: 2.00, proveedor: "Blindac", notas: "" },
-    { id: "INV-9", producto: "Cartulinas Construcción College", categoria: "Papelería", stockActual: "15 pliegos", estado: "Bajo Stock", precioUSD: 0.50, proveedor: "Prodimarca", notas: "Colores surtidos" },
-    { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
-  ];
+  // Ya NO usar valores por defecto para evitar reseteos
+  // Solo usar datos del backend o cache local
   
-  // PRIORIDAD: Backend primero (como pedidos), luego local, luego default
-  // Esto asegura que los cambios se sincronicen entre dispositivos
+  // PRIORIDAD: Backend primero (como pedidos), luego local
   if (state.data?.inventory && state.data.inventory.length > 0) {
     // Normalizar campos del backend para coincidir con frontend
     const normalizedInventory = state.data.inventory.map(item => ({
@@ -8714,8 +8735,8 @@ function getStoredInventory() {
       categoria: item.categoria,
       stockActual: item.stockActual,
       estado: item.estado,
-      precioUSD: item.precioEstimadoUSD || item.precioUSD || 0, // Normalizar campo
-      proveedor: item.proveedorHabitual || item.proveedor || "", // Normalizar campo
+      precioUSD: item.precioEstimadoUSD || item.precioUSD || 0,
+      proveedor: item.proveedorHabitual || item.proveedor || "",
       notas: item.notas
     }));
     
@@ -8730,8 +8751,8 @@ function getStoredInventory() {
     return cachedItems;
   }
   
-  // Si no hay datos en ninguno, usar los datos por defecto
-  return defaultItems;
+  // Si no hay datos en ninguno, retornar array vacío (no usar valores por defecto)
+  return [];
 }
 
 function saveStoredInventory(list) {
@@ -9245,7 +9266,8 @@ window.printReport = function() {
         h1 { text-align: center; color: #1e40af; margin: 0 0 5px 0; font-size: 16px; }
         h2 { text-align: center; color: #6b7280; font-size: 12px; margin: 0 0 15px 0; }
         .logo-container { text-align: center; margin-bottom: 15px; }
-        .logo-img { max-width: 120px; max-height: 120px; object-fit: contain; background: transparent; }
+        .logo-text { font-size: 24px; font-weight: bold; color: #1e40af; letter-spacing: 2px; }
+        .logo-sub { font-size: 10px; color: #6b7280; margin-top: 2px; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
         th, td { border: 1px solid #d1d5db; padding: 4px 6px; text-align: left; }
         th { background-color: #f3f4f6; font-weight: bold; font-size: 9px; }
@@ -9262,7 +9284,8 @@ window.printReport = function() {
     </head>
     <body>
       <div class="logo-container">
-        <img src="./logo_creaciones_jj.png" alt="Creaciones JJ" class="logo-img" onerror="this.src='./icons/icon-192.png'; this.onerror=null;">
+        <div class="logo-text">CREACIONES JJ</div>
+        <div class="logo-sub">Ochoa & Risquez · Taller</div>
       </div>
       <h1>Reporte de Pedidos Completados</h1>
       <h2>Creaciones JJ Ochoa & Risquez · Taller</h2>
@@ -9827,6 +9850,13 @@ window.setGeminiApiKey = function(key) {
   } else {
     store.remove("jj_gemini_api_key");
   }
+  
+  // Sincronizar con backend para que esté disponible en otros dispositivos
+  if (clean) {
+    api("profile_save_gemini_key", { apiKey: clean }).catch(() => {
+      console.log("No se pudo sincronizar API key con backend, pero se guardó localmente");
+    });
+  }
 };
 
 window.saveGeminiKeyFromSettings = function() {
@@ -9844,7 +9874,7 @@ window.testGeminiConnection = async function() {
   }
   if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`, {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -10018,7 +10048,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     console.log("Calling Gemini API with URL:", url.substring(0, 50) + "...");
     
     const payload = {
