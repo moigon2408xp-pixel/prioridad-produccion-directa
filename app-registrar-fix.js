@@ -595,12 +595,12 @@ function parseMagicPasteText(rawText) {
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   
-  // 1. Detección de Cliente / Nombre
-  const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de)[:\s]+([^\n\r,*]+)/i);
+  // 1. Detección de Cliente / Nombre (soporte formal e informal)
+  const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de|del|la)[:\s]+([^\n\r,*]+)/i);
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
   } else {
-    // Buscar en directorio de clientes guardados
+    // Buscar en directorio de clientes guardados (coincidencia parcial)
     for (const c of (state.frequentClients || [])) {
       if (c.name && rawText.toLowerCase().includes(c.name.toLowerCase())) {
         result.cliente = c.name;
@@ -609,7 +609,7 @@ function parseMagicPasteText(rawText) {
       }
     }
     if (!result.cliente && lines.length > 0 && !lines[0].includes(":")) {
-      result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de)\b,?\s*/i, "").trim();
+      result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de|la|el|un|una)\b,?\s*/i, "").trim();
     }
   }
   
@@ -621,16 +621,22 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // 3. Motivo / Temática
-  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema|personaje|temática\/motivo)[:\s]+([^\n\r,*]+)/i);
+  // 3. Motivo / Temática (soporte formal e informal)
+  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema|personaje|de|del|con|para|con)[:\s]+([^\n\r,*]+)/i);
   if (motivoMatch) {
     result.motivo = motivoMatch[1].trim();
   } else {
+    // Buscar coincidencia parcial en motivos frecuentes
     for (const m of (state.frequentMotivos || [])) {
       if (m && rawText.toLowerCase().includes(m.toLowerCase())) {
         result.motivo = m;
         break;
       }
+    }
+    // Detección informal: "de Barbie", "de Avengers", "de Frozen"
+    const informalMatch = rawText.match(/(?:de|del|con|para)\s+([A-Z][a-zÁÉÍÓÚÑáéíóúñ]+)/i);
+    if (informalMatch && !result.motivo) {
+      result.motivo = informalMatch[1].trim();
     }
   }
 
@@ -991,17 +997,25 @@ function orderCard(order, position) {
           ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
           ${disenoBadge}
           ${(() => {
+            // Prioridad: mostrar tiempo en vivo si está en proceso, o tiempo finalizado si está terminado
             if (order.estado === 'En proceso' && order.inicioProduccion) {
               const startMs = new Date(order.inicioProduccion).getTime();
               if (!isNaN(startMs)) {
                 const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
-                return `<span class="live-stopwatch-badge"><i class="fas fa-stopwatch"></i> ${elMin} min en mesa</span>`;
+                return `<span class="live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}"><i class="fas fa-stopwatch"></i> ${elMin} min en mesa</span>`;
               }
             } else if (order.estado === 'Pausado') {
               return `<span style="background:rgba(245,158,11,0.15); color:#d97706; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-pause-circle"></i> Pausado</span>`;
             } else if (order.duracionRealMin && Number(order.duracionRealMin) > 0) {
               console.log("Mostrando duracionRealMin en tarjeta:", order.id, order.duracionRealMin);
               return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-stopwatch"></i> ${order.duracionRealMin} min</span>`;
+            } else if (order.inicioProduccion && !order.duracionRealMin) {
+              // Si está terminado pero no tiene duraciónRealMin, calcular del inicioProduccion
+              const startMs = new Date(order.inicioProduccion).getTime();
+              if (!isNaN(startMs)) {
+                const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
+                return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-stopwatch"></i> ${elMin} min</span>`;
+              }
             }
             return '';
           })()}
@@ -8667,24 +8681,18 @@ function getStoredInventory() {
     { id: "INV-10", producto: "Tazas Blancas Sublimación", categoria: "Sublimación", stockActual: "12 unidades", estado: "Disponible", precioUSD: 2.50, proveedor: "Americas", notas: "" }
   ];
   
-  // Cargar datos guardados localmente (PRIORIDAD: cambios locales primero)
-  const cachedItems = store.get("pp_inventory_items", null);
-  
-  // Si hay datos guardados localmente, usarlos primero (protege cambios locales)
-  if (cachedItems && cachedItems.length > 0) {
-    // Solo actualizar desde backend si el backend tiene datos más recientes
-    if (state.data?.inventory && state.data.inventory.length > 0) {
-      // Comparar timestamps o usar el backend si es explícitamente más reciente
-      // Por ahora, priorizar datos locales para evitar pérdida de cambios
-      return cachedItems;
-    }
-    return cachedItems;
-  }
-  
-  // Si no hay datos locales, usar datos del backend
+  // PRIORIDAD: Backend primero (como pedidos), luego local, luego default
+  // Esto asegura que los cambios se sincronicen entre dispositivos
   if (state.data?.inventory && state.data.inventory.length > 0) {
+    // Guardar copia local para acceso rápido
     store.set("pp_inventory_items", state.data.inventory);
     return state.data.inventory;
+  }
+  
+  // Si no hay datos del backend, usar datos locales (fallback)
+  const cachedItems = store.get("pp_inventory_items", null);
+  if (cachedItems && cachedItems.length > 0) {
+    return cachedItems;
   }
   
   // Si no hay datos en ninguno, usar los datos por defecto
@@ -8939,11 +8947,11 @@ window.printReport = function() {
     <head>
       <title>Reporte de Pedidos Completados - Creaciones JJ</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 15px; color: #333; font-size: 11px; }
+        body { font-family: Arial, sans-serif; padding: 15px; color: #333; font-size: 11px; background: #fff; }
         h1 { text-align: center; color: #1e40af; margin: 0 0 5px 0; font-size: 16px; }
         h2 { text-align: center; color: #6b7280; font-size: 12px; margin: 0 0 15px 0; }
-        .logo-container { text-align: center; margin-bottom: 10px; }
-        .logo-img { max-width: 80px; max-height: 80px; }
+        .logo-container { text-align: center; margin-bottom: 15px; background: #fff; padding: 10px; border-radius: 8px; display: inline-block; }
+        .logo-img { max-width: 100px; max-height: 100px; object-fit: contain; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
         th, td { border: 1px solid #d1d5db; padding: 4px 6px; text-align: left; }
         th { background-color: #f3f4f6; font-weight: bold; font-size: 9px; }
@@ -9796,9 +9804,9 @@ window.triggerOcrForExpressInvoice = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando recibo (2-5 seg)...</span>';
 
   try {
-    // Agregar timeout de 10 segundos
+    // Agregar timeout de 30 segundos para OCR (aumentado de 10s)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 10000);
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 30000);
     });
 
     const data = await Promise.race([
@@ -9902,9 +9910,9 @@ window.triggerOcrForCashClose = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando planilla (3-6 seg)...</span>';
 
   try {
-    // Agregar timeout de 10 segundos
+    // Agregar timeout de 30 segundos para OCR (aumentado de 10s)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 10000);
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 30000);
     });
 
     const data = await Promise.race([
