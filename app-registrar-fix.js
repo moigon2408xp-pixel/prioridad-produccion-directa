@@ -581,6 +581,12 @@ function generateTimeOptions(selectedTime = "11:00 AM") {
 
 // ==== 4. PEGADO MÁGICO AVANZADO PARA REPOSTERAS Y WHATSAPP ====
 function parseMagicPasteText(rawText) {
+  console.log("=== INICIO PARSING DE VOZ ===");
+  console.log("Texto recibido:", rawText);
+  console.log("Clientes frecuentes disponibles:", state.frequentClients?.length || 0);
+  console.log("Tipos frecuentes disponibles:", state.frequentTypes?.length || 0);
+  console.log("Motivos frecuentes disponibles:", state.frequentMotivos?.length || 0);
+  
   const result = {
     cliente: "",
     telefono: "",
@@ -591,9 +597,13 @@ function parseMagicPasteText(rawText) {
     descripcion: rawText.trim()
   };
   
-  if (!rawText) return result;
+  if (!rawText) {
+    console.log("Texto vacío, retornando resultado vacío");
+    return result;
+  }
   
   const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+  console.log("Líneas procesadas:", lines);
   
   // 1. Detección de Cliente / Nombre (soporte formal e informal)
   const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de|del|la)[:\s]+([^\n\r,*]+)/i);
@@ -835,7 +845,17 @@ function parseMagicPasteText(rawText) {
     if (ampm === 'AM' && hourNum === 12) hourNum = 0;
     
     result.horaEntrega = `${hourNum.toString().padStart(2, '0')}:${minStr} ${ampm}`;
+    console.log("Hora detectada:", result.horaEntrega);
   }
+
+  console.log("=== RESULTADO FINAL DEL PARSING ===");
+  console.log("Cliente:", result.cliente);
+  console.log("Teléfono:", result.telefono);
+  console.log("Tipo:", result.tipo);
+  console.log("Motivo:", result.motivo);
+  console.log("Fecha:", result.fechaEntrega);
+  console.log("Hora:", result.horaEntrega);
+  console.log("=== FIN PARSING DE VOZ ===");
 
   return result;
 }
@@ -1949,9 +1969,9 @@ function modulesView() {
             <i class="fas fa-check-circle" style="color:#10b981;"></i>
             <span>Entregados: <strong>${finishedOrders.length}</strong></span>
           </div>
-          <div class="sics-metric-chip" onclick="navigate('workshopPrices')" style="cursor:pointer;" title="Ver precios y medidas">
+          <div class="sics-metric-chip" onclick="navigate('workshopPrices')" style="cursor:pointer; background:rgba(16,185,129,0.1); border-color:#10b981;" title="Ver precios y medidas del taller">
             <i class="fas fa-dollar-sign" style="color:#10b981;"></i>
-            <span>Precios & Medidas</span>
+            <span><strong>Precios & Medidas</strong></span>
           </div>
           ${leadUser ? `
             <div class="sics-metric-chip" onclick="navigate('providers')" style="cursor:pointer; border-color:#10b981;" title="Cuentas por pagar">
@@ -4079,7 +4099,7 @@ function openFinishModal(order, targetStatus) {
                 ${calcElapsed > 0 ? `Calculado por el cronómetro: <strong>${formatMinutesToHuman(calcElapsed)}</strong>` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
               </span>
             </div>
-            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" ${calcElapsed > 0 ? '' : 'required'} style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
           </div>
         `;
       })()}
@@ -4143,11 +4163,11 @@ function openFinishModal(order, targetStatus) {
 
     const commentVal = e.target.comentarioCierre.value.trim() || "Completado sin observaciones adicionales.";
     const manualVal = e.target.duracionManualMin?.value?.trim();
-    // Si el usuario no ingresó manualmente, usar el valor calculado o almacenado
-    const finalDuration = manualVal ? Number(manualVal) : calcElapsed;
+    // Usar valor manual si el usuario lo ingresó, si no usar valor calculado automáticamente
+    const finalDuration = manualVal && manualVal !== '' ? Number(manualVal) : calcElapsed;
 
     try {
-      console.log("Guardando orden con duración:", finalDuration, "minutos");
+      console.log("Guardando orden con duración:", finalDuration, "minutos (calculado:", calcElapsed, ", manual:", manualVal, ")");
       
       await api("profile_update_order", {
         id: order.id,
@@ -4163,7 +4183,7 @@ function openFinishModal(order, targetStatus) {
       }, 60000);
       closeModal();
       await refresh(false);
-      console.log("Pedido finalizado. duracionRealMin guardado:", Number(e.target.duracionManualMin?.value || 0));
+      console.log("Pedido finalizado. duracionRealMin guardado:", finalDuration);
       showToast("Pedido finalizado con éxito.");
     } catch (err) {
       btn.disabled = false;
@@ -9741,8 +9761,12 @@ window.openNewInventoryModal = function() {
   }).then(res => {
     if (res.isConfirmed && res.value) {
       const list = getStoredInventory();
+      // Generar ID único con timestamp y random
+      const uniqueId = "INV-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+      console.log("Generando ID único para nuevo insumo:", uniqueId);
+      
       const newItem = {
-        id: "INV-" + Date.now(),
+        id: uniqueId,
         producto: res.value.producto,
         categoria: res.value.categoria,
         stockActual: "1 unidad",
@@ -9974,7 +9998,7 @@ window.testGeminiConnection = async function() {
   }
   if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -10148,7 +10172,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
     console.log("Calling Gemini API with URL:", url.substring(0, 50) + "...");
     
     const payload = {
