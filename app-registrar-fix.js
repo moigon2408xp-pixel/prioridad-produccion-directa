@@ -71,7 +71,7 @@ function formatMinutesToHuman(minutes) {
   return `${minutes} min`;
 }
 
-// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 30 segundos (optimizado para móvil)
+// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 10 segundos (optimizado para móvil)
 if (!window._stopwatchInterval) {
   window._stopwatchInterval = setInterval(() => {
     try {
@@ -88,7 +88,7 @@ if (!window._stopwatchInterval) {
     } catch(e) {
       console.error("Error actualizando cronómetros:", e);
     }
-  }, 30000); // 30 segundos para móvil
+  }, 10000); // 10 segundos para móvil (reducido de 30s)
 }
 
 /**
@@ -670,9 +670,13 @@ function parseMagicPasteText(rawText) {
     result.fechaEntrega = tom.toISOString().split("T")[0];
   } else if (/\bhoy\b/.test(lowerText)) {
     result.fechaEntrega = today.toISOString().split("T")[0];
+  } else if (/\bpasado mañana\b/.test(lowerText)) {
+    const tom = new Date(today);
+    tom.setDate(tom.getDate() + 2);
+    result.fechaEntrega = tom.toISOString().split("T")[0];
   } else {
     const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-    const dayMatch = rawText.match(/(?:entregar|fecha|para|el)[:\s]*([a-záéíóúñ]+)/i);
+    const dayMatch = rawText.match(/(?:entregar|fecha|para|el|el dia|día)[:\s]*([a-záéíóúñ]+)/i);
     
     if (dayMatch) {
       const matchedWord = dayMatch[1].toLowerCase();
@@ -798,7 +802,8 @@ async function refresh(showMessage = true) {
       dailyPerformance: rawData.dailyPerformance || {},
       schedules: rawSchedules,
       horarios: rawSchedules,
-      inventory: rawData.inventory || []
+      inventory: rawData.inventory || [],
+      workshopPrices: rawData.workshopPrices || []
     };
     
     state.waTemplate = rawData.waTemplate || state.waTemplate;
@@ -1931,7 +1936,23 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- 7: Horarios y Guardias -->
+        <!-- 7: Precios y Medidas del Taller -->
+        <div class="sics-bento-card" onclick="navigate('workshopPrices')">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(16,185,129,0.12); color:#10b981;">
+              <i class="fas fa-dollar-sign"></i>
+            </div>
+            <div class="sics-bento-title">Precios &amp; Medidas</div>
+            <div class="sics-bento-desc">
+              Presupuestos rápidos, especificaciones DTF, medidas de toppers. Solo gerencia edita.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Ver Tabla</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- 8: Horarios y Guardias -->
         <div class="sics-bento-card" onclick="navigate('schedules')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(16,185,129,0.12); color:#10b981;">
@@ -3243,6 +3264,7 @@ function render() {
       providers: "Proveedores & Cuentas por Pagar (Solo Jefes)",
       cash: "Cierre de Caja & Arqueo Diario (Solo Jefes)",
       inventory: "Mini Inventario & Faltantes",
+      workshopPrices: "Precios y Medidas del Taller",
       history: "Historial & Archivo", schedules: "Horarios del Equipo",
       finances: "Control Financiero (Solo Jefes)", settings: "Ajustes del Sistema"
     };
@@ -3269,6 +3291,7 @@ function render() {
         providers: providersView,
         cash: cashView,
         inventory: inventoryView,
+        workshopPrices: workshopPricesView,
         history: historyView, schedules: schedulesView,
         finances: financesView, settings: settingsView
       };
@@ -8684,9 +8707,21 @@ function getStoredInventory() {
   // PRIORIDAD: Backend primero (como pedidos), luego local, luego default
   // Esto asegura que los cambios se sincronicen entre dispositivos
   if (state.data?.inventory && state.data.inventory.length > 0) {
+    // Normalizar campos del backend para coincidir con frontend
+    const normalizedInventory = state.data.inventory.map(item => ({
+      id: item.id,
+      producto: item.producto,
+      categoria: item.categoria,
+      stockActual: item.stockActual,
+      estado: item.estado,
+      precioUSD: item.precioEstimadoUSD || item.precioUSD || 0, // Normalizar campo
+      proveedor: item.proveedorHabitual || item.proveedor || "", // Normalizar campo
+      notas: item.notas
+    }));
+    
     // Guardar copia local para acceso rápido
-    store.set("pp_inventory_items", state.data.inventory);
-    return state.data.inventory;
+    store.set("pp_inventory_items", normalizedInventory);
+    return normalizedInventory;
   }
   
   // Si no hay datos del backend, usar datos locales (fallback)
@@ -8704,6 +8739,218 @@ function saveStoredInventory(list) {
   // También guardar en el backend para sincronización
   api("profile_save_inventory_list", { items: list }).catch(() => {});
 }
+
+// =========================================================================
+// MÓDULO DE PRECIOS Y MEDIDAS DEL TALLER (SOLO GERENCIA)
+// =========================================================================
+function getWorkshopPrices() {
+  return state.data?.workshopPrices || [];
+}
+
+function workshopPricesView() {
+  const prices = getWorkshopPrices();
+  const isManager = isLead();
+  
+  return `
+    <div style="max-width:1150px; margin:0 auto; padding-bottom:40px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+        <div>
+          <h2 style="margin:0; font-size:20px; color:var(--text-main);">💰 Precios y Medidas del Taller</h2>
+          <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-muted);">
+            Información de referencia para presupuestos y especificaciones técnicas
+          </p>
+        </div>
+        ${isManager ? `
+          <button type="button" class="primary-button" onclick="window.openAddWorkshopPriceModal()" style="background:#10b981; border:none; padding:8px 14px; font-size:11.5px;">
+            ➕ Agregar Precio/Medida
+          </button>
+        ` : ''}
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table class="sics-data-table">
+          <thead>
+            <tr>
+              <th>Item / Servicio</th>
+              <th>Categoría</th>
+              <th>Precio USD</th>
+              <th>Medidas</th>
+              <th>Notas</th>
+              <th>Actualizado Por</th>
+              ${isManager ? '<th>Acciones</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${prices.length ? prices.map(p => `
+              <tr>
+                <td style="font-weight:bold; color:var(--text-main);">${escapeHtml(p.item)}</td>
+                <td style="color:var(--text-muted);">${escapeHtml(p.categoria)}</td>
+                <td style="text-align:right; font-weight:bold; color:#10b981;">${p.precioUSD > 0 ? '$' + Number(p.precioUSD).toFixed(2) : '-'}</td>
+                <td style="color:var(--text-main);">${escapeHtml(p.medidas || '-')}</td>
+                <td style="color:var(--text-muted); font-size:11px;">${escapeHtml(p.notas || '-')}</td>
+                <td style="color:#38bdf8; font-size:11px;">${escapeHtml(p.actualizadoPor || 'N/A')}</td>
+                ${isManager ? `
+                  <td>
+                    <button type="button" class="secondary-button" onclick="window.editWorkshopPrice('${escapeHtml(p.id)}')" style="padding:4px 8px; font-size:10px;">
+                      ✏️ Editar
+                    </button>
+                    <button type="button" class="secondary-button" onclick="window.deleteWorkshopPrice('${escapeHtml(p.id)}')" style="padding:4px 8px; font-size:10px; background:#ef4444; color:white; border:none;">
+                      🗑️
+                    </button>
+                  </td>
+                ` : ''}
+              </tr>
+            `).join('') : '<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">No hay precios/medidas registrados. Solo gerencia puede agregar información.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+window.openAddWorkshopPriceModal = function() {
+  openModal(`
+    <div class="modal-head"><h2>Agregar Precio/Medida del Taller</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="workshop-price-form" class="form-grid">
+      <label class="field"><span class="field-label">ITEM / SERVICIO:</span>
+        <input type="text" name="item" required placeholder="Ej: Topper 30cm, DTF Camisa Adulto M" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">CATEGORÍA:</span>
+        <select name="categoria" style="max-width:100%;">
+          <option value="Topper">Topper</option>
+          <option value="DTF">DTF</option>
+          <option value="Piñata">Piñata</option>
+          <option value="Maqueta">Maqueta</option>
+          <option value="Banderín">Banderín</option>
+          <option value="Caja Explosiva">Caja Explosiva</option>
+          <option value="General">General</option>
+        </select>
+      </label>
+      <label class="field"><span class="field-label">PRECIO USD (OPCIONAL):</span>
+        <input type="number" name="precioUSD" step="0.01" placeholder="0.00" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">MEDIDAS / ESPECIFICACIONES:</span>
+        <input type="text" name="medidas" placeholder="Ej: 30x30cm, 35x45cm" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">NOTAS ADICIONALES:</span>
+        <textarea name="notas" placeholder="Ej: Incluye base, material recomendado..." style="max-width:100%;"></textarea>
+      </label>
+      <button type="submit" class="primary-button">💾 Guardar Precio/Medida</button>
+    </form>
+  `);
+
+  $("#workshop-price-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "⏳ Guardando...";
+
+    try {
+      await api("profile_save_workshop_price", {
+        item: e.target.item.value.trim(),
+        categoria: e.target.categoria.value,
+        precioUSD: Number(e.target.precioUSD.value || 0),
+        medidas: e.target.medidas.value.trim(),
+        notas: e.target.notas.value.trim(),
+        actualizadoPor: state.session?.name || "Gerencia"
+      });
+      closeModal();
+      await refresh(false);
+      showToast("✅ Precio/medida agregado exitosamente.");
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+      btn.disabled = false;
+      btn.textContent = "💾 Guardar Precio/Medida";
+    }
+  });
+};
+
+window.editWorkshopPrice = function(id) {
+  const prices = getWorkshopPrices();
+  const price = prices.find(p => p.id === id);
+  if (!price) return;
+
+  openModal(`
+    <div class="modal-head"><h2>Editar Precio/Medida</h2><button class="close-button" data-action="close">×</button></div>
+    <form id="workshop-price-form" class="form-grid">
+      <input type="hidden" name="id" value="${escapeHtml(price.id)}">
+      <label class="field"><span class="field-label">ITEM / SERVICIO:</span>
+        <input type="text" name="item" required value="${escapeHtml(price.item)}" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">CATEGORÍA:</span>
+        <select name="categoria" style="max-width:100%;">
+          <option value="Topper" ${price.categoria === 'Topper' ? 'selected' : ''}>Topper</option>
+          <option value="DTF" ${price.categoria === 'DTF' ? 'selected' : ''}>DTF</option>
+          <option value="Piñata" ${price.categoria === 'Piñata' ? 'selected' : ''}>Piñata</option>
+          <option value="Maqueta" ${price.categoria === 'Maqueta' ? 'selected' : ''}>Maqueta</option>
+          <option value="Banderín" ${price.categoria === 'Banderín' ? 'selected' : ''}>Banderín</option>
+          <option value="Caja Explosiva" ${price.categoria === 'Caja Explosiva' ? 'selected' : ''}>Caja Explosiva</option>
+          <option value="General" ${price.categoria === 'General' ? 'selected' : ''}>General</option>
+        </select>
+      </label>
+      <label class="field"><span class="field-label">PRECIO USD (OPCIONAL):</span>
+        <input type="number" name="precioUSD" step="0.01" value="${price.precioUSD}" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">MEDIDAS / ESPECIFICACIONES:</span>
+        <input type="text" name="medidas" value="${escapeHtml(price.medidas)}" style="max-width:100%;">
+      </label>
+      <label class="field"><span class="field-label">NOTAS ADICIONALES:</span>
+        <textarea name="notas" style="max-width:100%;">${escapeHtml(price.notas)}</textarea>
+      </label>
+      <button type="submit" class="primary-button">💾 Actualizar Precio/Medida</button>
+    </form>
+  `);
+
+  $("#workshop-price-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector(".primary-button");
+    btn.disabled = true;
+    btn.textContent = "⏳ Actualizando...";
+
+    try {
+      await api("profile_save_workshop_price", {
+        id: e.target.id.value,
+        item: e.target.item.value.trim(),
+        categoria: e.target.categoria.value,
+        precioUSD: Number(e.target.precioUSD.value || 0),
+        medidas: e.target.medidas.value.trim(),
+        notas: e.target.notas.value.trim(),
+        actualizadoPor: state.session?.name || "Gerencia"
+      });
+      closeModal();
+      await refresh(false);
+      showToast("✅ Precio/medida actualizado exitosamente.");
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+      btn.disabled = false;
+      btn.textContent = "💾 Actualizar Precio/Medida";
+    }
+  });
+};
+
+window.deleteWorkshopPrice = function(id) {
+  if (!confirm("¿Estás seguro de eliminar este precio/medida?")) return;
+  
+  // Marcar como eliminado vaciando los campos
+  const prices = getWorkshopPrices();
+  const price = prices.find(p => p.id === id);
+  if (!price) return;
+
+  api("profile_save_workshop_price", {
+    id: id,
+    item: price.item,
+    categoria: price.categoria,
+    precioUSD: 0,
+    medidas: "",
+    notas: "ELIMINADO",
+    actualizadoPor: state.session?.name || "Gerencia"
+  }).then(() => {
+    refresh(false);
+    showToast("🗑️ Precio/medida eliminado.");
+  }).catch(err => {
+    alert(`Error: ${err.message}`);
+  });
+};
 
 function inventoryView() {
   const items = getStoredInventory();
@@ -8886,7 +9133,54 @@ window.toggleReportOrdersCollapse = function() {
 
 window.forzarActualizacionGlobal = function() {
   console.log("forzarActualizacionGlobal llamado");
-  handleSettingsAction("force-update");
+  // Ejecutar directamente la lógica de force-update
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index:10000;';
+  modal.innerHTML = `
+    <div style="background:var(--bg-card); border-radius:12px; padding:24px; max-width:400px; box-shadow:0 10px 40px rgba(0,0,0,0.4);">
+      <h3 style="margin:0 0 12px 0; color:#ef4444; font-size:18px;">
+        <i class="fas fa-rocket"></i> Forzar Actualización Global
+      </h3>
+      <p style="margin:0 0 16px 0; color:var(--text-main); font-size:14px; line-height:1.5;">
+        ¿Deseas forzar la actualización inmediata en todas las sesiones y teléfonos activos del taller?
+      </p>
+      <p style="margin:0 0 20px 0; color:var(--text-muted); font-size:12px; line-height:1.4;">
+        <strong>⚠️ Todos los dispositivos del equipo recargarán automáticamente la versión más reciente.</strong><br>
+        Los trabajadores verán una notificación y sus pantallas se actualizarán.
+      </p>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="cancel-force-update" style="padding:8px 16px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main); cursor:pointer; font-size:13px;">
+          Cancelar
+        </button>
+        <button id="confirm-force-update" style="padding:8px 16px; border-radius:6px; border:none; background:#ef4444; color:white; cursor:pointer; font-size:13px; font-weight:bold;">
+          <i class="fas fa-check"></i> Confirmar Actualización
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  console.log("Modal de force-update agregado al DOM");
+  
+  document.getElementById('cancel-force-update').onclick = () => {
+    document.body.removeChild(modal);
+    showToast("⏸️ Actualización cancelada por el usuario.");
+  };
+  
+  document.getElementById('confirm-force-update').onclick = async () => {
+    document.body.removeChild(modal);
+    showToast("🔄 Iniciando actualización global del equipo...");
+    try {
+      const newVer = "v_" + Date.now();
+      await api("profile_force_update", { version: newVer });
+      store.set("pp_app_version", newVer);
+      showToast("✅ Orden de actualización global enviada a todo el equipo exitosamente.");
+      showToast("📱 Los dispositivos del equipo recargarán automáticamente.");
+      await refresh(false);
+    } catch (err) { 
+      showToast("❌ Error al forzar actualización: " + err.message);
+      alert(`Error al forzar actualización: ${err.message}`); 
+    }
+  };
 };
 
 window.printReport = function() {
@@ -8950,8 +9244,8 @@ window.printReport = function() {
         body { font-family: Arial, sans-serif; padding: 15px; color: #333; font-size: 11px; background: #fff; }
         h1 { text-align: center; color: #1e40af; margin: 0 0 5px 0; font-size: 16px; }
         h2 { text-align: center; color: #6b7280; font-size: 12px; margin: 0 0 15px 0; }
-        .logo-container { text-align: center; margin-bottom: 15px; background: #fff; padding: 10px; border-radius: 8px; display: inline-block; }
-        .logo-img { max-width: 100px; max-height: 100px; object-fit: contain; }
+        .logo-container { text-align: center; margin-bottom: 15px; }
+        .logo-img { max-width: 120px; max-height: 120px; object-fit: contain; background: transparent; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
         th, td { border: 1px solid #d1d5db; padding: 4px 6px; text-align: left; }
         th { background-color: #f3f4f6; font-weight: bold; font-size: 9px; }
@@ -9550,7 +9844,7 @@ window.testGeminiConnection = async function() {
   }
   if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -9724,7 +10018,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
     console.log("Calling Gemini API with URL:", url.substring(0, 50) + "...");
     
     const payload = {
