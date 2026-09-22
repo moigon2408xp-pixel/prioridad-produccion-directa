@@ -600,15 +600,46 @@ function parseMagicPasteText(rawText) {
   if (clienteMatch) {
     result.cliente = clienteMatch[1].trim();
   } else {
-    // Buscar en directorio de clientes guardados (coincidencia parcial)
+    // Buscar en directorio de clientes guardados (coincidencia parcial mejorada)
+    let bestMatch = null;
+    let bestScore = 0;
+    
     for (const c of (state.frequentClients || [])) {
-      if (c.name && rawText.toLowerCase().includes(c.name.toLowerCase())) {
-        result.cliente = c.name;
-        if (c.phone) result.telefono = c.phone;
+      if (!c.name) continue;
+      
+      const clientName = c.name.toLowerCase();
+      const lowerText = rawText.toLowerCase();
+      
+      // Coincidencia exacta
+      if (lowerText.includes(clientName)) {
+        bestMatch = c;
+        bestScore = 100;
         break;
       }
+      
+      // Coincidencia de palabras (split por espacios)
+      const clientWords = clientName.split(/\s+/);
+      const textWords = lowerText.split(/\s+/);
+      let matchCount = 0;
+      
+      for (const cWord of clientWords) {
+        if (cWord.length > 2 && textWords.some(tWord => tWord.includes(cWord) || cWord.includes(tWord))) {
+          matchCount++;
+        }
+      }
+      
+      const score = (matchCount / clientWords.length) * 100;
+      if (score > bestScore && score > 50) {
+        bestMatch = c;
+        bestScore = score;
+      }
     }
-    if (!result.cliente && lines.length > 0 && !lines[0].includes(":")) {
+    
+    if (bestMatch) {
+      result.cliente = bestMatch.name;
+      if (bestMatch.phone) result.telefono = bestMatch.phone;
+      console.log("Cliente encontrado por coincidencia parcial:", bestMatch.name, "Score:", bestScore);
+    } else if (lines.length > 0 && !lines[0].includes(":")) {
       result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de|la|el|un|una)\b,?\s*/i, "").trim();
     }
   }
@@ -634,17 +665,51 @@ function parseMagicPasteText(rawText) {
   if (motivoMatch) {
     result.motivo = motivoMatch[1].trim();
   } else {
-    // Buscar coincidencia parcial en motivos frecuentes
+    // Buscar coincidencia parcial mejorada en motivos frecuentes
+    let bestMotivoMatch = null;
+    let bestMotivoScore = 0;
+    
     for (const m of (state.frequentMotivos || [])) {
-      if (m && rawText.toLowerCase().includes(m.toLowerCase())) {
-        result.motivo = m;
+      if (!m) continue;
+      
+      const motivoName = m.toLowerCase();
+      const lowerText = rawText.toLowerCase();
+      
+      // Coincidencia exacta
+      if (lowerText.includes(motivoName)) {
+        bestMotivoMatch = m;
+        bestMotivoScore = 100;
         break;
       }
+      
+      // Coincidencia de palabras
+      const motivoWords = motivoName.split(/\s+/);
+      const textWords = lowerText.split(/\s+/);
+      let matchCount = 0;
+      
+      for (const mWord of motivoWords) {
+        if (mWord.length > 2 && textWords.some(tWord => tWord.includes(mWord) || mWord.includes(tWord))) {
+          matchCount++;
+        }
+      }
+      
+      const score = (matchCount / motivoWords.length) * 100;
+      if (score > bestMotivoScore && score > 50) {
+        bestMotivoMatch = m;
+        bestMotivoScore = score;
+      }
     }
-    // Detección informal: "de Barbie", "de Avengers", "de Frozen"
-    const informalMatch = rawText.match(/(?:de|del|con|para)\s+([A-Z][a-zÁÉÍÓÚÑáéíóúñ]+)/i);
-    if (informalMatch && !result.motivo) {
-      result.motivo = informalMatch[1].trim();
+    
+    if (bestMotivoMatch) {
+      result.motivo = bestMotivoMatch;
+      console.log("Motivo encontrado por coincidencia parcial:", bestMotivoMatch, "Score:", bestMotivoScore);
+    } else {
+      // Detección informal: "de Barbie", "de Avengers", "de Frozen"
+      const informalMatch = rawText.match(/(?:de|del|con|para)\s+([A-Z][a-zÁÉÍÓÚÑáéíóúñ]+)/i);
+      if (informalMatch && !result.motivo) {
+        result.motivo = informalMatch[1].trim();
+        console.log("Motivo detectado informalmente:", result.motivo);
+      }
     }
   }
 
@@ -653,13 +718,46 @@ function parseMagicPasteText(rawText) {
   if (typeMatch) {
     result.tipo = typeMatch[1].trim();
   } else {
+    // Buscar en tipos frecuentes con coincidencia parcial mejorada
+    let bestTypeMatch = null;
+    let bestTypeScore = 0;
+    
     for (const t of (state.frequentTypes || [])) {
-      if (t && rawText.toLowerCase().includes(t.toLowerCase())) {
-        result.tipo = t;
+      if (!t) continue;
+      
+      const typeName = t.toLowerCase();
+      const lowerText = rawText.toLowerCase();
+      
+      // Coincidencia exacta
+      if (lowerText.includes(typeName)) {
+        bestTypeMatch = t;
+        bestTypeScore = 100;
         break;
       }
+      
+      // Coincidencia de palabras
+      const typeWords = typeName.split(/\s+/);
+      const textWords = lowerText.split(/\s+/);
+      let matchCount = 0;
+      
+      for (const tWord of typeWords) {
+        if (tWord.length > 2 && textWords.some(tWord => tWord.includes(tWord) || tWord.includes(tWord))) {
+          matchCount++;
+        }
+      }
+      
+      const score = (matchCount / typeWords.length) * 100;
+      if (score > bestTypeScore && score > 50) {
+        bestTypeMatch = t;
+        bestTypeScore = score;
+      }
     }
-    if (!result.tipo) {
+    
+    if (bestTypeMatch) {
+      result.tipo = bestTypeMatch;
+      console.log("Tipo encontrado por coincidencia parcial:", bestTypeMatch, "Score:", bestTypeScore);
+    } else {
+      // Fallback a detección de palabras clave
       if (/topper/i.test(rawText)) result.tipo = "Topper";
       else if (/piñata|pinata/i.test(rawText)) result.tipo = "Piñata";
       else if (/maqueta/i.test(rawText)) result.tipo = "Maqueta";
@@ -676,7 +774,7 @@ function parseMagicPasteText(rawText) {
     }
   }
   
-  // 5. Fecha de Entrega (Días de la semana, 'mañana', 'hoy', o fechas DD/MM/YYYY)
+  // 5. Fecha de Entrega (Días de la semana, 'mañana', 'hoy', 'pasado mañana', o fechas DD/MM/YYYY)
   const lowerText = rawText.toLowerCase();
   const today = new Date();
   
@@ -684,15 +782,18 @@ function parseMagicPasteText(rawText) {
     const tom = new Date(today);
     tom.setDate(tom.getDate() + 1);
     result.fechaEntrega = tom.toISOString().split("T")[0];
+    console.log("Fecha detectada: mañana =", result.fechaEntrega);
   } else if (/\bhoy\b/.test(lowerText)) {
     result.fechaEntrega = today.toISOString().split("T")[0];
+    console.log("Fecha detectada: hoy =", result.fechaEntrega);
   } else if (/\bpasado mañana\b/.test(lowerText)) {
     const tom = new Date(today);
     tom.setDate(tom.getDate() + 2);
     result.fechaEntrega = tom.toISOString().split("T")[0];
+    console.log("Fecha detectada: pasado mañana =", result.fechaEntrega);
   } else {
     const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-    const dayMatch = rawText.match(/(?:entregar|fecha|para|el|el dia|día)[:\s]*([a-záéíóúñ]+)/i);
+    const dayMatch = rawText.match(/(?:entregar|fecha|para|el|el dia|día|el día)[:\s]*([a-záéíóúñ]+)/i);
     
     if (dayMatch) {
       const matchedWord = dayMatch[1].toLowerCase();
@@ -708,6 +809,7 @@ function parseMagicPasteText(rawText) {
         const targetDate = new Date();
         targetDate.setDate(today.getDate() + diff);
         result.fechaEntrega = targetDate.toISOString().split("T")[0];
+        console.log("Fecha detectada por día de semana:", matchedWord, "=", result.fechaEntrega);
       }
     }
   }
@@ -3977,7 +4079,7 @@ function openFinishModal(order, targetStatus) {
                 ${calcElapsed > 0 ? `Calculado por el cronómetro: <strong>${formatMinutesToHuman(calcElapsed)}</strong>` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
               </span>
             </div>
-            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" required style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" ${calcElapsed > 0 ? '' : 'required'} style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
           </div>
         `;
       })()}
@@ -8723,10 +8825,7 @@ window.openNewCashCloseModal = function() {
 // MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
 // =========================================================================
 function getStoredInventory() {
-  // Ya NO usar valores por defecto para evitar reseteos
-  // Solo usar datos del backend o cache local
-  
-  // PRIORIDAD: Backend primero (como pedidos), luego local
+  // PRIORIDAD: Backend primero (como pedidos), cache local como backup solo si backend falla
   if (state.data?.inventory && state.data.inventory.length > 0) {
     // Normalizar campos del backend para coincidir con frontend
     const normalizedInventory = state.data.inventory.map(item => ({
@@ -8736,22 +8835,23 @@ function getStoredInventory() {
       stockActual: item.stockActual,
       estado: item.estado,
       precioUSD: item.precioEstimadoUSD || item.precioUSD || 0,
-      proveedor: item.proveedorHabitual || item.proveedor || "",
+      proveedor: item.proveedorHabitual || item.proedor || "",
       notas: item.notas
     }));
     
-    // Guardar copia local para acceso rápido
+    // Actualizar cache local como backup (pero no como fuente primaria)
     store.set("pp_inventory_items", normalizedInventory);
     return normalizedInventory;
   }
   
-  // Si no hay datos del backend, usar datos locales (fallback)
+  // Si no hay datos del backend, usar cache local como backup temporal
   const cachedItems = store.get("pp_inventory_items", null);
   if (cachedItems && cachedItems.length > 0) {
+    console.log("Usando cache local de inventario como backup (backend no tiene datos)");
     return cachedItems;
   }
   
-  // Si no hay datos en ninguno, retornar array vacío (no usar valores por defecto)
+  // Si no hay datos en ninguno, retornar array vacío
   return [];
 }
 
@@ -10128,9 +10228,9 @@ window.triggerOcrForExpressInvoice = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando recibo (2-5 seg)...</span>';
 
   try {
-    // Agregar timeout de 30 segundos para OCR (aumentado de 10s)
+    // Agregar timeout de 60 segundos para OCR (aumentado de 30s para PC/móvil)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 30000);
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 60000);
     });
 
     const data = await Promise.race([
@@ -10234,9 +10334,9 @@ window.triggerOcrForCashClose = async function(base64) {
   banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando planilla (3-6 seg)...</span>';
 
   try {
-    // Agregar timeout de 30 segundos para OCR (aumentado de 10s)
+    // Agregar timeout de 60 segundos para OCR (aumentado de 30s para PC/móvil)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 30000);
+      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 60000);
     });
 
     const data = await Promise.race([
