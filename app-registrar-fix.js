@@ -772,6 +772,8 @@ async function refresh(showMessage = true) {
       schedules: rawSchedules,
       horarios: rawSchedules,
       inventory: rawData.inventory || [],
+      providerInvoices: rawData.providerInvoices || [],
+      cashCloses: rawData.cashCloses || [],
       workshopPrices: rawData.workshopPrices || [],
       geminiApiKey: rawData.geminiApiKey || ""
     };
@@ -786,6 +788,9 @@ async function refresh(showMessage = true) {
     
     store.set("pp_profile_data", state.data);
     store.set("pp_profile_clients", state.frequentClients);
+    store.set("pp_inventory_items", state.data.inventory);
+    store.set("pp_provider_invoices", state.data.providerInvoices);
+    store.set("pp_cash_closes", state.data.cashCloses);
     store.set("pp_profile_types", state.frequentTypes);
     store.set("pp_profile_motivos", state.frequentMotivos);
     store.set("pp_profile_schedules", rawSchedules);
@@ -3377,7 +3382,7 @@ function detail(order) {
       <div style="background:rgba(16,185,129,0.12); border:1.5px solid #10b981; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
         <div>
           <strong style="color:#10b981; font-size:13px; display:block;"><i class="fas fa-stopwatch fa-spin"></i> CRONÓMETRO EN VIVO:</strong>
-          <span style="font-size:12px; color:var(--text-main);">Llevas <strong id="modal-live-stopwatch-text">${formatMinutesToHuman(elMin)} (${elMin} min)</strong> de trabajo físico en mesa.</span>
+          <span style="font-size:12px; color:var(--text-main);">Llevas <strong id="modal-live-stopwatch-text">${formatMinutesToHuman(elMin)}</strong> de trabajo físico en mesa.</span>
         </div>
         <span class="live-stopwatch-badge live-stopwatch-active" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
       </div>
@@ -6115,6 +6120,134 @@ document.addEventListener("DOMContentLoaded", () => {
 // =========================================================
 // 4. MODO MOSTRADOR RÁPIDO / PEDIDO EXPRESS
 // =========================================================
+
+// =========================================================
+// MOTOR OCR AUTOMÁTICO PARA NOTA FÍSICA MANUSCRITA (JJ EXPRESS)
+// =========================================================
+window.triggerOcrForExpressInvoice = async function(base64Image) {
+  if (!base64Image) return;
+
+  const confirmBox = document.getElementById("express-visual-confirm");
+  const confirmSummary = document.getElementById("express-confirm-summary");
+  if (confirmBox && confirmSummary) {
+    confirmBox.style.display = "block";
+    confirmSummary.innerHTML = `<div style="color:#0284c7; font-weight:bold;"><i class="fas fa-spinner fa-spin"></i> Analizando nota manuscrita con Google Gemini IA... Por favor espera un momento.</div>`;
+  }
+  showToast("🔍 Leyendo nota manuscrita con IA...");
+
+  try {
+    const data = await window.transcribePhysicalSheet(base64Image, "order");
+    if (!data) return;
+
+    // 1. Cliente y teléfono
+    if (data.cliente) {
+      const cliInp = document.getElementById("express-cliente");
+      if (cliInp) cliInp.value = data.cliente;
+
+      const clients = state.data?.clients || state.frequentClients || [];
+      const match = clients.find(c => String(c.name || c.nombre || "").toLowerCase().trim() === data.cliente.toLowerCase().trim());
+      const cliSel = document.getElementById("express-client-select");
+      if (match && cliSel) {
+        cliSel.value = match.name || match.nombre;
+        const tlfInp = document.getElementById("express-telefono");
+        if (tlfInp && (match.phone || match.telefono)) {
+          tlfInp.value = match.phone || match.telefono;
+        }
+      }
+    }
+    if (data.telefono) {
+      const tlfInp = document.getElementById("express-telefono");
+      if (tlfInp && !tlfInp.value) tlfInp.value = data.telefono;
+    }
+
+    // 2. Motivo / Temática
+    if (data.motivo) {
+      const motInp = document.getElementById("express-motivo");
+      if (motInp) motInp.value = data.motivo;
+    }
+
+    // 3. Trabajos / Sub-ítems
+    const multContainer = document.getElementById("express-multiple-container");
+    if (multContainer) multContainer.style.display = "block";
+
+    const list = document.getElementById("express-items-list");
+    if (list) {
+      list.innerHTML = "";
+      if (data.items && data.items.length) {
+        data.items.forEach(it => {
+          window.addExpressSubItem(it.tipo || "Topper", it.cantidad || it.cant || 1, it.detalles || it.det || data.motivo || "");
+        });
+      } else if (data.tipo) {
+        window.addExpressSubItem(data.tipo, data.cantidad || 1, data.motivo || "");
+      }
+    }
+
+    // 4. Fechas y horas
+    if (data.fechaEntrega) {
+      const fInp = document.getElementById("express-fecha");
+      if (fInp) fInp.value = data.fechaEntrega;
+    }
+    if (data.horaEntrega) {
+      const hInp = document.getElementById("express-hora");
+      if (hInp) hInp.value = data.horaEntrega;
+    }
+
+    // 5. Costo, anticipo, método de pago y notas de cobro
+    if (data.costo !== undefined && data.costo !== null) {
+      const cInp = document.getElementById("express-costo");
+      if (cInp) cInp.value = Number(data.costo).toFixed(2);
+    }
+    if (data.abono !== undefined && data.abono !== null) {
+      const aInp = document.getElementById("express-anticipo");
+      if (aInp) aInp.value = Number(data.abono).toFixed(2);
+    }
+    if (data.metodoPago) {
+      const mSel = document.getElementById("express-metodo-pago");
+      if (mSel) {
+        Array.from(mSel.options).forEach(opt => {
+          if (opt.value.toLowerCase().includes(data.metodoPago.toLowerCase()) || data.metodoPago.toLowerCase().includes(opt.value.toLowerCase())) {
+            mSel.value = opt.value;
+          }
+        });
+      }
+    }
+    if (data.notasCobro) {
+      const nInp = document.getElementById("express-notas");
+      if (nInp) nInp.value = data.notasCobro;
+    }
+
+    // 6. Atendido por / Responsable
+    if (data.atendidoPor) {
+      const respSel = document.getElementById("express-responsable");
+      if (respSel) {
+        const found = Array.from(respSel.options).find(o => o.value.toLowerCase() === data.atendidoPor.toLowerCase());
+        if (found) respSel.value = found.value;
+      }
+    }
+
+    if (typeof window.recalcExpressPayment === "function") {
+      window.recalcExpressPayment();
+    }
+
+    if (confirmBox && confirmSummary) {
+      confirmSummary.innerHTML = `
+        <div><strong>Cliente:</strong> ${escapeHtml(data.cliente || 'Detectado')} (${escapeHtml(data.telefono || 'Sin tlf')})</div>
+        ${data.motivo ? `<div><strong>Motivo:</strong> ${escapeHtml(data.motivo)}</div>` : ''}
+        <div><strong>Trabajo:</strong> ${data.cantidad || 1}x ${escapeHtml(data.tipo || 'Topper')}</div>
+        <div><strong>Total:</strong> $${Number(data.costo || 0).toFixed(2)} | <strong>Abonado:</strong> $${Number(data.abono || 0).toFixed(2)}</div>
+        <div><strong>Entrega:</strong> ${escapeHtml(data.fechaEntrega || 'Hoy')}</div>
+      `;
+    }
+    showToast("✅ ¡Nota manuscrita leída y campos autorrellenados!");
+  } catch (err) {
+    console.error("Error en triggerOcrForExpressInvoice:", err);
+    if (confirmBox && confirmSummary) {
+      confirmSummary.innerHTML = `<span style="color:#ef4444;">⚠️ No se pudo transcribir automáticamente (${escapeHtml(err.message)}). Puedes llenar los campos manualmente.</span>`;
+    }
+    showToast("⚠️ No se pudo leer la nota automáticamente.");
+  }
+};
+
 window.openExpressOrderModal = function() {
   const clients = state.data?.clients || state.frequentClients || [];
   const types = state.frequentTypes || ["Topper", "Stickers", "Taza Sublimada", "Invitación Digital", "Letras 3D", "Pendón", "Caja Sorpresa", "Maqueta"];
@@ -6998,47 +7131,53 @@ window.startVoiceDictationForExpress = function() {
 };
 
 window.parseOrderNaturalLanguage = function(text) {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  
   const result = {
     cliente: "",
     telefono: "",
     items: [],
     motivo: "",
     entregaHora: "17:30",
-    fechaEntrega: new Date().toISOString().split('T')[0]
+    fechaEntrega: todayStr,
+    notas: ""
   };
 
   if (!text) return result;
   const lower = text.toLowerCase().trim();
 
-  // A. Búsqueda de cliente en la base de datos de clientes frecuentes
+  // A. Búsqueda y concordancia de cliente en el catálogo de clientes frecuentes
   const knownClients = (state.data?.clients || state.data?.frequentClients || state.frequentClients || []);
   for (const c of knownClients) {
     const cName = String(c.name || c.nombre || "").trim();
-    if (cName && lower.includes(cName.toLowerCase())) {
+    if (!cName) continue;
+    const parts = cName.split(/\s+/);
+    const firstName = parts[0].toLowerCase();
+    
+    // Coincidencia por nombre completo o primer nombre (mínimo 3 letras)
+    if (lower.includes(cName.toLowerCase()) || (firstName.length >= 3 && (new RegExp(`\\b${firstName}\\b`, 'i')).test(lower))) {
       result.cliente = cName;
       result.telefono = c.phone || c.telefono || "";
       break;
     }
   }
 
-  // Si no se encontró por coincidencia exacta de cliente guardado, extraer del texto
+  // Si no se encontró por cliente existente, extraer del texto
   if (!result.cliente) {
     const clientMatch = lower.match(/(?:pedido para|para|cliente|a nombre de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)/i);
     if (clientMatch) {
-      let rawName = clientMatch[1].trim();
-      // Eliminar preposiciones o artículos finales pegados accidentalmente (ej: "Miriam de" -> "Miriam")
-      rawName = rawName.replace(/\s+(?:de|con|un|una|el|la|para)$/i, "").trim();
+      let rawName = clientMatch[1].trim().replace(/\s+(?:de|con|un|una|el|la|para)$/i, "").trim();
       result.cliente = rawName.replace(/(?:^|\s)\S/g, l => l.toUpperCase());
     }
   }
 
-  // B. Extraer motivo / temática (ej: "con temática de Spiderman", "motivo Rapunzel", "de Barbie")
+  // B. Extraer motivo / temática del pedido (ej: Spiderman, Barbie, Flores...)
   const motivoMatch = lower.match(/(?:con\s+tem[aá]tica\s+de|tem[aá]tica\s+de|tem[aá]tica|motivo\s+de|motivo)\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
   if (motivoMatch) {
     result.motivo = motivoMatch[1].trim().replace(/(?:^|\s)\S/g, l => l.toUpperCase());
   } else {
-    // Si dice: "topper de Spiderman", "stickers de Flores", etc.
-    const deMatch = lower.match(/(?:topper[s]?|stickers?|taza[s]?|invitaci[oó]n(?:es)?|letras? 3d|pend[oó]n(?:es)?)\s+de\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
+    const deMatch = lower.match(/(?:topper[s]?|stickers?|taza[s]?|invitaci[oó]n(?:es)?|letras?\s*3d|pend[oó]n(?:es)?|caja[s]?|maqueta[s]?|dtf)\s+de\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
     if (deMatch) {
       const candidate = deMatch[1].trim();
       const forbidden = ["hoy", "mañana", "lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo", "mostrador", "taller"];
@@ -7048,50 +7187,50 @@ window.parseOrderNaturalLanguage = function(text) {
     }
   }
 
-  // C. Extraer fecha / día de la semana
-  const today = new Date();
-  if (lower.includes("para hoy") || lower.includes("hoy")) {
-    result.fechaEntrega = today.toISOString().split('T')[0];
+  // C. Extraer fecha / día de la semana con soporte para "este viernes", "el viernes", etc.
+  if (lower.includes("para hoy") || (lower.includes("hoy") && !lower.includes("hasta hoy"))) {
+    result.fechaEntrega = todayStr;
   } else if (lower.includes("para mañana") || lower.includes("mañana")) {
     const tm = new Date(today);
     tm.setDate(tm.getDate() + 1);
-    result.fechaEntrega = tm.toISOString().split('T')[0];
+    result.fechaEntrega = `${tm.getFullYear()}-${String(tm.getMonth()+1).padStart(2,'0')}-${String(tm.getDate()).padStart(2,'0')}`;
   } else {
-    // Reconocer días de la semana: lunes, martes, miércoles, jueves, viernes, sábado, domingo
     const daysMap = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, "miércoles": 3, jueves: 4, viernes: 5, sabado: 6, "sábado": 6 };
-    for (const [dayName, dayNum] of Object.entries(daysMap)) {
-      if (lower.includes("para el " + dayName) || lower.includes("el " + dayName)) {
+    const dayRegex = /(?:para\s+el|el|para\s+este|este)?\s*(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)/i;
+    const dayMatch = lower.match(dayRegex);
+    if (dayMatch) {
+      const dName = dayMatch[1].toLowerCase();
+      const dayNum = daysMap[dName];
+      if (dayNum !== undefined) {
         const currentDay = today.getDay();
         let diff = (dayNum - currentDay + 7) % 7;
-        if (diff === 0) diff = 7; // Próxima semana
+        if (diff === 0) diff = 7; // Próxima fecha correspondiente
         const targetDate = new Date(today);
         targetDate.setDate(today.getDate() + diff);
-        result.fechaEntrega = targetDate.toISOString().split('T')[0];
-        break;
+        result.fechaEntrega = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
       }
     }
   }
 
-  // D. Extraer hora de entrega
-  if (lower.includes("noche") || lower.includes("final de la jornada") || lower.includes("final de jornada")) {
+  // D. Extraer hora de entrega inteligente
+  const horaMatch = lower.match(/(?:a\s+las|para\s+las)\s+(\d{1,2})(?::(\d{2}))?\s*(?:y\s+media)?\s*(de\s+la\s+tarde|de\s+la\s+noche|de\s+la\s+mañana|en\s+la\s+noche|en\s+la\s+tarde|am|pm)?/i);
+  if (horaMatch) {
+    let hh = parseInt(horaMatch[1], 10);
+    let mm = horaMatch[2] || "00";
+    if (horaMatch[0].includes("y media")) mm = "30";
+    const mod = (horaMatch[3] || "").toLowerCase();
+    if ((mod.includes("tarde") || mod.includes("noche") || mod.includes("pm")) && hh < 12) hh += 12;
+    if (mod.includes("am") && hh === 12) hh = 0;
+    result.entregaHora = `${String(hh).padStart(2,'0')}:${mm}`;
+  } else if (lower.includes("noche") || lower.includes("final de la jornada")) {
     result.entregaHora = "19:30";
-  } else if (lower.includes("final de la tarde") || lower.includes("tarde")) {
+  } else if (lower.includes("final de la tarde") || lower.includes("en la tarde")) {
     result.entregaHora = "17:30";
   } else if (lower.includes("mañana por la mañana") || lower.includes("en la mañana")) {
     result.entregaHora = "10:00";
   }
 
-  const horaMatch = lower.match(/(?:a las|para las)\s+(\d{1,2})(?::(\d{2}))?\s*(de la tarde|de la mañana|de la noche|am|pm)?/i);
-  if (horaMatch) {
-    let hh = parseInt(horaMatch[1], 10);
-    const mm = horaMatch[2] || "00";
-    const mod = (horaMatch[3] || "").toLowerCase();
-    if ((mod.includes("tarde") || mod.includes("noche") || mod.includes("pm")) && hh < 12) hh += 12;
-    if (mod.includes("am") && hh === 12) hh = 0;
-    result.entregaHora = `${String(hh).padStart(2,'0')}:${mm}`;
-  }
-
-  // E. Extraer trabajos tipificados (Topper, Stickers, Taza, etc.)
+  // E. Trabajos tipificados con cantidades numéricas y en palabras
   const typesMap = [
     { patterns: ["toppers 3d", "topper 3d", "toppers", "topper"], formal: "Topper" },
     { patterns: ["stickers", "sticker", "calcomanias", "calcomanías"], formal: "Stickers" },
@@ -7099,19 +7238,30 @@ window.parseOrderNaturalLanguage = function(text) {
     { patterns: ["invitaciones digitales", "invitacion digital", "invitación digital", "invitaciones", "invitacion", "invitación"], formal: "Invitación Digital" },
     { patterns: ["letras 3d", "letra 3d"], formal: "Letras 3D" },
     { patterns: ["pendones", "pendon", "pendón"], formal: "Pendón" },
-    { patterns: ["cajas sorpresa", "caja sorpresa", "cotillones", "cotillon", "cotillón"], formal: "Caja Sorpresa" }
+    { patterns: ["cajas sorpresa", "caja sorpresa", "cotillones", "cotillon", "cotillón"], formal: "Caja Sorpresa" },
+    { patterns: ["maquetas", "maqueta"], formal: "Maqueta" },
+    { patterns: ["dtf textil", "impresion dtf", "dtf"], formal: "DTF Textil" }
   ];
 
   for (const t of typesMap) {
     for (const pat of t.patterns) {
       if (lower.includes(pat)) {
-        // Buscar cantidad antes del tipo (ej: "2 toppers")
-        const qtyRegex = new RegExp(`(\d+)\s*(?:de\s+)?` + pat.replace(" ", "\s+"), "i");
+        const qtyRegex = new RegExp(`(?:(\\d+)|(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez))\\s*(?:de\\s+)?` + pat.replace(' ', '\\s+'), "i");
         const qtyMatch = lower.match(qtyRegex);
-        const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+        let qty = 1;
+        if (qtyMatch) {
+          if (qtyMatch[1]) {
+            qty = parseInt(qtyMatch[1], 10);
+          } else if (qtyMatch[2]) {
+            const wordMap = { un: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+            qty = wordMap[qtyMatch[2].toLowerCase()] || 1;
+          }
+        }
         result.items.push({
           tipo: t.formal,
+          cantidad: qty,
           cant: qty,
+          detalles: result.motivo || t.formal,
           det: result.motivo || t.formal
         });
         break;
@@ -7119,13 +7269,34 @@ window.parseOrderNaturalLanguage = function(text) {
     }
   }
 
-  // Fallback si no detectó ítems específicos
+  // Fallback a Topper si no se detectó tipo específico
   if (!result.items.length) {
     result.items.push({
       tipo: "Topper",
+      cantidad: 1,
       cant: 1,
+      detalles: result.motivo || "General",
       det: result.motivo || "General"
     });
+  }
+
+  // F. Extraer notas adicionales (medidas de torta, nombres al frente, etc.)
+  const notePhrases = [];
+  const cakeMatch = lower.match(/(?:torta\s+(?:mide\s+)?[^,\.\n]+|medida[s]?\s+[^,\.\n]+)/i);
+  if (cakeMatch) notePhrases.push(cakeMatch[0].trim());
+  
+  if (lower.includes("nombres al frente") || lower.includes("nombre al frente") || lower.includes("al frente")) {
+    notePhrases.push("Nombres al frente");
+  }
+  if (lower.includes("encima de la torta") || lower.includes("arriba")) {
+    notePhrases.push("Piezas encima de la torta");
+  }
+  
+  const generalNoteMatch = lower.match(/(?:nota|comentario|observaci[oó]n):?\s*([^,\.\n]+)/i);
+  if (generalNoteMatch) notePhrases.push(generalNoteMatch[1].trim());
+
+  if (notePhrases.length > 0) {
+    result.notas = notePhrases.join(", ");
   }
 
   return result;
@@ -7134,41 +7305,71 @@ window.parseOrderNaturalLanguage = function(text) {
 window.parseAndFillExpressForm = function(text) {
   const parsed = window.parseOrderNaturalLanguage(text);
 
+  // 1. Cliente
   const cliInput = document.getElementById("express-cliente");
-  if (cliInput && parsed.cliente) cliInput.value = parsed.cliente;
+  if (cliInput && parsed.cliente) {
+    cliInput.value = parsed.cliente;
+  }
+  const cliSel = document.getElementById("express-client-select");
+  if (cliSel && parsed.cliente) {
+    const clients = state.data?.clients || state.frequentClients || [];
+    const matched = clients.find(c => String(c.name || c.nombre || "").toLowerCase().trim() === parsed.cliente.toLowerCase().trim());
+    if (matched) {
+      cliSel.value = matched.name || matched.nombre;
+      if (!parsed.telefono && (matched.phone || matched.telefono)) {
+        parsed.telefono = matched.phone || matched.telefono;
+      }
+    }
+  }
 
-  const fInput = document.getElementById("express-fecha-entrega");
+  // 2. Teléfono
+  const tlfInput = document.getElementById("express-telefono");
+  if (tlfInput && parsed.telefono) {
+    tlfInput.value = parsed.telefono;
+  }
+
+  // 3. Motivo
+  const motInput = document.getElementById("express-motivo");
+  if (motInput && parsed.motivo) {
+    motInput.value = parsed.motivo;
+  }
+
+  // 4. Fechas y horas (IDs reales: express-fecha y express-hora)
+  const fInput = document.getElementById("express-fecha");
   if (fInput && parsed.fechaEntrega) fInput.value = parsed.fechaEntrega;
 
-  const hInput = document.getElementById("express-hora-entrega");
+  const hInput = document.getElementById("express-hora");
   if (hInput && parsed.entregaHora) hInput.value = parsed.entregaHora;
 
-  // Llenar lista de ítems
+  // 5. Notas / Medidas
+  const nInput = document.getElementById("express-notas");
+  if (nInput && parsed.notas) {
+    nInput.value = parsed.notas;
+  }
+
+  // 6. Sub-ítems y despliegue del contenedor
+  const multContainer = document.getElementById("express-multiple-container");
+  if (multContainer) multContainer.style.display = "block";
+
   const list = document.getElementById("express-items-list");
-  if (list && parsed.items.length > 0) {
+  if (list && parsed.items && parsed.items.length > 0) {
     list.innerHTML = "";
     parsed.items.forEach(it => {
-      const row = document.createElement("div");
-      row.className = "subitem-row";
-      row.innerHTML = `
-        <input type="text" class="swal-item-tipo" value="${escapeHtml(it.tipo)}" required>
-        <input type="number" class="swal-item-cant" value="${it.cantidad || 1}" min="1" style="text-align:center;">
-        <input type="text" class="swal-item-det" value="${escapeHtml(it.detalles || '')}" placeholder="Detalles">
-        <button type="button" class="subitem-del-btn" onclick="this.closest('.subitem-row').remove()">🗑️</button>
-      `;
-      list.appendChild(row);
+      window.addExpressSubItem(it.tipo || "Topper", it.cantidad || it.cant || 1, it.detalles || it.det || parsed.motivo || "");
     });
   }
 
-  // Mostrar el AVISO DE CONFIRMACIÓN VISUAL EN PANTALLA
+  // 7. Mostrar confirmación visual en pantalla
   const confirmBox = document.getElementById("express-visual-confirm");
   const confirmSummary = document.getElementById("express-confirm-summary");
   if (confirmBox && confirmSummary) {
     confirmBox.style.display = "block";
     confirmSummary.innerHTML = `
-      <strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Detectado')}<br/>
-      <strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad}x ${it.tipo}`).join(", ")}<br/>
-      <strong>Entrega:</strong> ${parsed.fechaEntrega} a las ${parsed.entregaHora}
+      <div><strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Detectado')} ${parsed.telefono ? `(${escapeHtml(parsed.telefono)})` : ''}</div>
+      ${parsed.motivo ? `<div><strong>Motivo:</strong> ${escapeHtml(parsed.motivo)}</div>` : ''}
+      <div><strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad || it.cant || 1}x ${it.tipo}`).join(", ")}</div>
+      <div><strong>Entrega:</strong> ${parsed.fechaEntrega} a las ${parsed.entregaHora}</div>
+      ${parsed.notas ? `<div><strong>Notas:</strong> ${escapeHtml(parsed.notas)}</div>` : ''}
     `;
   }
 };
@@ -7182,9 +7383,11 @@ window.processVoiceTranscript = function(text) {
     <div class="visual-confirm-box">
       <div class="visual-confirm-title"><i class="fas fa-check-circle"></i> ¡Todo lo que indicaste ya está listo para revisar!</div>
       <div style="font-size:12px; margin-bottom:8px; line-height:1.4;">
-        👤 <strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Cliente nuevo')}<br/>
-        📦 <strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad}x ${it.tipo} ${it.detalles ? '('+it.detalles+')' : ''}`).join(', ')}<br/>
+        👤 <strong>Cliente:</strong> ${escapeHtml(parsed.cliente || 'Cliente nuevo')} ${parsed.telefono ? `(${escapeHtml(parsed.telefono)})` : ''}<br/>
+        ${parsed.motivo ? `🎨 <strong>Motivo:</strong> ${escapeHtml(parsed.motivo)}<br/>` : ''}
+        📦 <strong>Trabajos:</strong> ${parsed.items.map(it => `${it.cantidad || it.cant || 1}x ${it.tipo} ${it.detalles ? '('+it.detalles+')' : ''}`).join(', ')}<br/>
         📅 <strong>Entrega:</strong> ${parsed.fechaEntrega} a las ${parsed.entregaHora}
+        ${parsed.notas ? `<br/>📝 <strong>Notas:</strong> ${escapeHtml(parsed.notas)}` : ''}
       </div>
       <div style="display:flex; gap:6px;">
         <button type="button" class="primary-button" style="padding:6px 10px; font-size:11px; background:#10b981;" onclick="confirmBotOrder(${JSON.stringify(parsed).replace(/"/g, '&quot;')})">
@@ -7199,19 +7402,24 @@ window.processVoiceTranscript = function(text) {
 };
 
 window.confirmBotOrder = async function(parsed) {
-  const subItems = parsed.items || [];
+  const subItems = (parsed.items || []).map(s => ({
+    tipo: s.tipo,
+    cantidad: s.cantidad || s.cant || 1,
+    detalles: s.detalles || s.det || parsed.motivo || ""
+  }));
   const tipoResumen = subItems.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ") || "Trabajo Dictado";
 
   const payload = {
     cliente: parsed.cliente || "Cliente Dictado",
+    telefono: parsed.telefono || "",
     tipo: tipoResumen,
     motivo: parsed.motivo || "General",
-    descripcion: `[DICTADO POR VOZ]:
-${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
+    descripcion: `[DICTADO POR VOZ]:\n${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
     fechaEntrega: parsed.fechaEntrega,
     horaEntrega: parsed.entregaHora || "17:30",
     responsable: state.session?.name || "Sin asignar",
     diseno: "Sí",
+    notas: parsed.notas || "",
     subItems: subItems
   };
 
@@ -7475,13 +7683,16 @@ function getStoredProvidersData() {
   }
   const cached = store.get("pp_provider_invoices", null);
   if (cached && Array.isArray(cached) && cached.length > 0) {
+    if (state.data) state.data.providerInvoices = cached;
     return cached;
   }
-  return [];
+  return state.data?.providerInvoices || [];
 }
 
 function saveStoredProvidersData(list) {
-  store.set("pp_provider_invoices", list);
+  const cleanList = Array.isArray(list) ? list : [];
+  store.set("pp_provider_invoices", cleanList);
+  if (state.data) state.data.providerInvoices = cleanList;
 }
 
 function getProviderList() {
@@ -8702,9 +8913,13 @@ function getStoredInventory() {
 }
 
 function saveStoredInventory(list) {
-  store.set("pp_inventory_items", list);
-  // También guardar en el backend para sincronización
-  api("profile_save_inventory_list", { items: list }).catch(() => {});
+  const cleanList = Array.isArray(list) ? list : [];
+  store.set("pp_inventory_items", cleanList);
+  if (state.data) state.data.inventory = cleanList;
+  // Sincronizar en tiempo real con Google Sheets
+  api("profile_save_inventory_list", { items: cleanList }).catch((err) => {
+    console.warn("Aviso sincronización lista inventario:", err);
+  });
 }
 
 // =========================================================================
@@ -9962,24 +10177,41 @@ window.testGeminiConnection = async function() {
     if (resEl) resEl.innerHTML = '<span style="color:#ef4444; font-weight:bold;">⚠️ Por favor ingresa una clave API primero.</span>';
     return;
   }
-  if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Gemini Flash...</span>';
-  try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: "Responde exactamente: OK Creaciones JJ" }] }]
-      })
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+  if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Google Gemini...</span>';
+  
+  const testModels = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"];
+  let successModel = null;
+  let lastErr = "";
+  
+  for (const m of testModels) {
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: "Responde exactamente: OK Creaciones JJ" }] }]
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        successModel = m;
+        if (resEl) resEl.innerHTML = `<span style="color:#10b981; font-weight:bold;"><i class="fas fa-check-circle"></i> ¡Conexión Exitosa con Google Gemini (${m})! Respuesta: ${escapeHtml(text.trim())}</span>`;
+        // Guardar la clave en el backend para compartirla entre todas las sesiones
+        api("profile_save_gemini_key", { apiKey: key }).catch(() => {});
+        window.setGeminiApiKey(key);
+        break;
+      } else {
+        const errJson = await resp.json().catch(() => ({}));
+        lastErr = errJson.error?.message || `HTTP ${resp.status}`;
+      }
+    } catch (e) {
+      lastErr = e.message;
     }
-    const data = await resp.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    if (resEl) resEl.innerHTML = `<span style="color:#10b981; font-weight:bold;"><i class="fas fa-check-circle"></i> ¡Conexión Exitosa con Google Gemini! (${escapeHtml(text.trim())})</span>`;
-  } catch (err) {
-    if (resEl) resEl.innerHTML = `<span style="color:#ef4444; font-weight:bold;">❌ Error de conexión: ${escapeHtml(err.message)}</span>`;
+  }
+  
+  if (!successModel && resEl) {
+    resEl.innerHTML = `<span style="color:#ef4444; font-weight:bold;">❌ Error de conexión: ${escapeHtml(lastErr)}</span>`;
   }
 };
 
@@ -10244,7 +10476,7 @@ function getOrderElapsedMinutes(order) {
     return Number(order.duracionRealMin || 0);
   }
   
-  const pausedMins = Number(order.tiempoPausadoMin || 0);
+  const pausedMins = Math.round(Number(order.tiempoPausadoMin || 0));
   const isCurrentlyPaused = (order.estado === 'Pausado' || order.estado === 'Esperando Imprenta');
   
   let endMs = Date.now();
@@ -10260,28 +10492,25 @@ function getOrderElapsedMinutes(order) {
     }
   }
   
-  const rawMins = Math.floor((endMs - startMs) / 60000);
-  return Math.max(0, rawMins - pausedMins);
+  const rawMins = Math.max(0, Math.floor((endMs - startMs) / 60000));
+  return Math.max(0, Math.round(rawMins - pausedMins));
 }
 
 // Formatear minutos a formato humano (horas y minutos)
 function formatMinutesToHuman(minutes) {
-  if (!minutes || minutes <= 0) return "0 min";
+  const m = Math.round(Number(minutes) || 0);
+  if (m <= 0) return "0 min";
   
-  // Siempre mostrar en formato horas y minutos cuando es mayor a 60 minutos
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    
-    if (remainingMinutes === 0) {
+  if (m >= 60) {
+    const hours = Math.floor(m / 60);
+    const rem = m % 60;
+    if (rem === 0) {
       return `${hours} hora${hours > 1 ? 's' : ''}`;
     }
-    
-    return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
+    return `${hours} hora${hours > 1 ? 's' : ''} y ${rem} min`;
   }
   
-  // Solo minutos si es menos de 60
-  return `${minutes} min`;
+  return `${m} min`;
 }
 
 // Ticker global que actualiza los cronómetros en vivo en el DOM cada 5 segundos (dentro y fuera de la orden)
