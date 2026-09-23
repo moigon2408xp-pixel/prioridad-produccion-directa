@@ -3929,7 +3929,7 @@ function openFinishModal(order, targetStatus) {
       ${(() => {
         let calcElapsed = 0;
         if (order.inicioProduccion) {
-          const sMs = new Date(order.inicioProduccion).getTime();
+          const sMs = parseSafeTimestampMs(order.inicioProduccion);
           if (!isNaN(sMs)) {
             calcElapsed = getOrderElapsedMinutes(order);
           }
@@ -4044,7 +4044,7 @@ function openFinishModal(order, targetStatus) {
     const finalDuration = (manualVal && manualVal !== '' && !isNaN(Number(manualVal))) ? Number(manualVal) : calcVal;
 
     try {
-      console.log("Guardando orden con duración:", finalDuration, "minutos (calculado:", calcElapsed, ", manual:", manualVal, ")");
+      console.log("Guardando orden con duración:", finalDuration, "minutos (calculado:", calcVal, ", manual:", manualVal, ")");
       
       await api("profile_update_order", {
         id: order.id,
