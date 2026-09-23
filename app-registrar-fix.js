@@ -982,27 +982,31 @@ function orderCard(order, position) {
           ${order.motivo ? `<span class="badge-motivo-sm">🎨 ${escapeHtml(order.motivo)}</span>` : ''}
           ${disenoBadge}
           ${(() => {
-            // Prioridad: mostrar tiempo en vivo si está en proceso, o tiempo finalizado si está terminado
-            if (order.estado === 'En proceso' && order.inicioProduccion) {
-              const startMs = new Date(order.inicioProduccion).getTime();
-              if (!isNaN(startMs)) {
-                const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
-                return `<span class="live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}"><i class="fas fa-stopwatch"></i> ${elMin} min en mesa</span>`;
-              }
-            } else if (order.estado === 'Pausado') {
-              return `<span style="background:rgba(245,158,11,0.15); color:#d97706; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-pause-circle"></i> Pausado</span>`;
-            } else if (order.duracionRealMin && Number(order.duracionRealMin) > 0) {
-              console.log("Mostrando duracionRealMin en tarjeta:", order.id, order.duracionRealMin);
-              return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-stopwatch"></i> ${order.duracionRealMin} min</span>`;
-            } else if (order.inicioProduccion && !order.duracionRealMin) {
-              // Si está terminado pero no tiene duraciónRealMin, calcular del inicioProduccion
-              const startMs = new Date(order.inicioProduccion).getTime();
-              if (!isNaN(startMs)) {
-                const elMin = Math.max(0, Math.round((Date.now() - startMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
-                return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-stopwatch"></i> ${elMin} min</span>`;
-              }
+            const est = String(order.estado || "").trim();
+            // CRÍTICO: Si está en Pendiente, NO mostrar ningún cronómetro ni tiempo
+            if (est.toLowerCase() === "pendiente") {
+              return "";
             }
-            return '';
+            if (est === "En proceso") {
+              const elMin = getOrderElapsedMinutes(order);
+              return `<span class="live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}"><i class="fas fa-stopwatch"></i> ${elMin} min en mesa</span>`;
+            }
+            if (est === "Esperando Imprenta") {
+              const elMin = getOrderElapsedMinutes(order);
+              return `<span class="live-stopwatch-badge badge-imprenta" data-order-id="${escapeHtml(order.id)}" style="background:rgba(139,92,246,0.18); color:#a78bfa; border:1px solid rgba(139,92,246,0.35); padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-print"></i> ${elMin} min (Imprenta)</span>`;
+            }
+            if (est === "Pausado") {
+              const elMin = getOrderElapsedMinutes(order);
+              return `<span class="live-stopwatch-badge badge-pausa" data-order-id="${escapeHtml(order.id)}" style="background:rgba(245,158,11,0.18); color:#f59e0b; border:1px solid rgba(245,158,11,0.35); padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-pause-circle"></i> ${elMin > 0 ? `${elMin} min (Pausado)` : 'Pausado'}</span>`;
+            }
+            if (est === "Terminado" || est === "Entregado") {
+              const finMin = Number(order.duracionRealMin) || getOrderElapsedMinutes(order);
+              if (finMin > 0) {
+                return `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-check-circle"></i> ${finMin} min</span>`;
+              }
+              return "";
+            }
+            return "";
           })()}
           ${(() => {
             let subs = [];
@@ -6211,9 +6215,16 @@ window.triggerOcrForExpressInvoice = async function(base64Image) {
         });
       }
     }
-    if (data.notasCobro) {
+    const noteParts = [
+      data.medidas ? `Medidas: ${data.medidas}` : '',
+      data.notas,
+      data.notasCobro,
+      data.observaciones
+    ].filter(Boolean);
+    const combinedNotes = Array.from(new Set(noteParts)).join(". ");
+    if (combinedNotes) {
       const nInp = document.getElementById("express-notas");
-      if (nInp) nInp.value = data.notasCobro;
+      if (nInp) nInp.value = combinedNotes;
     }
 
     // 6. Atendido por / Responsable
@@ -6292,9 +6303,15 @@ window.openExpressOrderModal = function() {
         <input type="tel" id="express-telefono" name="telefono" placeholder="Ej. 04141234567">
       </label>
 
-      <!-- Motivo / Temática Explícito -->
+      <!-- Motivo / Temática Explícito con Selector Desplegable -->
       <label class="field">
         <span class="field-label">MOTIVO / TEMÁTICA DEL DISEÑO:</span>
+        ${motivos.length ? `
+          <select id="express-motivo-select" style="margin-bottom:6px; font-size:12px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:6px 8px;">
+            <option value="">-- Seleccionar motivo guardado o escribir nuevo abajo --</option>
+            ${motivos.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
+          </select>
+        ` : ''}
         <input type="text" id="express-motivo" name="motivo" placeholder="Ej. Spiderman, Barbie, Rapunzel, Flores, 15 Años..." required style="border-color:#38bdf8;">
       </label>
 
@@ -6508,6 +6525,29 @@ window.openExpressOrderModal = function() {
         document.getElementById("express-cliente").value = opt.value;
         const ph = opt.getAttribute("data-phone");
         if (ph) document.getElementById("express-telefono").value = ph;
+      }
+    });
+  }
+
+    const motSel = document.getElementById("express-motivo-select");
+  const motInp = document.getElementById("express-motivo");
+  if (motSel && motInp) {
+    motSel.addEventListener("change", (e) => {
+      if (e.target.value) {
+        motInp.value = e.target.value;
+        const firstSubItemDet = document.querySelector("#express-items-list .subitem-det");
+        if (firstSubItemDet && (!firstSubItemDet.value || firstSubItemDet.value === "Diseño general")) {
+          firstSubItemDet.value = e.target.value;
+        }
+      }
+    });
+    motInp.addEventListener("input", (e) => {
+      const typed = e.target.value.trim().toLowerCase();
+      const match = Array.from(motSel.options).find(opt => opt.value.toLowerCase() === typed);
+      if (match) {
+        motSel.value = match.value;
+      } else {
+        motSel.value = "";
       }
     });
   }
@@ -7172,44 +7212,62 @@ window.parseOrderNaturalLanguage = function(text) {
     }
   }
 
-  // B. Extraer motivo / temática del pedido (ej: Spiderman, Barbie, Flores...)
-  const motivoMatch = lower.match(/(?:con\s+tem[aá]tica\s+de|tem[aá]tica\s+de|tem[aá]tica|motivo\s+de|motivo)\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
-  if (motivoMatch) {
-    result.motivo = motivoMatch[1].trim().replace(/(?:^|\s)\S/g, l => l.toUpperCase());
-  } else {
-    const deMatch = lower.match(/(?:topper[s]?|stickers?|taza[s]?|invitaci[oó]n(?:es)?|letras?\s*3d|pend[oó]n(?:es)?|caja[s]?|maqueta[s]?|dtf)\s+de\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
-    if (deMatch) {
-      const candidate = deMatch[1].trim();
-      const forbidden = ["hoy", "mañana", "lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo", "mostrador", "taller"];
-      if (!forbidden.includes(candidate.toLowerCase())) {
-        result.motivo = candidate.replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+  // B. Extraer motivo / temática del pedido (ej: Spiderman, Barbie, Flores, Cashea...)
+  const knownMotivos = (state.data?.motivos || state.frequentMotivos || []);
+  for (const m of knownMotivos) {
+    const mStr = String(m || "").trim();
+    if (mStr && lower.includes(mStr.toLowerCase())) {
+      result.motivo = mStr;
+      break;
+    }
+  }
+
+  if (!result.motivo) {
+    const motivoMatch = lower.match(/(?:con\s+tem[aá]tica\s+de|tem[aá]tica\s+de|tem[aá]tica|motivo\s+de|motivo)\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
+    if (motivoMatch) {
+      result.motivo = motivoMatch[1].trim().replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+    } else {
+      const deMatch = lower.match(/(?:topper[s]?|stickers?|taza[s]?|invitaci[oó]n(?:es)?|letras?\s*3d|pend[oó]n(?:es)?|caja[s]?|maqueta[s]?|dtf)\s+de\s+([a-záéíóúñ0-9\s]+?)(?=\s+(?:para|con|\d|$)|$)/i);
+      if (deMatch) {
+        const candidate = deMatch[1].trim();
+        const forbidden = ["hoy", "mañana", "lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo", "mostrador", "taller"];
+        if (!forbidden.includes(candidate.toLowerCase())) {
+          result.motivo = candidate.replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+        }
       }
     }
   }
 
-  // C. Extraer fecha / día de la semana con soporte para "este viernes", "el viernes", etc.
-  if (lower.includes("para hoy") || (lower.includes("hoy") && !lower.includes("hasta hoy"))) {
+  // C. Extraer fecha / día de la semana con soporte para "este sábado", "el próximo lunes", etc.
+  // CRÍTICO: Remover expresiones de momento del día ("de la mañana", "en la mañana", "por la mañana")
+  // para que la palabra "mañana" no confunda la hora AM con el día de entrega mañana!
+  const textWithoutTimeOfDay = lower.replace(/\b(?:de\s+la|en\s+la|por\s+la)\s+mañana\b/gi, "");
+
+  const daysMap = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, "miércoles": 3, jueves: 4, viernes: 5, sabado: 6, "sábado": 6 };
+  const dayRegex = /\b(?:para\s+el|el|para\s+este|este|el\s+pr[oó]ximo|para\s+el\s+pr[oó]ximo|pr[oó]ximo)?\s*(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)\b/i;
+  const dayMatch = textWithoutTimeOfDay.match(dayRegex);
+
+  if (dayMatch) {
+    const isProximo = /\bpr[oó]ximo\b/i.test(dayMatch[0]);
+    const dName = dayMatch[1].toLowerCase();
+    const dayNum = daysMap[dName];
+    if (dayNum !== undefined) {
+      const currentDay = today.getDay();
+      let diff = (dayNum - currentDay + 7) % 7;
+      if (diff === 0) diff = 7; // Próxima fecha correspondiente si es el mismo día
+      if (isProximo && diff < 3 && dayNum !== 1) {
+        diff += 7; // Si dijo "próximo" y el día es inminente, saltar a la siguiente semana
+      }
+      const targetDate = new Date(today);
+      targetDate.setDate(today.getDate() + diff);
+      result.fechaEntrega = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
+    }
+  } else if (textWithoutTimeOfDay.includes("para hoy") || (textWithoutTimeOfDay.includes("hoy") && !textWithoutTimeOfDay.includes("hasta hoy"))) {
     result.fechaEntrega = todayStr;
-  } else if (lower.includes("para mañana") || lower.includes("mañana")) {
+  } else if (/\b(?:para\s+)?mañana\b/i.test(textWithoutTimeOfDay)) {
     const tm = new Date(today);
     tm.setDate(tm.getDate() + 1);
     result.fechaEntrega = `${tm.getFullYear()}-${String(tm.getMonth()+1).padStart(2,'0')}-${String(tm.getDate()).padStart(2,'0')}`;
-  } else {
-    const daysMap = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, "miércoles": 3, jueves: 4, viernes: 5, sabado: 6, "sábado": 6 };
-    const dayRegex = /(?:para\s+el|el|para\s+este|este)?\s*(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)/i;
-    const dayMatch = lower.match(dayRegex);
-    if (dayMatch) {
-      const dName = dayMatch[1].toLowerCase();
-      const dayNum = daysMap[dName];
-      if (dayNum !== undefined) {
-        const currentDay = today.getDay();
-        let diff = (dayNum - currentDay + 7) % 7;
-        if (diff === 0) diff = 7; // Próxima fecha correspondiente
-        const targetDate = new Date(today);
-        targetDate.setDate(today.getDate() + diff);
-        result.fechaEntrega = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
-      }
-    }
   }
 
   // D. Extraer hora de entrega inteligente
@@ -7332,6 +7390,13 @@ window.parseAndFillExpressForm = function(text) {
   const motInput = document.getElementById("express-motivo");
   if (motInput && parsed.motivo) {
     motInput.value = parsed.motivo;
+    const motSelectEl = document.getElementById("express-motivo-select");
+    if (motSelectEl) {
+      const match = Array.from(motSelectEl.options).find(opt => opt.value.toLowerCase() === parsed.motivo.toLowerCase());
+      if (match) {
+        motSelectEl.value = match.value;
+      }
+    }
   }
 
   // 4. Fechas y horas (IDs reales: express-fecha y express-hora)
@@ -8883,33 +8948,31 @@ window.setInventoryFilter = function(status) {
 
 function getStoredInventory() {
   // PRIORIDAD: Backend primero (como pedidos), cache local como backup solo si backend falla
-  if (state.data?.inventory && state.data.inventory.length > 0) {
-    // Normalizar campos del backend para coincidir con frontend
+  if (state.data?.inventory && Array.isArray(state.data.inventory) && state.data.inventory.length > 0) {
     const normalizedInventory = state.data.inventory.map(item => ({
-      id: item.id,
-      producto: item.producto,
-      categoria: item.categoria,
-      stockActual: item.stockActual,
-      estado: item.estado,
-      precioUSD: item.precioEstimadoUSD || item.precioUSD || 0,
-      proveedor: item.proveedorHabitual || item.proedor || "",
-      notas: item.notas
+      id: item.id || ("ART-" + Math.floor(Math.random() * 1000)),
+      producto: item.producto || item.item || "Insumo",
+      categoria: item.categoria || "Papelería",
+      stockActual: item.stockActual || item.stock || "1 unidad",
+      estado: item.estado || "Disponible",
+      precioUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
+      precioEstimadoUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
+      proveedor: item.proveedor || item.proveedorHabitual || "",
+      proveedorHabitual: item.proveedor || item.proveedorHabitual || "",
+      notas: item.notas || ""
     }));
-    
-    // Actualizar cache local como backup (pero no como fuente primaria)
     store.set("pp_inventory_items", normalizedInventory);
     return normalizedInventory;
   }
-  
+
   // Si no hay datos del backend, usar cache local como backup temporal
   const cachedItems = store.get("pp_inventory_items", null);
-  if (cachedItems && cachedItems.length > 0) {
-    console.log("Usando cache local de inventario como backup (backend no tiene datos)");
+  if (cachedItems && Array.isArray(cachedItems) && cachedItems.length > 0) {
+    if (state.data) state.data.inventory = cachedItems;
     return cachedItems;
   }
-  
-  // Si no hay datos en ninguno, retornar array vacío
-  return [];
+
+  return state.data?.inventory || [];
 }
 
 function saveStoredInventory(list) {
@@ -10351,19 +10414,22 @@ Devuelve ÚNICAMENTE un JSON estricto válido con las siguientes claves:
   } else {
     promptText = `Eres un transcriptor experto para Creaciones JJ, taller de papelería creativa y diseño.
 Analiza la foto de la comanda física de pedido rápido (JJ Express).
-El formato impreso tiene: CLIENTE, TELÉFONO, FECHA DE PEDIDO, FECHA DE ENTREGA, CANT, DESCRIPCIÓN (ej. Pendón, Topper), P.UNIT, TOTAL ($), método EFECTIVO / TRANSFERENCIA, TOTAL, ANTICIPO, RESTA, NOTAS (ej. Falta dar 3$ de vuelto) y ATENDIDO POR.
+El formato impreso contiene: CLIENTE, TELÉFONO, FECHA DE PEDIDO, FECHA DE ENTREGA, CANT, DESCRIPCIÓN (ej. Pendón, Topper), P.UNIT, TOTAL ($), método EFECTIVO / TRANSFERENCIA, TOTAL, ANTICIPO, RESTA, NOTAS, OBSERVACIONES, MEDIDAS / TAMAÑO y ATENDIDO POR.
+IMPORTANTE: En las notas u observaciones pueden aparecer medidas o dimensiones (ej. 30x30, 30x40 cm, tamaño de torta 20cm, alto, ancho, diámetro, detalles de diseño, materiales especiales, o notas de vuelto/pago). Debes capturar TODAS las medidas y observaciones manuscritas sin omitir nada.
 Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
 {
   "cliente": "nombre del cliente",
   "telefono": "teléfono (ej. 04141234567)",
   "tipo": "tipo de producto (Topper, Pendón, Libreta, Stickers, etc.)",
-  "motivo": "personaje, motivo o temática si está indicado",
+  "motivo": "personaje, motivo o temática si está indicado (ej. Spiderman, Barbie, Cashea)",
+  "medidas": "medidas o dimensiones encontradas (ej. 30x30 cm, 30x40 cm, torta 20cm)",
   "cantidad": 1,
   "costo": monto total en dólares (número),
   "abono": anticipo o abono en dólares (número),
   "resta": resta o saldo en dólares (número),
   "metodoPago": "Efectivo $" | "Pago Móvil" | "Punto de Venta" | "Zelle",
-  "notasCobro": "observaciones, notas de vuelto o cobro",
+  "notas": "TODAS las notas, observaciones, especificaciones y medidas manuscritas",
+  "notasCobro": "observaciones, medidas o notas de vuelto/cobro",
   "fechaEntrega": "YYYY-MM-DD",
   "atendidoPor": "nombre del responsable"
 }`;
@@ -10447,43 +10513,38 @@ function getRealTeamList() {
 // Helper robusto para calcular minutos reales en mesa de trabajo (congelando en Pausado y Esperando Imprenta)
 function getOrderElapsedMinutes(order) {
   if (!order) return 0;
-  let startMs = NaN;
-  
-  if (order.inicioProduccion) {
-    const parsed = new Date(order.inicioProduccion).getTime();
-    if (!isNaN(parsed) && parsed <= Date.now() + 60000) {
-      startMs = parsed;
-    }
+  const estado = String(order.estado || "").trim();
+
+  // CRÍTICO: Si está en Pendiente, SIEMPRE retornar 0 minutos. NUNCA contar tiempo.
+  if (estado.toLowerCase() === "pendiente") return 0;
+
+  // Si está terminado, entregado o cancelado, retornar duración final registrada
+  if (["terminado", "entregado", "cancelado"].includes(estado.toLowerCase())) {
+    return Math.max(0, Math.round(Number(order.duracionRealMin || 0)));
   }
-  
-  // Si no hay inicioProduccion válido o está en el futuro (error de fecha fija), buscar en notas
-  if (isNaN(startMs) || startMs > Date.now()) {
-    const notas = String(order.notas || "");
-    const match = notas.match(/\[(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*-[^\]]+\]:\s*.*(?:producción|produccion|mesa)/i);
-    if (match) {
-      let [_, d, m, y, hh, mm, ap] = match;
-      let h = parseInt(hh, 10);
-      if (ap && ap.toUpperCase() === 'PM' && h < 12) h += 12;
-      if (ap && ap.toUpperCase() === 'AM' && h === 12) h = 0;
-      const dt = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), h, parseInt(mm, 10), 0);
-      if (!isNaN(dt.getTime()) && dt.getTime() <= Date.now()) {
-        startMs = dt.getTime();
-      }
-    }
+
+  // Si no ha iniciado producción física, es 0
+  if (!order.inicioProduccion) {
+    return Math.max(0, Math.round(Number(order.duracionRealMin || 0)));
   }
-  
-  if (isNaN(startMs)) {
-    return Number(order.duracionRealMin || 0);
+
+  const startMs = new Date(order.inicioProduccion).getTime();
+  if (isNaN(startMs) || startMs > Date.now() + 60000) {
+    return Math.max(0, Math.round(Number(order.duracionRealMin || 0)));
   }
-  
-  const pausedMins = Math.round(Number(order.tiempoPausadoMin || 0));
-  const isCurrentlyPaused = (order.estado === 'Pausado' || order.estado === 'Esperando Imprenta');
-  
+
+  const pausedMins = Math.max(0, Math.round(Number(order.tiempoPausadoMin || 0)));
+  const isPaused = (estado === "Pausado" || estado === "Esperando Imprenta");
+
   let endMs = Date.now();
-  if (isCurrentlyPaused && order.ultimaPausa) {
-    const pMs = new Date(order.ultimaPausa).getTime();
-    if (!isNaN(pMs) && pMs >= startMs) {
-      endMs = pMs;
+  if (isPaused) {
+    if (order.ultimaPausa) {
+      const pMs = new Date(order.ultimaPausa).getTime();
+      if (!isNaN(pMs) && pMs >= startMs) {
+        endMs = pMs;
+      }
+    } else if (order.duracionRealMin && Number(order.duracionRealMin) > 0) {
+      return Math.max(0, Math.round(Number(order.duracionRealMin)));
     }
   } else if (order.finProduccion) {
     const fMs = new Date(order.finProduccion).getTime();
@@ -10491,7 +10552,7 @@ function getOrderElapsedMinutes(order) {
       endMs = fMs;
     }
   }
-  
+
   const rawMins = Math.max(0, Math.floor((endMs - startMs) / 60000));
   return Math.max(0, Math.round(rawMins - pausedMins));
 }
@@ -10524,12 +10585,16 @@ if (!window._stopwatchInterval) {
         const ord = allTarget.find(o => String(o.id) === String(id));
         if (!ord) return;
         
+        if (ord.estado === 'Pendiente') {
+          el.style.display = 'none';
+          return;
+        }
         const mins = getOrderElapsedMinutes(ord);
         const human = formatMinutesToHuman(mins);
         if (ord.estado === 'Esperando Imprenta') {
-          el.innerHTML = `<i class="fas fa-print"></i> ${human} (Imprenta)`;
+          el.innerHTML = `<i class="fas fa-print"></i> ${mins} min (Imprenta)`;
         } else if (ord.estado === 'Pausado') {
-          el.innerHTML = `<i class="fas fa-pause"></i> ${human} (Pausado)`;
+          el.innerHTML = `<i class="fas fa-pause-circle"></i> ${mins > 0 ? `${mins} min (Pausado)` : 'Pausado'}`;
         } else {
           el.innerHTML = `<i class="fas fa-stopwatch"></i> ${human} en mesa`;
         }
