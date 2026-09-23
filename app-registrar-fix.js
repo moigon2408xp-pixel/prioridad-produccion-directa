@@ -6349,6 +6349,15 @@ window.openExpressOrderModal = function() {
       </div>
     </div>
 
+      <!-- Notas y Observaciones Generales (Medidas, Torta, Especificaciones Especiales) -->
+      <label class="field">
+        <span class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>📝 NOTAS Y OBSERVACIONES GENERALES:</span>
+          <span style="font-size:11px; color:#0ea5e9; font-weight:normal;">(Medidas, torta, especificaciones)</span>
+        </span>
+        <textarea id="express-notas" name="notas" rows="2" placeholder="Ej. Medidas 30x30 cm, torta de 1/2 kilo, nombre Isabella al frente..." style="width:100%; box-sizing:border-box; font-size:12.5px; border-radius:8px; padding:8px 10px; background:var(--bg-main); color:var(--text-main); border:1px solid var(--border-color); resize:vertical;"></textarea>
+      </label>
+
       <!-- Selección Rápida de Entrega -->
       <div class="field">
         <span class="field-label">TIEMPO DE ENTREGA REQUERIDO:</span>
@@ -6729,9 +6738,13 @@ window.openExpressOrderModal = function() {
         const primaryTipo = subItems[0].tipo || "Topper";
         const itemsSummary = subItems.map(s => `${s.cantidad}x ${s.tipo}${s.detalles ? ` (${s.detalles})` : ''}`).join(', ');
 
+        const notasGenerales = document.getElementById("express-notas")?.value?.trim() || "";
         let notasIniciales = `⚡ [Pedido JJ Express - Mostrador]: ${itemsSummary}`;
+        if (notasGenerales) {
+          notasIniciales += `\n📝 Nota/Medidas: ${notasGenerales}`;
+        }
         if (costo > 0 || anticipo > 0 || notaPago) {
-          notasIniciales += `\n💰 Cobro: Total $${costo.toFixed(2)} | Anticipo: $${anticipo.toFixed(2)} | Saldo: $${resta.toFixed(2)} | ${metodoPago}${notaPago ? ` | Nota: ${notaPago}` : ''}`;
+          notasIniciales += `\n💰 Cobro: Total $${costo.toFixed(2)} | Anticipo: $${anticipo.toFixed(2)} | Saldo: $${resta.toFixed(2)} | ${metodoPago}${notaPago ? ` | Nota Cobro: ${notaPago}` : ''}`;
         }
 
         const payload = {
@@ -7474,17 +7487,22 @@ window.confirmBotOrder = async function(parsed) {
   }));
   const tipoResumen = subItems.map(s => `${s.cantidad}x ${s.tipo}`).join(" + ") || "Trabajo Dictado";
 
+  let botNotas = `⚡ [Pedido JJ-Bot - Dictado]: ${tipoResumen}`;
+  if (parsed.notas) {
+    botNotas += `\n📝 Nota/Medidas: ${parsed.notas}`;
+  }
+
   const payload = {
     cliente: parsed.cliente || "Cliente Dictado",
     telefono: parsed.telefono || "",
     tipo: tipoResumen,
     motivo: parsed.motivo || "General",
-    descripcion: `[DICTADO POR VOZ]:\n${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}`,
+    descripcion: `[DICTADO POR VOZ]:\n${subItems.map((s, i) => `${i+1}. ${s.cantidad}x ${s.tipo} ${s.detalles ? '('+s.detalles+')' : ''}`).join('\n')}${parsed.notas ? '\nNota/Medidas: ' + parsed.notas : ''}`,
     fechaEntrega: parsed.fechaEntrega,
     horaEntrega: parsed.entregaHora || "17:30",
     responsable: state.session?.name || "Sin asignar",
     diseno: "Sí",
-    notas: parsed.notas || "",
+    notas: botNotas,
     subItems: subItems
   };
 
@@ -8949,18 +8967,40 @@ window.setInventoryFilter = function(status) {
 function getStoredInventory() {
   // PRIORIDAD: Backend primero (como pedidos), cache local como backup solo si backend falla
   if (state.data?.inventory && Array.isArray(state.data.inventory) && state.data.inventory.length > 0) {
-    const normalizedInventory = state.data.inventory.map(item => ({
-      id: item.id || ("ART-" + Math.floor(Math.random() * 1000)),
-      producto: item.producto || item.item || "Insumo",
-      categoria: item.categoria || "Papelería",
-      stockActual: item.stockActual || item.stock || "1 unidad",
-      estado: item.estado || "Disponible",
-      precioUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
-      precioEstimadoUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
-      proveedor: item.proveedor || item.proveedorHabitual || "",
-      proveedorHabitual: item.proveedor || item.proveedorHabitual || "",
-      notas: item.notas || ""
-    }));
+    const rawList = state.data.inventory;
+    const seen = new Set();
+    const normalizedInventory = [];
+    
+    for (let idx = 0; idx < rawList.length; idx++) {
+      const item = rawList[idx];
+      if (!item) continue;
+      const estado = String(item.estado || "Disponible").trim();
+      if (estado.toLowerCase() === "eliminado") continue;
+
+      const pName = String(item.producto || item.item || "").trim();
+      if (!pName) continue;
+
+      let id = String(item.id || "").trim();
+      if (!id) id = "ART-" + String(idx + 1).padStart(3, "0");
+
+      const idKey = id.toLowerCase();
+      if (seen.has(idKey)) continue; // Eliminar duplicados
+      seen.add(idKey);
+
+      normalizedInventory.push({
+        id: id,
+        producto: pName,
+        categoria: item.categoria || "Papelería",
+        stockActual: item.stockActual || item.stock || "1 unidad",
+        estado: estado,
+        precioUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
+        precioEstimadoUSD: Number(item.precioUSD !== undefined ? item.precioUSD : (item.precioEstimadoUSD || 0)),
+        proveedor: item.proveedor || item.proveedorHabitual || "",
+        proveedorHabitual: item.proveedor || item.proveedorHabitual || "",
+        notas: item.notas || ""
+      });
+    }
+
     store.set("pp_inventory_items", normalizedInventory);
     return normalizedInventory;
   }
@@ -8968,8 +9008,16 @@ function getStoredInventory() {
   // Si no hay datos del backend, usar cache local como backup temporal
   const cachedItems = store.get("pp_inventory_items", null);
   if (cachedItems && Array.isArray(cachedItems) && cachedItems.length > 0) {
-    if (state.data) state.data.inventory = cachedItems;
-    return cachedItems;
+    const seen = new Set();
+    const cleanCached = cachedItems.filter(it => {
+      if (!it || !it.producto) return false;
+      const key = String(it.id || it.producto).trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return String(it.estado || "").toLowerCase() !== "eliminado";
+    });
+    if (state.data) state.data.inventory = cleanCached;
+    return cleanCached;
   }
 
   return state.data?.inventory || [];
@@ -9917,8 +9965,8 @@ window.editInventoryItem = function(id) {
         if (d.isConfirmed) {
           list.splice(idx, 1);
           saveStoredInventory(list);
-          // Sincronizar con backend
-          api("profile_save_inventory_item", { id: it.id, producto: it.producto, stockActual: "", estado: "Eliminado" }).catch(()=>{});
+          // Eliminar definitivamente del backend y Google Sheets
+          api("profile_delete_inventory_item", { id: it.id }).catch(()=>{});
           showToast(`🗑️ "${it.producto}" eliminado del inventario.`);
           if (typeof render === "function") render();
         }
@@ -10242,7 +10290,7 @@ window.testGeminiConnection = async function() {
   }
   if (resEl) resEl.innerHTML = '<span style="color:#0ea5e9;"><i class="fas fa-spinner fa-spin"></i> Conectando con Google Gemini...</span>';
   
-  const testModels = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"];
+  const testModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
   let successModel = null;
   let lastErr = "";
   
@@ -10441,16 +10489,16 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
       contents: [{
         parts: [
           { text: promptText },
-          { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } }
+          { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
         ]
       }],
       generationConfig: {
         temperature: 0.1,
-        response_mime_type: "application/json"
+        responseMimeType: "application/json"
       }
     };
 
-    const modelCandidates = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+    const modelCandidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
     let data = null;
     let lastErrorMsg = "";
 
@@ -10511,6 +10559,31 @@ function getRealTeamList() {
 
 
 // Helper robusto para calcular minutos reales en mesa de trabajo (congelando en Pausado y Esperando Imprenta)
+// Helper seguro para calcular milisegundos evitando desfase UTC/Local (GMT-4)
+function parseSafeTimestampMs(val) {
+  if (!val) return NaN;
+  if (val instanceof Date) return val.getTime();
+  const str = String(val).trim();
+  if (!str) return NaN;
+
+  // Si ya tiene indicador de zona o Z explícito, parsear directo
+  if (/Z|[+-]\d{2}:?\d{2}$/i.test(str)) {
+    return new Date(str).getTime();
+  }
+
+  const localMs = new Date(str).getTime();
+  const utcMs = new Date(str + "Z").getTime();
+  const now = Date.now();
+
+  // Si al interpretarse como fecha local cae en el futuro (desfase típico de 4h UTC), pero con Z cae en pasado/presente
+  if (!isNaN(localMs) && localMs > now + 60000 && (localMs - now) <= 6 * 3600000) {
+    if (!isNaN(utcMs) && utcMs <= now + 60000) {
+      return utcMs;
+    }
+  }
+  return localMs;
+}
+
 function getOrderElapsedMinutes(order) {
   if (!order) return 0;
   const estado = String(order.estado || "").trim();
@@ -10528,7 +10601,7 @@ function getOrderElapsedMinutes(order) {
     return Math.max(0, Math.round(Number(order.duracionRealMin || 0)));
   }
 
-  const startMs = new Date(order.inicioProduccion).getTime();
+  const startMs = parseSafeTimestampMs(order.inicioProduccion);
   if (isNaN(startMs) || startMs > Date.now() + 60000) {
     return Math.max(0, Math.round(Number(order.duracionRealMin || 0)));
   }
@@ -10539,7 +10612,7 @@ function getOrderElapsedMinutes(order) {
   let endMs = Date.now();
   if (isPaused) {
     if (order.ultimaPausa) {
-      const pMs = new Date(order.ultimaPausa).getTime();
+      const pMs = parseSafeTimestampMs(order.ultimaPausa);
       if (!isNaN(pMs) && pMs >= startMs) {
         endMs = pMs;
       }
@@ -10547,7 +10620,7 @@ function getOrderElapsedMinutes(order) {
       return Math.max(0, Math.round(Number(order.duracionRealMin)));
     }
   } else if (order.finProduccion) {
-    const fMs = new Date(order.finProduccion).getTime();
+    const fMs = parseSafeTimestampMs(order.finProduccion);
     if (!isNaN(fMs) && fMs >= startMs) {
       endMs = fMs;
     }
@@ -10557,7 +10630,6 @@ function getOrderElapsedMinutes(order) {
   return Math.max(0, Math.round(rawMins - pausedMins));
 }
 
-// Formatear minutos a formato humano (horas y minutos)
 function formatMinutesToHuman(minutes) {
   const m = Math.round(Number(minutes) || 0);
   if (m <= 0) return "0 min";
