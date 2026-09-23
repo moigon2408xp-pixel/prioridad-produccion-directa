@@ -2708,3 +2708,198 @@ body.role-trabajadora .manager-only-section {
   border-color: #38bdf8;
   transform: rotate(15deg);
 }
+
+
+/* ============================================================
+   MEJORAS RESPONSIVAS: HEADER MÓVIL Y PREVENCIÓN DE OVERFLOW
+   ============================================================ */
+html, body {
+  overflow-x: hidden !important;
+  max-width: 100vw !important;
+  width: 100% !important;
+}
+
+.app-shell, .workspace {
+  overflow-x: hidden !important;
+  max-width: 100vw !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Badge estilizado para Nuevo Estatus: Esperando Imprenta */
+.badge-imprenta {
+  background: rgba(139, 92, 246, 0.18) !important;
+  color: #8b5cf6 !important;
+  border: 1px solid rgba(139, 92, 246, 0.45) !important;
+  font-weight: 800 !important;
+  border-radius: 12px !important;
+  padding: 2px 8px !important;
+  font-size: 10.5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+[data-theme="dark"] .badge-imprenta {
+  background: rgba(139, 92, 246, 0.28) !important;
+  color: #c4b5fd !important;
+  border-color: rgba(139, 92, 246, 0.6) !important;
+}
+
+/* Filtro activo en barra de búsqueda de inventario */
+.active-filter {
+  background: #06b6d4 !important;
+  color: #ffffff !important;
+  border-color: #06b6d4 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 6px rgba(6, 182, 212, 0.35) !important;
+}
+
+/* ADAPTACIÓN MÓVIL ULTRA FLUIDA PARA HEADER (< 640px) */
+@media (max-width: 640px) {
+  .jj-main-header {
+    margin: 0 0 10px 0 !important;
+    padding: 6px 10px !important;
+    border-radius: 12px !important;
+    min-height: 48px !important;
+    max-height: 52px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    gap: 6px !important;
+    position: sticky !important;
+    top: 4px !important;
+    z-index: 1000 !important;
+  }
+
+  .jj-header-brand {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+    text-decoration: none !important;
+  }
+
+  .jj-brand-logo-img {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .jj-brand-title {
+    font-size: 14px !important;
+    font-weight: 800 !important;
+    white-space: nowrap !important;
+    color: var(--text-main) !important;
+    letter-spacing: -0.3px !important;
+  }
+
+  /* Ocultar subtítulo en pantallas pequeñas para que no ocupe espacio horizontal ni vertical */
+  .jj-brand-sub {
+    display: none !important;
+  }
+
+  .jj-header-controls {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .control-btn-circle {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    font-size: 12px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #btn-fast-order {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    font-size: 13px !important;
+  }
+
+  .user-pill {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    max-width: 85px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  /* El botón secundario de PIN se oculta en móvil porque el user-pill ya abre el mismo modal al tocarlo */
+  .btn-change-pin-header {
+    display: none !important;
+  }
+
+  .logout-btn-new {
+    padding: 5px 8px !important;
+    font-size: 11px !important;
+    margin-left: 2px !important;
+  }
+
+  /* Barra de pestañas deslizable suavemente en móvil sin barra tosca */
+  #sics-module-tabs {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    padding: 4px 6px 8px 6px !important;
+    margin-bottom: 8px !important;
+    scrollbar-width: none !important;
+  }
+
+  #sics-module-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .sics-tab-btn {
+    white-space: nowrap !important;
+    flex: 0 0 auto !important;
+    font-size: 11.5px !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+  }
+}
+
+
+/* Estilos adicionales para Inventario: SKU Badge y Filtros */
+.sku-badge {
+  background: rgba(14, 165, 233, 0.12) !important;
+  color: #0284c7 !important;
+  border: 1px solid rgba(14, 165, 233, 0.3) !important;
+  font-family: monospace !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  border-radius: 6px !important;
+  letter-spacing: 0.5px !important;
+}
+
+[data-theme="dark"] .sku-badge {
+  background: rgba(14, 165, 233, 0.25) !important;
+  color: #38bdf8 !important;
+  border-color: rgba(14, 165, 233, 0.5) !important;
+}
+
+.filter-btn.active-filter, .filter-btn.active {
+  background: #06b6d4 !important;
+  color: #ffffff !important;
+  border-color: #06b6d4 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 6px rgba(6, 182, 212, 0.35) !important;
+}
