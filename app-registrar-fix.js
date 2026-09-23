@@ -1,96 +1,3 @@
-
-// Helper para obtener el equipo real activo de Creaciones JJ (sin nombres de relleno)
-function getRealTeamList() {
-  const users = (state.data?.users || []).filter(u => {
-    const n = String(u.name || u.nombre || "").trim().toLowerCase();
-    const act = u.active !== false && u.activo !== false;
-    // Excluir Eloy (ya no trabaja allí) y placeholders ficticios
-    return act && n !== 'eloy' && n !== 'nelson' && n !== 'yolber' && n !== 'yenny' && n !== 'andreina';
-  });
-  const names = users.map(u => u.name || u.nombre);
-  if (names.length) return names;
-  // Fallback al equipo oficial de Creaciones JJ
-  return ["Moises", "Julieta", "Camila", "Jeanette", "Valentina"];
-}
-
-
-// Helper robusto para calcular minutos reales en mesa de trabajo
-function getOrderElapsedMinutes(order) {
-  if (!order) return 0;
-  let startMs = NaN;
-  
-  if (order.inicioProduccion) {
-    const parsed = new Date(order.inicioProduccion).getTime();
-    if (!isNaN(parsed) && parsed <= Date.now() + 60000) {
-      startMs = parsed;
-    }
-  }
-  
-  // Si no hay inicioProduccion válido o está en el futuro (error de fecha fija), buscar en notas
-  if (isNaN(startMs) || startMs > Date.now()) {
-    const notas = String(order.notas || "");
-    const match = notas.match(/\[(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*-[^\]]+\]:\s*.*(?:producción|produccion|mesa)/i);
-    if (match) {
-      let [_, d, m, y, hh, mm, ap] = match;
-      let h = parseInt(hh, 10);
-      if (ap && ap.toUpperCase() === 'PM' && h < 12) h += 12;
-      if (ap && ap.toUpperCase() === 'AM' && h === 12) h = 0;
-      const dt = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), h, parseInt(mm, 10), 0);
-      if (!isNaN(dt.getTime()) && dt.getTime() <= Date.now()) {
-        startMs = dt.getTime();
-      }
-    }
-  }
-  
-  if (isNaN(startMs)) {
-    return Number(order.duracionRealMin || 0);
-  }
-  
-  const rawMins = Math.floor((Date.now() - startMs) / 60000);
-  const pausedMins = Number(order.tiempoPausadoMin || 0);
-  return Math.max(0, rawMins - pausedMins);
-}
-
-// Formatear minutos a formato humano (horas y minutos)
-function formatMinutesToHuman(minutes) {
-  if (!minutes || minutes <= 0) return "0 min";
-  
-  // Siempre mostrar en formato horas y minutos cuando es mayor a 60 minutos
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    
-    if (remainingMinutes === 0) {
-      return `${hours} hora${hours > 1 ? 's' : ''}`;
-    }
-    
-    return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
-  }
-  
-  // Solo minutos si es menos de 60
-  return `${minutes} min`;
-}
-
-// Ticker global que actualiza los badges de cronómetro en vivo en el DOM cada 10 segundos (optimizado para móvil)
-if (!window._stopwatchInterval) {
-  window._stopwatchInterval = setInterval(() => {
-    try {
-      document.querySelectorAll('.live-stopwatch-badge[data-order-id]').forEach(el => {
-        const id = el.getAttribute('data-order-id');
-        const allTarget = (state.data?.allOrders || []).concat(state.data?.myOrders || []);
-        const ord = allTarget.find(o => String(o.id) === String(id));
-        if (!ord) return;
-        
-        const mins = getOrderElapsedMinutes(ord);
-        const human = formatMinutesToHuman(mins);
-        el.textContent = human;
-      });
-    } catch(e) {
-      console.error("Error actualizando cronómetros:", e);
-    }
-  }, 10000); // 10 segundos para móvil (reducido de 30s)
-}
-
 /**
  * SISTEMA DE PRODUCCIÓN Y API WEB DE PRIORIDAD PRODUCCIÓN
  * Versión 11.0 Definitiva - Frontend JavaScript (app-registrar-fix.js)
@@ -581,11 +488,8 @@ function generateTimeOptions(selectedTime = "11:00 AM") {
 
 // ==== 4. PEGADO MÁGICO AVANZADO PARA REPOSTERAS Y WHATSAPP ====
 function parseMagicPasteText(rawText) {
-  console.log("=== INICIO PARSING DE VOZ ===");
+  console.log("=== INICIO PARSING DE VOZ AVANZADO ===");
   console.log("Texto recibido:", rawText);
-  console.log("Clientes frecuentes disponibles:", state.frequentClients?.length || 0);
-  console.log("Tipos frecuentes disponibles:", state.frequentTypes?.length || 0);
-  console.log("Motivos frecuentes disponibles:", state.frequentMotivos?.length || 0);
   
   const result = {
     cliente: "",
@@ -594,273 +498,197 @@ function parseMagicPasteText(rawText) {
     motivo: "",
     fechaEntrega: "",
     horaEntrega: "11:00 AM",
-    descripcion: rawText.trim()
+    descripcion: (rawText || "").trim()
   };
   
-  if (!rawText) {
-    console.log("Texto vacío, retornando resultado vacío");
-    return result;
-  }
-  
-  const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
-  console.log("Líneas procesadas:", lines);
-  
-  // 1. Detección de Cliente / Nombre (soporte formal e informal)
-  const clienteMatch = rawText.match(/(?:cliente|nombre|para|festejado|comprador|de|del|la)[:\s]+([^\n\r,*]+)/i);
-  if (clienteMatch) {
-    result.cliente = clienteMatch[1].trim();
-  } else {
-    // Buscar en directorio de clientes guardados (coincidencia parcial mejorada)
-    let bestMatch = null;
-    let bestScore = 0;
+  if (!rawText || !rawText.trim()) return result;
+  const cleanText = rawText.trim();
+  const lowerText = cleanText.toLowerCase();
+
+  // 1. Detección Inteligente de Teléfono
+  const phoneMatch = cleanText.match(/(?:\+?58\s?)?0?(4\d{2}[\s.-]?\d{7}|\d{10,11})/);
+  if (phoneMatch) {
+    let digits = phoneMatch[0].replace(/\D/g, "");
+    if (digits.startsWith("58") && digits.length > 10) digits = "0" + digits.substring(2);
+    else if (digits.length === 10 && !digits.startsWith("0")) digits = "0" + digits;
+    result.telefono = digits;
     
+    // Si encontramos teléfono, asociar inmediatamente al cliente frecuente guardado si existe
     for (const c of (state.frequentClients || [])) {
-      if (!c.name) continue;
-      
-      const clientName = c.name.toLowerCase();
-      const lowerText = rawText.toLowerCase();
-      
-      // Coincidencia exacta
-      if (lowerText.includes(clientName)) {
-        bestMatch = c;
-        bestScore = 100;
+      const cPhone = String(c.phone || "").replace(/\D/g, "");
+      if (cPhone && cPhone === digits) {
+        result.cliente = c.name;
+        console.log("Cliente asociado por teléfono guardado:", c.name);
         break;
-      }
-      
-      // Coincidencia de palabras (split por espacios)
-      const clientWords = clientName.split(/\s+/);
-      const textWords = lowerText.split(/\s+/);
-      let matchCount = 0;
-      
-      for (const cWord of clientWords) {
-        if (cWord.length > 2 && textWords.some(tWord => tWord.includes(cWord) || cWord.includes(tWord))) {
-          matchCount++;
-        }
-      }
-      
-      const score = (matchCount / clientWords.length) * 100;
-      if (score > bestScore && score > 50) {
-        bestMatch = c;
-        bestScore = score;
-      }
-    }
-    
-    if (bestMatch) {
-      result.cliente = bestMatch.name;
-      if (bestMatch.phone) result.telefono = bestMatch.phone;
-      console.log("Cliente encontrado por coincidencia parcial:", bestMatch.name, "Score:", bestScore);
-    } else if (lines.length > 0 && !lines[0].includes(":")) {
-      result.cliente = lines[0].replace(/^(?:hola|buenas|saludos|de|la|el|un|una)\b,?\s*/i, "").trim();
-    }
-  }
-  
-  // Validar que el cliente exista en la lista de clientes frecuentes
-  if (result.cliente) {
-    const clientExists = state.frequentClients?.some(c => c.name.toLowerCase() === result.cliente.toLowerCase());
-    if (!clientExists) {
-      console.log("Cliente no encontrado en lista frecuente:", result.cliente);
-    }
-  }
-  
-  // 2. Teléfono / WhatsApp
-  if (!result.telefono) {
-    const phoneMatch = rawText.match(/(\+?58\s?)?0?4\d{2}[\s-]?\d{7}|\b\d{10,11}\b/);
-    if (phoneMatch) {
-      result.telefono = cleanPhoneNumber(phoneMatch[0]);
-    }
-  }
-  
-  // 3. Motivo / Temática (soporte formal e informal)
-  const motivoMatch = rawText.match(/(?:motivo|temática|tematica|tema|personaje|de|del|con|para|con)[:\s]+([^\n\r,*]+)/i);
-  if (motivoMatch) {
-    result.motivo = motivoMatch[1].trim();
-  } else {
-    // Buscar coincidencia parcial mejorada en motivos frecuentes
-    let bestMotivoMatch = null;
-    let bestMotivoScore = 0;
-    
-    for (const m of (state.frequentMotivos || [])) {
-      if (!m) continue;
-      
-      const motivoName = m.toLowerCase();
-      const lowerText = rawText.toLowerCase();
-      
-      // Coincidencia exacta
-      if (lowerText.includes(motivoName)) {
-        bestMotivoMatch = m;
-        bestMotivoScore = 100;
-        break;
-      }
-      
-      // Coincidencia de palabras
-      const motivoWords = motivoName.split(/\s+/);
-      const textWords = lowerText.split(/\s+/);
-      let matchCount = 0;
-      
-      for (const mWord of motivoWords) {
-        if (mWord.length > 2 && textWords.some(tWord => tWord.includes(mWord) || mWord.includes(tWord))) {
-          matchCount++;
-        }
-      }
-      
-      const score = (matchCount / motivoWords.length) * 100;
-      if (score > bestMotivoScore && score > 50) {
-        bestMotivoMatch = m;
-        bestMotivoScore = score;
-      }
-    }
-    
-    if (bestMotivoMatch) {
-      result.motivo = bestMotivoMatch;
-      console.log("Motivo encontrado por coincidencia parcial:", bestMotivoMatch, "Score:", bestMotivoScore);
-    } else {
-      // Detección informal: "de Barbie", "de Avengers", "de Frozen"
-      const informalMatch = rawText.match(/(?:de|del|con|para)\s+([A-Z][a-zÁÉÍÓÚÑáéíóúñ]+)/i);
-      if (informalMatch && !result.motivo) {
-        result.motivo = informalMatch[1].trim();
-        console.log("Motivo detectado informalmente:", result.motivo);
       }
     }
   }
 
-  // 4. Tipo de Trabajo
-  const typeMatch = rawText.match(/(?:tipo|trabajo|producto|servicio|item|pedido)[:\s]+([^\n\r,*]+)/i);
-  if (typeMatch) {
-    result.tipo = typeMatch[1].trim();
-  } else {
-    // Buscar en tipos frecuentes con coincidencia parcial mejorada
-    let bestTypeMatch = null;
-    let bestTypeScore = 0;
-    
-    for (const t of (state.frequentTypes || [])) {
-      if (!t) continue;
-      
-      const typeName = t.toLowerCase();
-      const lowerText = rawText.toLowerCase();
-      
-      // Coincidencia exacta
-      if (lowerText.includes(typeName)) {
-        bestTypeMatch = t;
-        bestTypeScore = 100;
+  // 2. Detección de Cliente en Directorio Guardado (si no vino por teléfono)
+  if (!result.cliente) {
+    const clients = (state.frequentClients || []).filter(c => c.name && c.name.length > 2);
+    // Ordenar de mayor longitud a menor para coincidir nombres completos
+    const sortedClients = [...clients].sort((a, b) => b.name.length - a.name.length);
+    for (const c of sortedClients) {
+      const regex = new RegExp(`\\b${c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(cleanText)) {
+        result.cliente = c.name;
+        if (c.phone && !result.telefono) result.telefono = cleanPhoneNumber(c.phone);
+        console.log("Cliente detectado del directorio frecuente:", c.name);
         break;
       }
-      
-      // Coincidencia de palabras
-      const typeWords = typeName.split(/\s+/);
-      const textWords = lowerText.split(/\s+/);
-      let matchCount = 0;
-      
-      for (const tWord of typeWords) {
-        if (tWord.length > 2 && textWords.some(tWord => tWord.includes(tWord) || tWord.includes(tWord))) {
-          matchCount++;
+    }
+  }
+
+  // Si no se encontró en directorio, buscar patrones de habla ("para [Nombre]", "cliente [Nombre]")
+  if (!result.cliente) {
+    const cliExplicit = cleanText.match(/(?:cliente|atender a|festejado|comprador)[:\s]+([A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+)?)/i);
+    if (cliExplicit && !/^(el|la|un|una|los|las)$/i.test(cliExplicit[1].trim())) {
+      result.cliente = cliExplicit[1].trim();
+    } else {
+      const paraMatch = cleanText.match(/\bpara\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)/);
+      if (paraMatch) {
+        const cand = paraMatch[1].trim();
+        const exclusions = ["hoy", "mañana", "manana", "pasado", "lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo", "el", "la", "las", "los", "un", "una"];
+        if (!exclusions.includes(cand.toLowerCase())) {
+          result.cliente = cand;
         }
       }
-      
-      const score = (matchCount / typeWords.length) * 100;
-      if (score > bestTypeScore && score > 50) {
-        bestTypeMatch = t;
-        bestTypeScore = score;
+    }
+  }
+
+  // 3. Detección y Mapeo Canónico del Tipo de Trabajo (evita duplicar campos)
+  const canonTypes = [
+    "Topper 3D", "Topper Sencillo", "Stickers / Calcomanías", "Pendón",
+    "Taza Sublimada", "Invitación Digital", "Invitación Física / Tarjetas",
+    "Letras 3D", "Maqueta Escolar", "Caja Sorpresa / Cotillón",
+    "Banderines / Guirnaldas", "Cuadro Personalizado", "Estampado / Franela",
+    "Chapa / Pin", "Corte Vinil", "Libreta", "Piñata"
+  ];
+  const allKnownTypes = Array.from(new Set([...(state.frequentTypes || []), ...canonTypes]));
+  
+  for (const t of allKnownTypes) {
+    if (!t) continue;
+    const tClean = t.replace(/[/\\-]/g, ' ');
+    const words = tClean.split(/\s+/).filter(w => w.length > 2);
+    if (words.length > 0 && words.every(w => lowerText.includes(w.toLowerCase()))) {
+      result.tipo = t;
+      break;
+    }
+  }
+
+  if (!result.tipo) {
+    if (/\btopper\s*3d\b/i.test(cleanText)) result.tipo = "Topper 3D";
+    else if (/\btopper\b/i.test(cleanText)) result.tipo = "Topper Sencillo";
+    else if (/\bpend[oó]n\b/i.test(cleanText)) result.tipo = "Pendón";
+    else if (/\bsticker[s]?|calcoman[ií]a[s]?\b/i.test(cleanText)) result.tipo = "Stickers / Calcomanías";
+    else if (/\btaza[s]?\b/i.test(cleanText)) result.tipo = "Taza Sublimada";
+    else if (/\bletra[s]?\s*3d\b/i.test(cleanText)) result.tipo = "Letras 3D";
+    else if (/\bmaqueta\b/i.test(cleanText)) result.tipo = "Maqueta Escolar";
+    else if (/\bpi[ñn]ata\b/i.test(cleanText)) result.tipo = "Piñata";
+    else if (/\bcuadro\b/i.test(cleanText)) result.tipo = "Cuadro Personalizado";
+    else if (/\blibreta[s]?\b/i.test(cleanText)) result.tipo = "Libreta";
+  }
+
+  // 4. Motivo / Temática (personajes, temáticas sin tragar conectores)
+  const motExplicit = cleanText.match(/(?:motivo|tem[aá]tica|tema|personaje)[:\s]+([A-Za-z0-9ÁÉÍÓÚÑáéíóúñ\s]+?)(?=\s+(?:para|el|fecha|a las|con|telefono|tel|$))/i);
+  if (motExplicit) {
+    result.motivo = motExplicit[1].trim();
+  } else {
+    // Patrones informales: "de Peppa Pig", "de Barbie", "de Sonic", "de Spiderman"
+    const deMatch = cleanText.match(/\b(?:de|del)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ0-9]+(?:\s+[A-ZÁÉÍÓÚÑ0-9][a-záéíóúñ0-9]+)?)\b/);
+    if (deMatch) {
+      const cand = deMatch[1].trim();
+      const nonMotifs = ["hoy", "mañana", "manana", "ayer", "la", "el", "un", "una"];
+      if (!nonMotifs.includes(cand.toLowerCase()) && cand.toLowerCase() !== result.cliente.toLowerCase()) {
+        result.motivo = cand;
       }
     }
-    
-    if (bestTypeMatch) {
-      result.tipo = bestTypeMatch;
-      console.log("Tipo encontrado por coincidencia parcial:", bestTypeMatch, "Score:", bestTypeScore);
-    } else {
-      // Fallback a detección de palabras clave
-      if (/topper/i.test(rawText)) result.tipo = "Topper";
-      else if (/piñata|pinata/i.test(rawText)) result.tipo = "Piñata";
-      else if (/maqueta/i.test(rawText)) result.tipo = "Maqueta";
-      else if (/banderín|banderin/i.test(rawText)) result.tipo = "Banderín";
-      else if (/caja/i.test(rawText)) result.tipo = "Caja Explosiva";
-    }
   }
-  
-  // Validar que el tipo exista en la lista de tipos frecuentes
-  if (result.tipo) {
-    const typeExists = state.frequentTypes?.some(t => t.toLowerCase() === result.tipo.toLowerCase());
-    if (!typeExists) {
-      console.log("Tipo no encontrado en lista frecuente:", result.tipo);
-    }
-  }
-  
-  // 5. Fecha de Entrega (Días de la semana, 'mañana', 'hoy', 'pasado mañana', o fechas DD/MM/YYYY)
-  const lowerText = rawText.toLowerCase();
+
+  // 5. Fecha de Entrega en lenguaje natural
   const today = new Date();
-  
-  if (/\bmañana\b/.test(lowerText)) {
-    const tom = new Date(today);
-    tom.setDate(tom.getDate() + 1);
-    result.fechaEntrega = tom.toISOString().split("T")[0];
-    console.log("Fecha detectada: mañana =", result.fechaEntrega);
-  } else if (/\bhoy\b/.test(lowerText)) {
+  if (/\bpasado\s+mañana\b|\bpasado\s+manana\b/i.test(lowerText)) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 2);
+    result.fechaEntrega = d.toISOString().split("T")[0];
+  } else if (/\bmañana\b|\bmanana\b/i.test(lowerText)) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 1);
+    result.fechaEntrega = d.toISOString().split("T")[0];
+  } else if (/\bhoy\b/i.test(lowerText)) {
     result.fechaEntrega = today.toISOString().split("T")[0];
-    console.log("Fecha detectada: hoy =", result.fechaEntrega);
-  } else if (/\bpasado mañana\b/.test(lowerText)) {
-    const tom = new Date(today);
-    tom.setDate(tom.getDate() + 2);
-    result.fechaEntrega = tom.toISOString().split("T")[0];
-    console.log("Fecha detectada: pasado mañana =", result.fechaEntrega);
   } else {
-    const dayNames = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-    const dayMatch = rawText.match(/(?:entregar|fecha|para|el|el dia|día|el día)[:\s]*([a-záéíóúñ]+)/i);
-    
-    if (dayMatch) {
-      const matchedWord = dayMatch[1].toLowerCase();
-      const dayIdx = dayNames.findIndex(d => matchedWord.includes(d));
-      
-      if (dayIdx !== -1) {
-        const targetDayOfWeek = (dayIdx === 4) ? 3 : (dayIdx === 8 ? 6 : (dayIdx > 4 ? dayIdx - 1 : dayIdx));
-        const currentDayOfWeek = today.getDay();
-        
-        let diff = targetDayOfWeek - currentDayOfWeek;
+    // Días de la semana ("el viernes", "para el sábado", "este lunes")
+    const daysMap = { "domingo": 0, "lunes": 1, "martes": 2, "miércoles": 3, "miercoles": 3, "jueves": 4, "viernes": 5, "sábado": 6, "sabado": 6 };
+    for (const [dName, dNum] of Object.entries(daysMap)) {
+      const dRegex = new RegExp(`\\b(?:el|para el|este)\\s+${dName}\\b|\\b${dName}\\b`, 'i');
+      if (dRegex.test(lowerText)) {
+        const currentDay = today.getDay();
+        let diff = dNum - currentDay;
         if (diff <= 0) diff += 7;
-        
-        const targetDate = new Date();
+        const targetDate = new Date(today);
         targetDate.setDate(today.getDate() + diff);
         result.fechaEntrega = targetDate.toISOString().split("T")[0];
-        console.log("Fecha detectada por día de semana:", matchedWord, "=", result.fechaEntrega);
+        break;
       }
     }
   }
 
+  // Detección de fecha explícita DD/MM/YYYY o nombres de meses ("15 de octubre")
   if (!result.fechaEntrega) {
-    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/);
-    if (dateMatch) {
-      const parsedDate = safeParseDate(dateMatch[0]);
-      if (parsedDate) {
-        result.fechaEntrega = parsedDate.toISOString().split("T")[0];
+    const mesMap = { "enero": 0, "febrero": 1, "marzo": 2, "abril": 3, "mayo": 4, "junio": 5, "julio": 6, "agosto": 7, "septiembre": 8, "octubre": 9, "noviembre": 10, "diciembre": 11 };
+    const mesMatch = lowerText.match(/\b(\d{1,2})\s+de\s+([a-záéíóúñ]+)\b/);
+    if (mesMatch && mesMap[mesMatch[2].toLowerCase()] !== undefined) {
+      const dayNum = parseInt(mesMatch[1], 10);
+      const mIdx = mesMap[mesMatch[2].toLowerCase()];
+      const d = new Date(today.getFullYear(), mIdx, dayNum);
+      if (d < today) d.setFullYear(d.getFullYear() + 1);
+      result.fechaEntrega = d.toISOString().split("T")[0];
+    } else {
+      const dateMatch = cleanText.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+      if (dateMatch) {
+        const day = parseInt(dateMatch[1], 10);
+        const mon = parseInt(dateMatch[2], 10) - 1;
+        let yr = dateMatch[3] ? parseInt(dateMatch[3], 10) : today.getFullYear();
+        if (yr < 100) yr += 2000;
+        const dt = new Date(yr, mon, day);
+        if (!isNaN(dt.getTime())) result.fechaEntrega = dt.toISOString().split("T")[0];
       }
     }
   }
-  
-  // 6. Hora de Entrega
-  const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
-  if (timeMatch) {
-    let hourNum = parseInt(timeMatch[1], 10);
-    const minStr = timeMatch[2] || "00";
-    const ampm = timeMatch[3].toUpperCase();
-    
-    if (ampm === 'PM' && hourNum < 12) hourNum += 12;
-    if (ampm === 'AM' && hourNum === 12) hourNum = 0;
-    
-    result.horaEntrega = `${hourNum.toString().padStart(2, '0')}:${minStr} ${ampm}`;
-    console.log("Hora detectada:", result.horaEntrega);
+
+  // 6. Hora de Entrega en lenguaje natural ("a las 3 de la tarde", "11 de la mañana", "4:30 pm")
+  const natTimeMatch = cleanText.match(/(?:a las|para las)?\s*(\d{1,2})(?::(\d{2}))?\s*(?:de la\s*)?(tarde|noche|mañana|manana|am|pm)\b/i);
+  if (natTimeMatch) {
+    let h = parseInt(natTimeMatch[1], 10);
+    const mStr = natTimeMatch[2] || "00";
+    const period = natTimeMatch[3].toLowerCase();
+    let ampm = "AM";
+    if (["tarde", "noche", "pm"].includes(period)) {
+      if (h < 12) h += 12;
+      ampm = "PM";
+    } else {
+      if (h === 12) h = 0;
+      ampm = "AM";
+    }
+    const h12 = h % 12 || 12;
+    result.horaEntrega = `${String(h12).padStart(2, '0')}:${mStr} ${ampm}`;
+  } else {
+    const stdTimeMatch = cleanText.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+    if (stdTimeMatch) {
+      let h = parseInt(stdTimeMatch[1], 10);
+      const mStr = stdTimeMatch[2] || "00";
+      const ampm = stdTimeMatch[3].toUpperCase();
+      const h12 = h % 12 || 12;
+      result.horaEntrega = `${String(h12).padStart(2, '0')}:${mStr} ${ampm}`;
+    }
   }
 
-  console.log("=== RESULTADO FINAL DEL PARSING ===");
-  console.log("Cliente:", result.cliente);
-  console.log("Teléfono:", result.telefono);
-  console.log("Tipo:", result.tipo);
-  console.log("Motivo:", result.motivo);
-  console.log("Fecha:", result.fechaEntrega);
-  console.log("Hora:", result.horaEntrega);
-  console.log("=== FIN PARSING DE VOZ ===");
-
+  console.log("=== RESULTADO PARSING DE VOZ ===", result);
   return result;
 }
 
-// HTTP API Fetch Handler con tiempo límite anti-congelamiento
 async function api(action, extra = {}, timeoutMs = null) {
   const baseUrl = window.PRIORIDAD_CONFIG?.appsScriptUrl || "https://script.google.com/macros/s/AKfycby_mIt5VzEOZjKb6znpYXH_T0Q0jJfEqr5UB1Z8l0JpUiHfEC9CuRuK9z2s_Q3lNl6www/exec";
   const payload = { action, user: state.session?.name || "", userTipo: state.session?.tipo || "taller", token: state.session?.token || "", ...extra };
@@ -3541,17 +3369,37 @@ function detail(order) {
   ) || {};
   const hasDelivery = clientInfo.delivery === "Sí";
 
-  // Cálculo de tiempo transcurrido en vivo si está en proceso
+  // Cálculo de tiempo transcurrido en vivo o congelado según el estatus
   let liveTimerNotice = '';
+  const elMin = getOrderElapsedMinutes(order);
   if (order.estado === 'En proceso') {
-    const elMin = getOrderElapsedMinutes(order);
     liveTimerNotice = `
       <div style="background:rgba(16,185,129,0.12); border:1.5px solid #10b981; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
         <div>
           <strong style="color:#10b981; font-size:13px; display:block;"><i class="fas fa-stopwatch fa-spin"></i> CRONÓMETRO EN VIVO:</strong>
-          <span style="font-size:12px; color:var(--text-main);">Llevas <strong id="modal-live-stopwatch-text">${elMin} minutos</strong> de trabajo físico en mesa.</span>
+          <span style="font-size:12px; color:var(--text-main);">Llevas <strong id="modal-live-stopwatch-text">${formatMinutesToHuman(elMin)} (${elMin} min)</strong> de trabajo físico en mesa.</span>
         </div>
         <span class="live-stopwatch-badge live-stopwatch-active" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="font-size:13px; padding:6px 12px;">⏱️ ${elMin} min</span>
+      </div>
+    `;
+  } else if (order.estado === 'Esperando Imprenta') {
+    liveTimerNotice = `
+      <div style="background:rgba(139,92,246,0.12); border:1.5px solid #8b5cf6; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <div>
+          <strong style="color:#7c3aed; font-size:13px; display:block;"><i class="fas fa-print"></i> ESPERANDO IMPRENTA EXTERNA:</strong>
+          <span style="font-size:12px; color:var(--text-main);">Cronómetro <strong id="modal-live-stopwatch-text">congelado en ${elMin} min</strong>. No suma tiempo al taller mientras terceros entregan la impresión.</span>
+        </div>
+        <span class="live-stopwatch-badge badge-imprenta" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="background:#7c3aed; color:white; font-size:13px; padding:6px 12px; border-radius:20px;">🖨️ ${elMin} min</span>
+      </div>
+    `;
+  } else if (order.estado === 'Pausado') {
+    liveTimerNotice = `
+      <div style="background:rgba(245,158,11,0.12); border:1.5px solid #f59e0b; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <div>
+          <strong style="color:#d97706; font-size:13px; display:block;"><i class="fas fa-pause"></i> PEDIDO PAUSADO:</strong>
+          <span style="font-size:12px; color:var(--text-main);">Cronómetro <strong id="modal-live-stopwatch-text">congelado en ${elMin} min</strong>.</span>
+        </div>
+        <span class="live-stopwatch-badge" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="background:#f59e0b; color:white; font-size:13px; padding:6px 12px; border-radius:20px;">⏸️ ${elMin} min</span>
       </div>
     `;
   }
@@ -3644,7 +3492,7 @@ function detail(order) {
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
           <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
           <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-            ${(isLead() ? ["Pendiente", "En proceso", "Pausado", "Terminado", "Entregado", "Cancelado"] : ["Pendiente", "En proceso", "Pausado", "Terminado", "Cancelado"]).map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st}</option>`).join("")}
+            ${(isLead() ? ["Pendiente", "En proceso", "Pausado", "Esperando Imprenta", "Terminado", "Entregado", "Cancelado"] : ["Pendiente", "En proceso", "Pausado", "Esperando Imprenta", "Terminado", "Cancelado"]).map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st === "Esperando Imprenta" ? "🖨️ Esperando Imprenta" : (st === "Pausado" ? "⏸️ Pausado" : st)}</option>`).join("")}
           </select>
         </div>
 
@@ -4074,32 +3922,51 @@ function openFinishModal(order, targetStatus) {
         if (order.inicioProduccion) {
           const sMs = new Date(order.inicioProduccion).getTime();
           if (!isNaN(sMs)) {
-            calcElapsed = Math.max(0, Math.round((Date.now() - sMs) / 60000) - (Number(order.tiempoPausadoMin) || 0));
+            calcElapsed = getOrderElapsedMinutes(order);
           }
         }
-        // Si el cronómetro está en 0 pero ya había un tiempo guardado, usar ese valor
         if (calcElapsed <= 0 && Number(order.duracionRealMin) > 0) {
           calcElapsed = Number(order.duracionRealMin);
         }
-        // Guardar el valor calculado en un atributo data para recuperarlo si el usuario lo borra
-        const storedElapsed = calcElapsed;
         
-        // Validación: si el diseño está en proceso, advertir al usuario
-        const designWarning = (order.diseno && (order.diseno.toLowerCase() === 'no' || order.diseno === 'En proceso' || order.diseno === 'en proceso')) ? 
-          `<div style="background:rgba(245,158,11,0.15); border:1px solid #f59e0b; border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px; color:#d97706;">
-            <strong>⚠️ ADVERTENCIA:</strong> El estado del diseño aún está en proceso. Se recomienda marcar el diseño como "Listo para fabricar" antes de terminar el pedido.
+        const designWarning = (order.diseno && (order.diseno.toLowerCase() === 'no' || order.diseno.toLowerCase() === 'en proceso')) ? 
+          `<div style="background:rgba(245,158,11,0.15); border:1.5px solid #f59e0b; border-radius:10px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#d97706; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-exclamation-triangle" style="font-size:16px;"></i>
+            <span><strong>ADVERTENCIA:</strong> El diseño estaba en proceso. Se registrará como finalizado.</span>
           </div>` : '';
         
         return `
           ${designWarning}
-          <div style="background:rgba(16,185,129,0.08); border:1.5px solid #10b981; border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+          <div style="background:rgba(16,185,129,0.1); border:1.5px solid #10b981; border-radius:12px; padding:12px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <span style="font-size:12.5px; font-weight:800; color:#059669; display:block;">⏱️ TIEMPO REAL INVERTIDO EN MESA:</span>
-              <span style="font-size:11px; color:var(--text-muted);">
-                ${calcElapsed > 0 ? `Calculado por el cronómetro: <strong>${formatMinutesToHuman(calcElapsed)}</strong>` : `⚠️ Cronómetro no iniciado o en 0. Confirma los minutos reales.`}
+              <span style="font-size:12px; font-weight:800; color:#059669; display:block;">
+                <i class="fas fa-check-circle"></i> TIEMPO REAL REGISTRADO AUTOMÁTICAMENTE:
+              </span>
+              <span style="font-size:12px; color:var(--text-main);">
+                El pedido duró <strong>${formatMinutesToHuman(calcElapsed)}</strong> en mesa (${calcElapsed} minutos).
               </span>
             </div>
-            <input type="number" id="finish-duracion-manual" name="duracionManualMin" value="${calcElapsed > 0 ? calcElapsed : ''}" placeholder="${calcElapsed > 0 ? calcElapsed : 'Minutos'}" min="0" data-stored-value="${calcElapsed}" style="width:85px; padding:6px 8px; border-radius:6px; border:1.5px solid #10b981; font-weight:bold; font-size:14px; text-align:center;">
+            <div style="text-align:right;">
+              <span style="display:inline-block; background:#10b981; color:white; font-size:13px; font-weight:900; padding:6px 14px; border-radius:20px; box-shadow:0 2px 6px rgba(16,185,129,0.3);">
+                ⏱️ ${calcElapsed} min
+              </span>
+              <input type="hidden" id="finish-duracion-calc" name="duracionCalculadaMin" value="${calcElapsed}">
+            </div>
+          </div>
+
+          <div style="margin-bottom:12px; text-align:right;">
+            <button type="button" onclick="const w = document.getElementById('manual-time-adjust-wrap'); if(w) w.style.display = (w.style.display === 'none' ? 'block' : 'none');" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
+              ✏️ ¿Hubo anomalías en el tiempo? Ajustar manualmente
+            </button>
+            <div id="manual-time-adjust-wrap" style="display:none; margin-top:8px; background:var(--bg-main); padding:10px 14px; border-radius:8px; border:1px dashed var(--border-color); text-align:left;">
+              <label style="font-size:11.5px; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">
+                Minutos reales corregidos manualmente:
+              </label>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="number" id="finish-duracion-manual" name="duracionManualMin" min="0" placeholder="Ej: ${calcElapsed}" style="width:110px; padding:6px 10px; border-radius:6px; border:1.5px solid var(--border-color); font-weight:bold; font-size:13px;">
+                <span style="font-size:11px; color:var(--text-muted);">Solo para casos de excepción justificados.</span>
+              </div>
+            </div>
           </div>
         `;
       })()}
@@ -4162,9 +4029,10 @@ function openFinishModal(order, targetStatus) {
     btn.textContent = "⏳ Guardando y subiendo evidencias...";
 
     const commentVal = e.target.comentarioCierre.value.trim() || "Completado sin observaciones adicionales.";
+    const calcVal = Number(e.target.duracionCalculadaMin?.value || 0);
     const manualVal = e.target.duracionManualMin?.value?.trim();
-    // Usar valor manual si el usuario lo ingresó, si no usar valor calculado automáticamente
-    const finalDuration = manualVal && manualVal !== '' ? Number(manualVal) : calcElapsed;
+    // Usar valor manual SOLO si el usuario abrió el ajuste y digitó un número válido; de lo contrario usar tiempo 100% automático
+    const finalDuration = (manualVal && manualVal !== '' && !isNaN(Number(manualVal))) ? Number(manualVal) : calcVal;
 
     try {
       console.log("Guardando orden con duración:", finalDuration, "minutos (calculado:", calcElapsed, ", manual:", manualVal, ")");
@@ -7602,112 +7470,14 @@ window.addStandardSubItem = function(tipo, cant, det) {
 // MÓDULO 1: PROVEEDORES Y CUENTAS POR PAGAR (EXCLUSIVO GERENCIA / JEFES)
 // =========================================================================
 function getStoredProvidersData() {
-  const defaultProviders = [
-    "Americas (Jorge José Ochoa Gómez)",
-    "Blindac, C.A.",
-    "Prodimarca (Manualidades y Artes)",
-    "Inversiones Patiño, C.A.",
-    "Huepa (Chocolates & Repostería)",
-    "Mercal",
-    "Makro",
-    "Lider",
-    "Central Madeirense",
-    "Papeles Valencia",
-    "Silicones Venezuela",
-    "Artesanías Creativas",
-    "Distribuidora de Repostería",
-    "Chocolatería Artesanal"
-  ];
-  
-  const defaultList = [
-    {
-      id: "PROV-11140",
-      proveedor: "Americas (Jorge José Ochoa Gómez)",
-      numeroNota: "11140",
-      fechaEntrega: "2026-09-02",
-      fechaVencimiento: "2026-09-09",
-      moneda: "USD",
-      montoTotal: 325.00,
-      abonado: 100.00,
-      saldoPendiente: 225.00,
-      estado: "Vencida",
-      tasaBCV: 798.33,
-      fotos: [],
-      abonos: [
-        { fecha: "05/09/2026 10:30 AM", monto: 100.00, moneda: "USD", referencia: "Efectivo", registradoPor: "Moises" }
-      ],
-      notas: "Promoción Nata 1 Galon, Mantequilla Galon"
-    },
-    {
-      id: "PROV-111764",
-      proveedor: "Blindac, C.A.",
-      numeroNota: "CD111764",
-      fechaEntrega: "2026-09-07",
-      fechaVencimiento: "2026-09-10",
-      moneda: "USD",
-      montoTotal: 15.45,
-      abonado: 15.45,
-      saldoPendiente: 0.00,
-      estado: "Pagada",
-      tasaBCV: 798.33,
-      fotos: [],
-      abonos: [
-        { fecha: "10/09/2026 04:15 PM", monto: 15.45, moneda: "USD", referencia: "Transferencia Banesco", registradoPor: "Julieta" }
-      ],
-      notas: "Porta Carnet Negro Pointer y Azul Pointer"
-    },
-    {
-      id: "PROV-162893",
-      proveedor: "Prodimarca (Manualidades y Artes)",
-      numeroNota: "00162893",
-      fechaEntrega: "2026-09-01",
-      fechaVencimiento: "2026-09-20",
-      moneda: "USD",
-      montoTotal: 245.40,
-      abonado: 50.00,
-      saldoPendiente: 195.40,
-      estado: "Parcial",
-      tasaBCV: 798.33,
-      fotos: [],
-      abonos: [
-        { fecha: "08/09/2026 11:00 AM", monto: 50.00, moneda: "USD", referencia: "Pago Móvil", registradoPor: "Moises" }
-      ],
-      notas: "Cartulinas construcción college, silicón líquido y en barra"
-    },
-    {
-      id: "PROV-36689",
-      proveedor: "Inversiones Patiño, C.A.",
-      numeroNota: "00036689",
-      fechaEntrega: "2026-09-03",
-      fechaVencimiento: "2026-09-23",
-      moneda: "USD",
-      montoTotal: 81.00,
-      abonado: 0.00,
-      saldoPendiente: 81.00,
-      estado: "Pendiente",
-      tasaBCV: 798.33,
-      fotos: [],
-      abonos: [],
-      notas: "Crema Chantilly Sucream 1Lt x 12"
-    },
-    {
-      id: "PROV-18503",
-      proveedor: "Huepa (Chocolates & Repostería)",
-      numeroNota: "00018503",
-      fechaEntrega: "2026-09-09",
-      fechaVencimiento: "2026-09-29",
-      moneda: "USD",
-      montoTotal: 92.28,
-      abonado: 0.00,
-      saldoPendiente: 92.28,
-      estado: "Pendiente",
-      tasaBCV: 798.33,
-      fotos: [],
-      abonos: [],
-      notas: "Tina Maxiplas, Cuchara postre, Bolsas teta y casero"
-    }
-  ];
-  return store.get("pp_provider_invoices", defaultList);
+  if (state.data?.providerInvoices && Array.isArray(state.data.providerInvoices) && state.data.providerInvoices.length > 0) {
+    return state.data.providerInvoices;
+  }
+  const cached = store.get("pp_provider_invoices", null);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    return cached;
+  }
+  return [];
 }
 
 function saveStoredProvidersData(list) {
@@ -8326,13 +8096,18 @@ window.openAddProviderPaymentModal = function(id) {
   });
 };
 
-window.deleteProviderInvoice = function(id) {
-  if (!confirm("¿Seguro que deseas eliminar este registro de proveedor?")) return;
-  let list = getStoredProvidersData();
-  list = list.filter(i => String(i.id) !== String(id));
+window.deleteProviderInvoice = async function(id) {
+  if (!confirm("¿Seguro que deseas eliminar definitivamente este registro de proveedor?")) return;
+  let list = getStoredProvidersData().filter(i => String(i.id) !== String(id));
   saveStoredProvidersData(list);
-  showToast("Nota de entrega eliminada.");
   if (typeof render === "function") render();
+  try {
+    await api("profile_delete_provider_invoice", { id: id });
+    showToast("✅ Registro de proveedor eliminado permanentemente.");
+  } catch(e) {
+    console.warn("Aviso backend eliminación proveedor:", e);
+    showToast("✅ Registro de proveedor eliminado del dispositivo.");
+  }
 };
 
 
@@ -8340,30 +8115,20 @@ window.deleteProviderInvoice = function(id) {
 // MÓDULO 2: CIERRE DE CAJA POR TURNOS (PLANILLA FÍSICA CREACIONES JJ)
 // =========================================================================
 function getStoredCashCloses() {
-  const defaultList = [
-    {
-      id: "CAJA-20260910-T1",
-      fecha: "2026-09-10",
-      turno: "Turno 1 (8:00 AM a 1:00 PM)",
-      inicioBs: 300.00,
-      inicioUSD: 3.00,
-      totalPuntoBs: 3180.00,
-      totalPagoMovilBs: 40.00,
-      totalEfectivoBs: 1050.00,
-      totalEfectivoUSD: 12.00,
-      tasaBCV: 798.33,
-      totalDiaBs: 4270.00,
-      totalDiaUSD: 17.35,
-      fotoRespaldo: "",
-      responsable: "Moises",
-      observaciones: "Turno de la mañana cuadrado con lote de punto."
-    }
-  ];
-  return store.get("pp_cash_closes", defaultList);
+  if (state.data?.cashCloses && Array.isArray(state.data.cashCloses) && state.data.cashCloses.length > 0) {
+    return state.data.cashCloses;
+  }
+  const cached = store.get("pp_cash_closes", null);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    return cached;
+  }
+  return [];
 }
 
 function saveStoredCashCloses(list) {
-  store.set("pp_cash_closes", list);
+  const cleanList = Array.isArray(list) ? list : [];
+  store.set("pp_cash_closes", cleanList);
+  if (state.data) state.data.cashCloses = cleanList;
 }
 
 window.editCashClose = function(cashId) {
@@ -8447,17 +8212,22 @@ window.editCashClose = function(cashId) {
   });
 };
 
-window.deleteCashClose = function(cashId) {
-  if (!confirm("¿Estás seguro de que deseas eliminar este cierre de caja? Esta acción no se puede deshacer.")) {
+window.deleteCashClose = async function(cashId) {
+  if (!confirm("¿Estás seguro de que deseas eliminar este cierre de caja definitivamente?")) {
     return;
   }
   
-  const closes = getStoredCashCloses();
-  const updatedCloses = closes.filter(c => c.id !== cashId);
-  saveStoredCashCloses(updatedCloses);
-  
-  showToast("✅ Cierre de caja eliminado exitosamente.");
+  const closes = getStoredCashCloses().filter(c => String(c.id) !== String(cashId));
+  saveStoredCashCloses(closes);
   if (typeof render === "function") render();
+  
+  try {
+    await api("profile_delete_cash_close", { id: cashId });
+    showToast("✅ Cierre de caja eliminado permanentemente.");
+  } catch (err) {
+    console.warn("Aviso backend eliminación cierre:", err);
+    showToast("✅ Cierre eliminado del dispositivo.");
+  }
 };
 
 window.editProviderAbono = function(invoiceId, abonoIndex) {
@@ -8844,6 +8614,62 @@ window.openNewCashCloseModal = function() {
 // =========================================================================
 // MÓDULO 3: MINI INVENTARIO Y LISTA DE COMPRAS
 // =========================================================================
+
+// Generador de código secuencial irrepetible para insumos (ART-001, ART-002...)
+function generateUniqueInventoryCode() {
+  const items = getStoredInventory();
+  let maxNum = 0;
+  items.forEach(it => {
+    const m = String(it.id || "").match(/(?:ART|INV)[-_]?(\d+)/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxNum && n < 10000) maxNum = n;
+    }
+  });
+  if (maxNum === 0) maxNum = items.length;
+  const nextNum = maxNum + 1;
+  return `ART-${String(nextNum).padStart(3, '0')}`;
+}
+
+window.deleteInventoryItem = async function(id) {
+  if (!confirm("¿Estás seguro de que deseas eliminar este insumo definitivamente?")) {
+    return;
+  }
+  const list = getStoredInventory().filter(i => String(i.id) !== String(id));
+  saveStoredInventory(list);
+  if (state.data) state.data.inventory = list;
+  if (typeof render === "function") render();
+  try {
+    await api("profile_delete_inventory_item", { id });
+    showToast("✅ Insumo eliminado permanentemente.");
+  } catch (err) {
+    console.warn("Aviso backend eliminación insumo:", err);
+    showToast("✅ Insumo eliminado localmente.");
+  }
+};
+
+window.setInventorySearch = function(query) {
+  state.invSearchQuery = query;
+  const input = document.getElementById("inv-search-input");
+  const tableRows = document.querySelectorAll("#inventory-table-body tr");
+  const cards = document.querySelectorAll(".inventory-grid .inventory-card");
+  const q = String(query || "").trim().toLowerCase();
+  
+  tableRows.forEach(tr => {
+    const text = tr.textContent.toLowerCase();
+    tr.style.display = (!q || text.includes(q)) ? "" : "none";
+  });
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.display = (!q || text.includes(q)) ? "" : "none";
+  });
+};
+
+window.setInventoryFilter = function(status) {
+  state.invFilterStatus = status;
+  if (typeof render === "function") render();
+};
+
 function getStoredInventory() {
   // PRIORIDAD: Backend primero (como pedidos), cache local como backup solo si backend falla
   if (state.data?.inventory && state.data.inventory.length > 0) {
@@ -9094,27 +8920,45 @@ window.deleteWorkshopPrice = function(id) {
 };
 
 function inventoryView() {
-  const items = getStoredInventory();
+  const allItems = getStoredInventory();
   const currentTab = state.inventoryTab || 'catalog'; // 'catalog' | 'shopping_list'
-  const outItems = items.filter(i => i.estado === 'Agotado' || i.estado === 'Bajo Stock');
+  const currentLayout = state.inventoryLayout || 'table'; // 'table' | 'grid'
+  const filterStatus = state.invFilterStatus || 'all';
+  const searchQuery = String(state.invSearchQuery || '').trim().toLowerCase();
+
+  const outItems = allItems.filter(i => i.estado === 'Agotado' || i.estado === 'Bajo Stock');
+
+  // Filtrado reactivo de items
+  let items = allItems.filter(item => {
+    if (filterStatus !== 'all' && item.estado !== filterStatus) return false;
+    if (searchQuery) {
+      const matchCode = String(item.id || '').toLowerCase().includes(searchQuery);
+      const matchProd = String(item.producto || '').toLowerCase().includes(searchQuery);
+      const matchCat = String(item.categoria || '').toLowerCase().includes(searchQuery);
+      const matchProv = String(item.proveedor || '').toLowerCase().includes(searchQuery);
+      return matchCode || matchProd || matchCat || matchProv;
+    }
+    return true;
+  });
 
   return `
     <div style="max-width:1150px; margin:0 auto; padding-bottom:40px;">
+      <!-- ENCABEZADO Y ACCIONES PRINCIPALES DE INVENTARIO -->
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
         <div>
           <h1 style="font-size:22px; margin:0 0 6px 0; display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-boxes" style="color:#06b6d4;"></i> Mini Inventario &amp; Control de Insumos
+            <i class="fas fa-boxes" style="color:#06b6d4;"></i> Control de Inventario &amp; Insumos
           </h1>
           <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
-            Control de materiales del taller, alertas de agotados y lista para compras mensuales a proveedores.
+            Control en tiempo real de insumos de taller, códigos únicos, alertas de stock y lista para proveedores.
           </p>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button type="button" class="secondary-button" onclick="window.setInventoryTab('${currentTab === 'catalog' ? 'shopping_list' : 'catalog'}')" style="background:${currentTab === 'shopping_list' ? '#06b6d4; color:white;' : 'var(--bg-card)'}; font-weight:bold; font-size:12px; padding:8px 14px;">
             <i class="fas fa-clipboard-list"></i> ${currentTab === 'shopping_list' ? 'Ver Catálogo Completo' : `📋 Lista de Compras (${outItems.length})`}
           </button>
           <button type="button" class="primary-button" onclick="window.openNewInventoryModal()" style="background:#06b6d4; border:none; padding:8px 14px; font-size:12px; font-weight:bold;">
-            + Nuevo Insumo
+            <i class="fas fa-plus"></i> Nuevo Insumo
           </button>
         </div>
       </div>
@@ -9136,6 +8980,7 @@ function inventoryView() {
             <table class="sics-data-table">
               <thead>
                 <tr>
+                  <th>Código</th>
                   <th>Insumo / Producto</th>
                   <th>Categoría</th>
                   <th>Estado Actual</th>
@@ -9146,6 +8991,7 @@ function inventoryView() {
               <tbody>
                 ${outItems.length ? outItems.map(i => `
                   <tr>
+                    <td><span style="background:rgba(6,182,212,0.15); color:#06b6d4; font-weight:900; padding:2px 7px; border-radius:6px; font-size:11px;">${escapeHtml(i.id || 'ART-?')}</span></td>
                     <td style="font-weight:bold; color:var(--text-main);">${escapeHtml(i.producto)}</td>
                     <td style="color:var(--text-muted);">${escapeHtml(i.categoria)}</td>
                     <td>
@@ -9156,50 +9002,158 @@ function inventoryView() {
                     <td style="color:#38bdf8; font-weight:bold;">${escapeHtml(i.proveedor || 'Sin asignar')}</td>
                     <td style="text-align:right; font-weight:bold; color:#10b981;">$${Number(i.precioUSD).toFixed(2)}</td>
                   </tr>
-                `).join('') : '<tr><td colspan="5" style="text-align:center; padding:20px; color:#10b981;">🎉 ¡Todos los insumos están abastecidos! No hay faltantes.</td></tr>'}
+                `).join('') : '<tr><td colspan="6" style="text-align:center; padding:20px; color:#10b981;">🎉 ¡Todos los insumos están abastecidos! No hay faltantes.</td></tr>'}
               </tbody>
             </table>
           </div>
         </div>
       ` : `
-        <!-- CATÁLOGO DE INSUMOS (GRID) -->
-        <div class="inventory-grid">
-          ${items.map(item => {
-            const isOut = item.estado === 'Agotado';
-            const isLow = item.estado === 'Bajo Stock';
-            const cardClass = isOut ? 'inventory-card is-out' : (isLow ? 'inventory-card is-low' : 'inventory-card');
-            const badgeBg = isOut ? 'rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4);' : (isLow ? 'rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4);' : 'rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);');
-
-            return `
-              <div class="${cardClass}">
-                <div>
-                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-                    <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase;">${escapeHtml(item.categoria)}</span>
-                    <button type="button" onclick="window.cycleInventoryStatus('${escapeHtml(item.id)}')" style="border-radius:12px; padding:2px 8px; font-size:10px; font-weight:800; cursor:pointer; background:${badgeBg}">
-                      ${escapeHtml(item.estado)}
-                    </button>
-                  </div>
-                  <h3 style="margin:0 0 4px 0; font-size:14px; color:var(--text-main);">${escapeHtml(item.producto)}</h3>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
-                    Stock: <strong>${escapeHtml(item.stockActual || 'N/A')}</strong>
-                  </div>
-                </div>
-
-                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; font-size:11.5px; gap:6px;">
-                  <span style="color:#9ca3af;"><i class="fas fa-truck" style="font-size:10px;"></i> ${escapeHtml(item.proveedor || 'Proveedor')}</span>
-                  <span style="display:flex; align-items:center; gap:8px;">
-                    <strong style="color:#10b981;">$${Number(item.precioUSD).toFixed(2)}</strong>
-                    <button type="button" title="Editar insumo (stock, precio, proveedor)" onclick="window.editInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:11px;">✏️</button>
-                  </span>
-                </div>
-              </div>
-            `;
-          }).join('')}
+        <!-- BARRA DE BÚSQUEDA Y FILTROS INTERACTIVOS DE INVENTARIO -->
+        <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:12px 16px; margin-bottom:16px; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="position:relative; flex:1; min-width:280px;">
+              <i class="fas fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:13px;"></i>
+              <input type="text" id="inv-search-input" value="${escapeHtml(state.invSearchQuery || '')}" oninput="window.setInventorySearch(this.value)" placeholder="🔍 Buscar por código (ART-001), insumo, categoría o proveedor..." style="width:100%; box-sizing:border-box; padding:9px 12px 9px 36px; border-radius:10px; border:1px solid var(--border-color); background:var(--bg-main); color:var(--text-main); font-size:13px;">
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              <button type="button" class="secondary-button" onclick="window.setInventoryFilter('all')" style="font-size:11px; padding:6px 10px; font-weight:${filterStatus === 'all' ? '800' : 'normal'}; border-color:${filterStatus === 'all' ? '#06b6d4' : 'var(--border-color)'};">
+                Todos (${allItems.length})
+              </button>
+              <button type="button" class="secondary-button" onclick="window.setInventoryFilter('Agotado')" style="font-size:11px; padding:6px 10px; color:#ef4444; font-weight:${filterStatus === 'Agotado' ? '800' : 'normal'}; border-color:${filterStatus === 'Agotado' ? '#ef4444' : 'var(--border-color)'};">
+                Agotados (${allItems.filter(i=>i.estado==='Agotado').length})
+              </button>
+              <button type="button" class="secondary-button" onclick="window.setInventoryFilter('Bajo Stock')" style="font-size:11px; padding:6px 10px; color:#f59e0b; font-weight:${filterStatus === 'Bajo Stock' ? '800' : 'normal'}; border-color:${filterStatus === 'Bajo Stock' ? '#f59e0b' : 'var(--border-color)'};">
+                Bajo Stock (${allItems.filter(i=>i.estado==='Bajo Stock').length})
+              </button>
+              <button type="button" class="secondary-button" onclick="window.setInventoryFilter('Disponible')" style="font-size:11px; padding:6px 10px; color:#10b981; font-weight:${filterStatus === 'Disponible' ? '800' : 'normal'}; border-color:${filterStatus === 'Disponible' ? '#10b981' : 'var(--border-color)'};">
+                Disponibles (${allItems.filter(i=>i.estado==='Disponible').length})
+              </button>
+              <div style="height:20px; width:1px; background:var(--border-color); margin:0 4px;"></div>
+              <button type="button" class="secondary-button" onclick="window.setInventoryLayout('${currentLayout === 'table' ? 'grid' : 'table'}')" title="Alternar entre Vista de Tabla y Vista de Tarjetas" style="font-size:12px; padding:6px 10px;">
+                <i class="fas ${currentLayout === 'table' ? 'fa-th-large' : 'fa-table'}"></i> ${currentLayout === 'table' ? 'Tarjetas' : 'Tabla'}
+              </button>
+            </div>
+          </div>
         </div>
+
+        ${currentLayout === 'table' ? `
+          <!-- TABLA INTERACTIVA DE BÚSQUEDA Y GESTIÓN DE INVENTARIO -->
+          <div class="sics-table-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; overflow:hidden;">
+            <div style="overflow-x:auto;">
+              <table class="sics-data-table" style="width:100%; border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:1.5px solid var(--border-color); background:rgba(6,182,212,0.06);">
+                    <th style="padding:10px 12px; text-align:left; font-size:12px;">Código Único</th>
+                    <th style="padding:10px 12px; text-align:left; font-size:12px;">Insumo / Material</th>
+                    <th style="padding:10px 12px; text-align:left; font-size:12px;">Categoría</th>
+                    <th style="padding:10px 12px; text-align:left; font-size:12px;">Stock en Tienda</th>
+                    <th style="padding:10px 12px; text-align:center; font-size:12px;">Estado (Clic para alternar)</th>
+                    <th style="padding:10px 12px; text-align:right; font-size:12px;">Precio USD</th>
+                    <th style="padding:10px 12px; text-align:left; font-size:12px;">Proveedor</th>
+                    <th style="padding:10px 12px; text-align:center; font-size:12px;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="inventory-table-body">
+                  ${items.length ? items.map(item => {
+                    const isOut = item.estado === 'Agotado';
+                    const isLow = item.estado === 'Bajo Stock';
+                    const badgeBg = isOut ? 'rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4);' : (isLow ? 'rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4);' : 'rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);');
+                    return `
+                      <tr style="border-bottom:1px solid var(--border-color); transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.04)'" onmouseout="this.style.background=''">
+                        <td style="padding:10px 12px;">
+                          <span style="background:rgba(6,182,212,0.15); color:#06b6d4; font-weight:900; padding:3px 8px; border-radius:6px; font-size:11.5px; letter-spacing:0.5px; border:1px solid rgba(6,182,212,0.3);">
+                            ${escapeHtml(item.id || 'ART-?')}
+                          </span>
+                        </td>
+                        <td style="padding:10px 12px; font-weight:700; color:var(--text-main); font-size:13px;">
+                          ${escapeHtml(item.producto)}
+                        </td>
+                        <td style="padding:10px 12px; color:var(--text-muted); font-size:12px;">
+                          ${escapeHtml(item.categoria)}
+                        </td>
+                        <td style="padding:10px 12px; font-size:12.5px; color:var(--text-main); font-weight:600;">
+                          ${escapeHtml(item.stockActual || '1 unidad')}
+                        </td>
+                        <td style="padding:10px 12px; text-align:center;">
+                          <button type="button" onclick="window.cycleInventoryStatus('${escapeHtml(item.id)}')" title="Clic para cambiar estado" style="border-radius:12px; padding:3px 10px; font-size:10.5px; font-weight:800; cursor:pointer; background:${badgeBg}; transition:transform 0.15s;">
+                            ${escapeHtml(item.estado)} 🔄
+                          </button>
+                        </td>
+                        <td style="padding:10px 12px; text-align:right; font-weight:800; color:#10b981; font-size:13px;">
+                          $${Number(item.precioUSD || 0).toFixed(2)}
+                        </td>
+                        <td style="padding:10px 12px; color:#38bdf8; font-weight:600; font-size:12px;">
+                          ${escapeHtml(item.proveedor || 'Sin asignar')}
+                        </td>
+                        <td style="padding:10px 12px; text-align:center; white-space:nowrap;">
+                          <button type="button" onclick="window.editInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:11.5px; margin-right:4px;" title="Editar artículo">
+                            ✏️
+                          </button>
+                          <button type="button" onclick="window.deleteInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:11.5px;" title="Eliminar definitivamente">
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('') : `
+                    <tr>
+                      <td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted); font-size:13px;">
+                        No se encontraron insumos que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  `}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ` : `
+          <!-- VISTA EN TARJETAS (GRID) -->
+          <div class="inventory-grid">
+            ${items.map(item => {
+              const isOut = item.estado === 'Agotado';
+              const isLow = item.estado === 'Bajo Stock';
+              const cardClass = isOut ? 'inventory-card is-out' : (isLow ? 'inventory-card is-low' : 'inventory-card');
+              const badgeBg = isOut ? 'rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4);' : (isLow ? 'rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4);' : 'rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);');
+
+              return `
+                <div class="${cardClass}">
+                  <div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                      <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase;">${escapeHtml(item.categoria)}</span>
+                      <button type="button" onclick="window.cycleInventoryStatus('${escapeHtml(item.id)}')" style="border-radius:12px; padding:2px 8px; font-size:10px; font-weight:800; cursor:pointer; background:${badgeBg}">
+                        ${escapeHtml(item.estado)}
+                      </button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                      <span style="background:rgba(6,182,212,0.15); color:#06b6d4; font-weight:900; padding:1px 6px; border-radius:4px; font-size:10.5px;">${escapeHtml(item.id || 'ART-?')}</span>
+                      <h3 style="margin:0; font-size:14px; color:var(--text-main); flex:1;">${escapeHtml(item.producto)}</h3>
+                    </div>
+                    <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">
+                      Stock: <strong>${escapeHtml(item.stockActual || 'N/A')}</strong>
+                      ${item.proveedor ? ` · <span style="color:#38bdf8;">${escapeHtml(item.proveedor)}</span>` : ''}
+                    </div>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:8px; margin-top:4px;">
+                    <span style="font-weight:bold; color:#10b981; font-size:13px;">$${Number(item.precioUSD).toFixed(2)}</span>
+                    <span style="display:flex; gap:6px;">
+                      <button type="button" onclick="window.editInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:11px;">✏️</button>
+                      <button type="button" onclick="window.deleteInventoryItem('${escapeHtml(item.id)}')" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:11px;">🗑️</button>
+                    </span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
       `}
     </div>
   `;
 }
+
+window.setInventoryLayout = function(layout) {
+  state.inventoryLayout = layout;
+  if (typeof render === "function") render();
+};
 
 window.setInventoryTab = function(tab) {
   state.inventoryTab = tab;
@@ -9762,7 +9716,7 @@ window.openNewInventoryModal = function() {
     if (res.isConfirmed && res.value) {
       const list = getStoredInventory();
       // Generar ID único con timestamp y random
-      const uniqueId = "INV-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+      const uniqueId = generateUniqueInventoryCode();
       console.log("Generando ID único para nuevo insumo:", uniqueId);
       
       const newItem = {
@@ -9947,15 +9901,27 @@ window.openChangePinModal = function() {
 
 // 2. CONFIGURACIÓN DE GEMINI API KEY (Persistente y compartida entre usuarios)
 window.getGeminiApiKey = function() {
-  // Intentar obtener del almacenamiento persistente de la app primero
-  let key = store.get("jj_gemini_api_key") || "";
-  
-  // Si no existe, intentar del localStorage (fallback)
-  if (!key) {
-    key = localStorage.getItem("jj_gemini_api_key") || "";
+  // 1. Clave en memoria de la sesión compartida
+  if (window.__SHARED_GEMINI_KEY__) return window.__SHARED_GEMINI_KEY__;
+  if (state.data?.geminiApiKey) {
+    window.__SHARED_GEMINI_KEY__ = state.data.geminiApiKey;
+    return window.__SHARED_GEMINI_KEY__;
   }
   
-  return key;
+  // 2. Almacenamiento persistente
+  let key = store.get("jj_gemini_api_key") || localStorage.getItem("jj_gemini_api_key") || "";
+  if (key) {
+    window.__SHARED_GEMINI_KEY__ = key;
+    return key;
+  }
+
+  // 3. Fallback a configuración de app si existe
+  if (window.PRIORIDAD_CONFIG?.geminiApiKey) {
+    window.__SHARED_GEMINI_KEY__ = window.PRIORIDAD_CONFIG.geminiApiKey;
+    return window.__SHARED_GEMINI_KEY__;
+  }
+  
+  return "";
 };
 
 window.setGeminiApiKey = function(key) {
@@ -10172,9 +10138,7 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
-    console.log("Calling Gemini API with URL:", url.substring(0, 50) + "...");
-    
+    // Intentar modelos Flash rápidos en orden de disponibilidad con fallback automático
     const payload = {
       contents: [{
         parts: [
@@ -10184,254 +10148,233 @@ Devuelve ÚNICAMENTE un JSON estricto con las siguientes claves:
       }],
       generationConfig: {
         temperature: 0.1,
-        response_mime_type: "application/json",
-        thinkingConfig: { thinkingBudget: 0 }
+        response_mime_type: "application/json"
       }
     };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    const modelCandidates = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+    let data = null;
+    let lastErrorMsg = "";
 
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => ({}));
-      const errorMsg = errJson.error?.message || `HTTP ${response.status}`;
-      
-      if (response.status === 403 || response.status === 401) {
-        console.warn("API Key inválida, permitiendo entrada manual");
-        // No lanzar error, solo retornar null para permitir entrada manual
-        return null;
+    for (const modelName of modelCandidates) {
+      try {
+        console.log(`Intentando OCR con modelo ${modelName}...`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          const resJson = await response.json();
+          const rawTextResponse = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (rawTextResponse) {
+            const clean = rawTextResponse.replace(/```json/g, "").replace(/```/g, "").trim();
+            data = JSON.parse(clean);
+            console.log(`OCR exitoso con ${modelName}:`, data);
+            break;
+          }
+        } else {
+          const errText = await response.text();
+          console.warn(`Modelo ${modelName} retornó ${response.status}:`, errText);
+          lastErrorMsg = `${response.status}: ${errText}`;
+        }
+      } catch (callErr) {
+        console.warn(`Fallo al llamar a ${modelName}:`, callErr);
+        lastErrorMsg = callErr.message;
       }
-      throw new Error(errorMsg);
     }
 
-    const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error("Respuesta vacía del modelo de IA.");
+    if (!data) {
+      throw new Error(`Error en transcripción (${lastErrorMsg || "No hubo respuesta del modelo"}). Puedes completar los campos manualmente.`);
+    }
 
-    return JSON.parse(rawText);
-  } catch (directErr) {
-    console.warn("Fallo llamada directa Gemini, intentando vía backend:", directErr);
+    return data;
+  } catch (err) {
+    console.error("Error general en transcribePhysicalSheet:", err);
+    throw err;
+  }
+};
+
+// Helper para obtener el equipo real activo de Creaciones JJ (sin nombres de relleno)
+function getRealTeamList() {
+  const users = (state.data?.users || []).filter(u => {
+    const n = String(u.name || u.nombre || "").trim().toLowerCase();
+    const act = u.active !== false && u.activo !== false;
+    // Excluir Eloy (ya no trabaja allí) y placeholders ficticios
+    return act && n !== 'eloy' && n !== 'nelson' && n !== 'yolber' && n !== 'yenny' && n !== 'andreina';
+  });
+  const names = users.map(u => u.name || u.nombre);
+  if (names.length) return names;
+  // Fallback al equipo oficial de Creaciones JJ
+  return ["Moises", "Julieta", "Camila", "Jeanette", "Valentina"];
+}
+
+
+// Helper robusto para calcular minutos reales en mesa de trabajo (congelando en Pausado y Esperando Imprenta)
+function getOrderElapsedMinutes(order) {
+  if (!order) return 0;
+  let startMs = NaN;
+  
+  if (order.inicioProduccion) {
+    const parsed = new Date(order.inicioProduccion).getTime();
+    if (!isNaN(parsed) && parsed <= Date.now() + 60000) {
+      startMs = parsed;
+    }
+  }
+  
+  // Si no hay inicioProduccion válido o está en el futuro (error de fecha fija), buscar en notas
+  if (isNaN(startMs) || startMs > Date.now()) {
+    const notas = String(order.notas || "");
+    const match = notas.match(/\[(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*-[^\]]+\]:\s*.*(?:producción|produccion|mesa)/i);
+    if (match) {
+      let [_, d, m, y, hh, mm, ap] = match;
+      let h = parseInt(hh, 10);
+      if (ap && ap.toUpperCase() === 'PM' && h < 12) h += 12;
+      if (ap && ap.toUpperCase() === 'AM' && h === 12) h = 0;
+      const dt = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), h, parseInt(mm, 10), 0);
+      if (!isNaN(dt.getTime()) && dt.getTime() <= Date.now()) {
+        startMs = dt.getTime();
+      }
+    }
+  }
+  
+  if (isNaN(startMs)) {
+    return Number(order.duracionRealMin || 0);
+  }
+  
+  const pausedMins = Number(order.tiempoPausadoMin || 0);
+  const isCurrentlyPaused = (order.estado === 'Pausado' || order.estado === 'Esperando Imprenta');
+  
+  let endMs = Date.now();
+  if (isCurrentlyPaused && order.ultimaPausa) {
+    const pMs = new Date(order.ultimaPausa).getTime();
+    if (!isNaN(pMs) && pMs >= startMs) {
+      endMs = pMs;
+    }
+  } else if (order.finProduccion) {
+    const fMs = new Date(order.finProduccion).getTime();
+    if (!isNaN(fMs) && fMs >= startMs) {
+      endMs = fMs;
+    }
+  }
+  
+  const rawMins = Math.floor((endMs - startMs) / 60000);
+  return Math.max(0, rawMins - pausedMins);
+}
+
+// Formatear minutos a formato humano (horas y minutos)
+function formatMinutesToHuman(minutes) {
+  if (!minutes || minutes <= 0) return "0 min";
+  
+  // Siempre mostrar en formato horas y minutos cuando es mayor a 60 minutos
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
     
-    if (directErr.message && directErr.message.includes("API Key")) {
-      throw directErr; // Re-lanzar error de API key específico
+    if (remainingMinutes === 0) {
+      return `${hours} hora${hours > 1 ? 's' : ''}`;
     }
     
+    return `${hours} hora${hours > 1 ? 's' : ''} y ${remainingMinutes} min`;
+  }
+  
+  // Solo minutos si es menos de 60
+  return `${minutes} min`;
+}
+
+// Ticker global que actualiza los cronómetros en vivo en el DOM cada 5 segundos (dentro y fuera de la orden)
+if (!window._stopwatchInterval) {
+  window._stopwatchInterval = setInterval(() => {
     try {
-      const backendRes = await api("profile_ai_transcribe", {
-        imageBase64: compressedDataUrl,
-        sheetType: sheetType,
-        apiKey: apiKey
+      // 1. Actualizar badges en tarjetas fuera de la orden
+      document.querySelectorAll('.live-stopwatch-badge[data-order-id]').forEach(el => {
+        const id = el.getAttribute('data-order-id');
+        const allTarget = (state.data?.allOrders || []).concat(state.data?.myOrders || []).concat(state.data?.finishedOrders || []);
+        const ord = allTarget.find(o => String(o.id) === String(id));
+        if (!ord) return;
+        
+        const mins = getOrderElapsedMinutes(ord);
+        const human = formatMinutesToHuman(mins);
+        if (ord.estado === 'Esperando Imprenta') {
+          el.innerHTML = `<i class="fas fa-print"></i> ${human} (Imprenta)`;
+        } else if (ord.estado === 'Pausado') {
+          el.innerHTML = `<i class="fas fa-pause"></i> ${human} (Pausado)`;
+        } else {
+          el.innerHTML = `<i class="fas fa-stopwatch"></i> ${human} en mesa`;
+        }
       });
-      if (backendRes && backendRes.data) {
-        return backendRes.data;
-      }
-    } catch (bErr) {
-      console.warn("Fallo backend también:", bErr);
-    }
-    throw directErr;
-  }
-};
 
-// 4. HANDLERS INTERACTIVOS PARA JJ EXPRESS Y CIERRE DE CAJA - OPTIMIZADOS
-window.triggerOcrForExpressInvoice = async function(base64) {
-  const container = document.getElementById("express-invoice-preview-wrap");
-  if (!container) return;
-
-  let banner = document.getElementById("express-ocr-status-banner");
-  if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "express-ocr-status-banner";
-    container.parentNode.insertBefore(banner, container.nextSibling);
-  }
-
-  banner.className = "ocr-scanning-banner";
-  banner.style.display = "flex";
-  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando recibo (2-5 seg)...</span>';
-
-  try {
-    // Agregar timeout de 60 segundos para OCR (aumentado de 30s para PC/móvil)
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 60000);
-    });
-
-    const data = await Promise.race([
-      window.transcribePhysicalSheet(base64, "express"),
-      timeoutPromise
-    ]);
-
-    if (!data) {
-      banner.style.display = "none";
-      return;
-    }
-
-    if (data.cliente) {
-      const cliInp = document.getElementById("express-cliente");
-      if (cliInp) cliInp.value = data.cliente;
-    }
-    if (data.telefono) {
-      const telInp = document.getElementById("express-telefono");
-      if (telInp) telInp.value = data.telefono;
-    }
-    if (data.costo !== undefined && data.costo !== null && !isNaN(Number(data.costo))) {
-      const cInp = document.getElementById("express-costo");
-      if (cInp) cInp.value = Number(data.costo);
-    }
-    if (data.abono !== undefined && data.abono !== null && !isNaN(Number(data.abono))) {
-      const aInp = document.getElementById("express-anticipo");
-      if (aInp) aInp.value = Number(data.abono);
-    }
-    if (data.resta !== undefined && data.resta !== null && !isNaN(Number(data.resta))) {
-      const rInp = document.getElementById("express-resta");
-      if (rInp) rInp.value = Number(data.resta);
-    }
-    if (data.motivo) {
-      const mInp = document.getElementById("express-motivo");
-      if (mInp) mInp.value = data.motivo;
-    }
-    if (data.notasCobro) {
-      const nInp = document.getElementById("express-nota-pago");
-      if (nInp) nInp.value = data.notasCobro;
-    }
-    if (data.fechaEntrega) {
-      const fInp = document.getElementById("express-fecha");
-      if (fInp) fInp.value = data.fechaEntrega;
-    }
-    if (data.metodoPago) {
-      const metSelect = document.getElementById("express-metodo-pago");
-      if (metSelect) {
-        for (let opt of metSelect.options) {
-          if (opt.value.toLowerCase().includes(data.metodoPago.toLowerCase()) || data.metodoPago.toLowerCase().includes(opt.value.toLowerCase())) {
-            metSelect.value = opt.value;
-            break;
+      // 2. Actualizar cronómetro en vivo dentro del modal de detalle
+      const modalStopwatchText = document.getElementById("modal-live-stopwatch-text");
+      const modalStopwatchBadge = document.getElementById("modal-live-stopwatch-badge");
+      if (state.selectedOrder && (modalStopwatchText || modalStopwatchBadge)) {
+        const mins = getOrderElapsedMinutes(state.selectedOrder);
+        const human = formatMinutesToHuman(mins);
+        if (modalStopwatchText) {
+          if (state.selectedOrder.estado === 'Esperando Imprenta') {
+            modalStopwatchText.textContent = `${human} (Congelado por Imprenta Externa)`;
+          } else if (state.selectedOrder.estado === 'Pausado') {
+            modalStopwatchText.textContent = `${human} (Pausado)`;
+          } else {
+            modalStopwatchText.textContent = `${human} (${mins} min)`;
           }
         }
-      }
-    }
-    if (data.atendidoPor) {
-      const respSelect = document.getElementById("express-responsable");
-      if (respSelect) {
-        for (let opt of respSelect.options) {
-          if (opt.value.toLowerCase().includes(data.atendidoPor.toLowerCase()) || data.atendidoPor.toLowerCase().includes(opt.value.toLowerCase())) {
-            respSelect.value = opt.value;
-            break;
-          }
+        if (modalStopwatchBadge) {
+          modalStopwatchBadge.innerHTML = `<i class="fas fa-stopwatch"></i> ${mins} min`;
         }
       }
+    } catch(e) {
+      console.error("Error actualizando cronómetros:", e);
     }
-    if (data.tipo) {
-      const firstTipoInp = document.querySelector("#express-items-list .subitem-row .swal-item-tipo");
-      if (firstTipoInp) firstTipoInp.value = data.tipo;
-    }
+  }, 5000);
+}
+window.openWorkshopPricesModal = function() {
+  const prices = getWorkshopPrices();
+  const isManager = isLead();
 
-    if (typeof window.recalcExpressPayment === "function") {
-      window.recalcExpressPayment();
-    }
-
-    banner.className = "ocr-verified-banner";
-    banner.innerHTML = '<i class="fas fa-check-circle"></i> <span>✨ <strong>Datos transcritos con éxito:</strong> Comprueba que los datos coincidan con la comanda física antes de guardar.</span>';
-    showToast("✨ Recibo transcrito automáticamente con IA");
-  } catch (err) {
-    console.error("Error en transcripción OCR Express:", err);
-    banner.className = "ocr-error-banner";
-    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>${err.message || "No se pudo transcribir automáticamente"} - Puedes llenar los campos manualmente.</span>`;
-    showToast("⚠️ OCR falló - Llena los campos manualmente");
-  }
+  openModal(`
+    <div class="modal-head">
+      <h2>💰 Precios y Medidas del Taller</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <div style="padding:14px; max-height:75vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">
+          Consulta rápida de especificaciones, medidas y presupuestos aprobados por Gerencia.
+        </p>
+        ${isManager ? `
+          <button type="button" class="primary-button" onclick="closeModal(); setTimeout(window.openAddWorkshopPriceModal, 150);" style="background:#10b981; border:none; padding:6px 12px; font-size:11.5px;">
+            ➕ Agregar Precio/Medida
+          </button>
+        ` : ''}
+      </div>
+      
+      <div style="overflow-x:auto;">
+        <table class="sics-data-table" style="width:100%; font-size:12px;">
+          <thead>
+            <tr>
+              <th>Item / Trabajo</th>
+              <th>Categoría</th>
+              <th style="text-align:right;">Precio USD</th>
+              <th>Medidas</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${prices.length ? prices.map(p => `
+              <tr>
+                <td style="font-weight:bold; color:var(--text-main);">${escapeHtml(p.item)}</td>
+                <td style="color:var(--text-muted); font-size:11px;">${escapeHtml(p.categoria)}</td>
+                <td style="text-align:right; font-weight:bold; color:#10b981;">${p.precioUSD > 0 ? '$' + Number(p.precioUSD).toFixed(2) : '-'}</td>
+                <td style="color:var(--text-main);">${escapeHtml(p.medidas || '-')}</td>
+                <td style="color:var(--text-muted); font-size:11px;">${escapeHtml(p.notas || '-')}</td>
+              </tr>
+            `).join('') : '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">No hay precios cargados aún.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
 };
-var triggerOcrForExpressInvoice = window.triggerOcrForExpressInvoice;
-
-window.triggerOcrForCashClose = async function(base64) {
-  const container = document.getElementById("caja-photo-preview");
-  if (!container) return;
-
-  let banner = document.getElementById("caja-ocr-status-banner");
-  if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "caja-ocr-status-banner";
-    container.parentNode.insertBefore(banner, container.nextSibling);
-  }
-
-  banner.className = "ocr-scanning-banner";
-  banner.style.display = "flex";
-  banner.innerHTML = '<i class="fas fa-magic fa-spin"></i> <span>🤖 Analizando planilla (3-6 seg)...</span>';
-
-  try {
-    // Agregar timeout de 60 segundos para OCR (aumentado de 30s para PC/móvil)
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Tiempo de espera agotado. Intenta nuevamente o llena los campos manualmente.")), 60000);
-    });
-
-    const data = await Promise.race([
-      window.transcribePhysicalSheet(base64, "caja"),
-      timeoutPromise
-    ]);
-
-    if (!data) {
-      banner.style.display = "none";
-      return;
-    }
-
-    if (data.fecha) {
-      const fInp = document.getElementById("caja-fecha");
-      if (fInp) fInp.value = data.fecha;
-    }
-    if (data.turno) {
-      const tSel = document.getElementById("caja-turno");
-      if (tSel) {
-        for (let opt of tSel.options) {
-          if (opt.value.toLowerCase().includes(data.turno.toLowerCase()) || data.turno.toLowerCase().includes(opt.value.toLowerCase())) {
-            tSel.value = opt.value;
-            break;
-          }
-        }
-      }
-    }
-    if (data.inicioBs !== undefined && data.inicioBs !== null && !isNaN(Number(data.inicioBs))) {
-      const iBs = document.getElementById("caja-inicio-bs");
-      if (iBs) iBs.value = Number(data.inicioBs);
-    }
-    if (data.inicioUSD !== undefined && data.inicioUSD !== null && !isNaN(Number(data.inicioUSD))) {
-      const iUsd = document.getElementById("caja-inicio-usd");
-      if (iUsd) iUsd.value = Number(data.inicioUSD);
-    }
-    if (data.puntoVentaBs !== undefined && data.puntoVentaBs !== null && !isNaN(Number(data.puntoVentaBs))) {
-      const pBs = document.getElementById("caja-punto-bs");
-      if (pBs) pBs.value = Number(data.puntoVentaBs);
-    }
-    if (data.pagoMovilBs !== undefined && data.pagoMovilBs !== null && !isNaN(Number(data.pagoMovilBs))) {
-      const pmBs = document.getElementById("caja-pagomovil-bs");
-      if (pmBs) pmBs.value = Number(data.pagoMovilBs);
-    }
-    if (data.pagoMovilRef) {
-      const pmRef = document.getElementById("caja-pagomovil-ref");
-      if (pmRef) pmRef.value = data.pagoMovilRef;
-    }
-    if (data.efectivoBs !== undefined && data.efectivoBs !== null && !isNaN(Number(data.efectivoBs))) {
-      const efBs = document.getElementById("caja-efectivo-bs");
-      if (efBs) efBs.value = Number(data.efectivoBs);
-    }
-    if (data.efectivoUSD !== undefined && data.efectivoUSD !== null && !isNaN(Number(data.efectivoUSD))) {
-      const efUsd = document.getElementById("caja-efectivo-usd");
-      if (efUsd) efUsd.value = Number(data.efectivoUSD);
-    }
-    if (data.observaciones) {
-      const obs = document.getElementById("caja-obs");
-      if (obs) obs.value = data.observaciones;
-    }
-
-    if (typeof window.calcCashTotals === "function") {
-      window.calcCashTotals();
-    }
-
-    banner.className = "ocr-verified-banner";
-    banner.innerHTML = '<i class="fas fa-check-circle"></i> <span>✨ <strong>Planilla transcrita con éxito:</strong> Por favor verifica que los montos coincidan con la hoja antes de guardar.</span>';
-    showToast("✨ Planilla transcrita automáticamente con IA");
-  } catch (err) {
-    console.error("Error en transcripción OCR Caja:", err);
-    banner.className = "ocr-error-banner";
-    banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span>No se pudo transcribir automáticamente (${escapeHtml(err.message)}). Puedes llenar los campos manualmente.</span>`;
-  }
-};
-var triggerOcrForCashClose = window.triggerOcrForCashClose;
