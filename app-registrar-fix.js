@@ -852,6 +852,7 @@ async function refresh(showMessage = true) {
     store.set("pp_profile_types", state.frequentTypes);
     store.set("pp_profile_motivos", state.frequentMotivos);
     store.set("pp_profile_schedules", rawSchedules);
+    store.set("pp_suggestions", rawData.suggestions || []);
 
     // Detección de orden de actualización forzada por el Manager
     const serverVer = String(rawData.appVersion || rawData.version || "");
@@ -1933,6 +1934,22 @@ function modulesView() {
           </div>
           <div class="sics-bento-action">
             <span>Ver Métricas</span> <i class="fas fa-arrow-right"></i>
+          </div>
+        </div>
+
+        <!-- 4: Sugerencias y Problemas (Todos los usuarios) -->
+        <div class="sics-bento-card" onclick="window.openSuggestionsModal()">
+          <div>
+            <div class="sics-bento-icon" style="background:rgba(245,158,11,0.12); color:#f59e0b;">
+              <i class="fas fa-lightbulb"></i>
+            </div>
+            <div class="sics-bento-title">Sugerencias &amp; Problemas</div>
+            <div class="sics-bento-desc">
+              Reporta problemas o envía sugerencias para mejorar el sistema. Gerencia puede ver y gestionar.
+            </div>
+          </div>
+          <div class="sics-bento-action">
+            <span>Reportar</span> <i class="fas fa-arrow-right"></i>
           </div>
         </div>
         ` : ''}
@@ -4280,6 +4297,291 @@ window.editOrderFinishDate = function(orderId) {
       } catch (err) {
         alert("Error al actualizar fecha: " + err.message);
       }
+    });
+  }
+};
+
+// Almacenamiento de sugerencias
+const getStoredSuggestions = () => {
+  try {
+    // Priorizar datos del backend sincronizados
+    const backendSuggestions = state.data?.suggestions || [];
+    if (backendSuggestions.length > 0) {
+      return backendSuggestions;
+    }
+    
+    // Fallback a localStorage
+    const stored = localStorage.getItem("pp_suggestions");
+    return stored ? JSON.parse(stored) : [];
+  } catch(e) {
+    return [];
+  }
+};
+
+const saveStoredSuggestions = (list) => {
+  try {
+    localStorage.setItem("pp_suggestions", JSON.stringify(list));
+  } catch(e) {}
+};
+
+window.openSuggestionsModal = function() {
+  const suggestions = getStoredSuggestions();
+  const isManager = isLead();
+
+  openModal(`
+    <div class="modal-head">
+      <h2>💡 Sugerencias &amp; Problemas</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    ${isManager ? `
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <button type="button" class="secondary-button" onclick="window.filterSuggestions('all')" style="flex:1;">Todos</button>
+          <button type="button" class="secondary-button" onclick="window.filterSuggestions('pendiente')" style="flex:1;">Pendientes</button>
+          <button type="button" class="secondary-button" onclick="window.filterSuggestions('resuelto')" style="flex:1;">Resueltos</button>
+        </div>
+      </div>
+    ` : ''}
+
+    <div id="suggestions-list" style="max-height:400px; overflow-y:auto; margin-bottom:16px;">
+      ${suggestions.length === 0 ? '<p style="text-align:center; color:var(--text-muted);">No hay sugerencias ni problemas reportados.</p>' : 
+        suggestions.slice(0, isManager ? 50 : 10).map(s => `
+          <div style="background:${s.tipo === 'problema' ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)'}; border:1px solid ${s.tipo === 'problema' ? '#ef4444' : '#10b981'}; border-radius:8px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+              <span style="font-size:11px; font-weight:bold; color:${s.tipo === 'problema' ? '#ef4444' : '#10b981'}; text-transform:uppercase;">
+                ${s.tipo === 'problema' ? '🐛 PROBLEMA' : '💡 SUGERENCIA'}
+              </span>
+              <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(s.fecha)}</span>
+            </div>
+            <div style="font-size:13px; margin-bottom:6px;">${escapeHtml(s.descripcion)}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+              <strong>Reportado por:</strong> ${escapeHtml(s.autor)} ${s.rol ? `(${escapeHtml(s.rol)})` : ''}
+            </div>
+            ${s.captura ? `
+              <div style="margin-bottom:6px;">
+                <a href="${s.captura}" target="_blank" style="font-size:11px; color:#38bdf8; text-decoration:none;">
+                  📸 Ver captura de pantalla
+                </a>
+              </div>
+            ` : ''}
+            ${isManager ? `
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                ${s.estado === 'pendiente' ? `
+                  <button type="button" onclick="window.resolveSuggestion('${escapeHtml(s.id)}')" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">
+                    ✅ Marcar como resuelto
+                  </button>
+                ` : `
+                  <span style="font-size:11px; color:#10b981; font-weight:bold;">✅ Resuelto</span>
+                `}
+                <button type="button" onclick="window.deleteSuggestion('${escapeHtml(s.id)}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">
+                  🗑️ Eliminar
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+    </div>
+
+    ${!isManager ? `
+      <button type="button" class="primary-button" onclick="window.openNewSuggestionModal()" style="width:100%; background:#f59e0b; border:none;">
+        + Nueva Sugerencia/Problema
+      </button>
+    ` : ''}
+  `);
+
+  window.filterSuggestions = function(filter) {
+    const suggestions = getStoredSuggestions();
+    const filtered = filter === 'all' ? suggestions : suggestions.filter(s => s.estado === filter);
+    
+    const listEl = document.getElementById("suggestions-list");
+    if (listEl) {
+      listEl.innerHTML = filtered.length === 0 ? '<p style="text-align:center; color:var(--text-muted);">No hay sugerencias con este filtro.</p>' : 
+        filtered.map(s => `
+          <div style="background:${s.tipo === 'problema' ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)'}; border:1px solid ${s.tipo === 'problema' ? '#ef4444' : '#10b981'}; border-radius:8px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+              <span style="font-size:11px; font-weight:bold; color:${s.tipo === 'problema' ? '#ef4444' : '#10b981'}; text-transform:uppercase;">
+                ${s.tipo === 'problema' ? '🐛 PROBLEMA' : '💡 SUGERENCIA'}
+              </span>
+              <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(s.fecha)}</span>
+            </div>
+            <div style="font-size:13px; margin-bottom:6px;">${escapeHtml(s.descripcion)}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+              <strong>Reportado por:</strong> ${escapeHtml(s.autor)} ${s.rol ? `(${escapeHtml(s.rol)})` : ''}
+            </div>
+            ${s.captura ? `
+              <div style="margin-bottom:6px;">
+                <a href="${s.captura}" target="_blank" style="font-size:11px; color:#38bdf8; text-decoration:none;">
+                  📸 Ver captura de pantalla
+                </a>
+              </div>
+            ` : ''}
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              ${s.estado === 'pendiente' ? `
+                <button type="button" onclick="window.resolveSuggestion('${escapeHtml(s.id)}')" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">
+                  ✅ Marcar como resuelto
+                </button>
+              ` : `
+                <span style="font-size:11px; color:#10b981; font-weight:bold;">✅ Resuelto</span>
+              `}
+              <button type="button" onclick="window.deleteSuggestion('${escapeHtml(s.id)}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+        `).join('');
+    }
+  };
+
+  window.resolveSuggestion = function(id) {
+    const suggestions = getStoredSuggestions();
+    const idx = suggestions.findIndex(s => s.id === id);
+    if (idx !== -1) {
+      suggestions[idx].estado = 'resuelto';
+      suggestions[idx].fechaResolucion = new Date().toISOString();
+      saveStoredSuggestions(suggestions);
+      window.filterSuggestions('all');
+      showToast("✅ Sugerencia marcada como resuelta.");
+      
+      // Sincronizar con backend
+      try {
+        api("profile_update_suggestion", { id: id, estado: 'resuelto' }).catch(()=>{});
+      } catch(e){}
+    }
+  };
+
+  window.deleteSuggestion = function(id) {
+    if (!confirm("¿Estás seguro de eliminar esta sugerencia?")) return;
+    
+    const suggestions = getStoredSuggestions();
+    const filtered = suggestions.filter(s => s.id !== id);
+    saveStoredSuggestions(filtered);
+    window.filterSuggestions('all');
+    showToast("🗑️ Sugerencia eliminada.");
+  };
+};
+
+window.openNewSuggestionModal = function() {
+  let capturaBase64 = "";
+
+  openModal(`
+    <div class="modal-head">
+      <h2>✨ Nueva Sugerencia/Problema</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+
+    <form id="suggestion-form" style="margin-top:12px;">
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Tipo:</label>
+        <select id="suggestion-type" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+          <option value="sugerencia">💡 Sugerencia (idea de mejora)</option>
+          <option value="problema">🐛 Problema (error o bug)</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Descripción:</label>
+        <textarea id="suggestion-desc" rows="4" placeholder="Describe detalladamente tu sugerencia o problema..." required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px; resize:vertical;"></textarea>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">📸 Captura de pantalla (opcional):</label>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="secondary-button" id="btn-cam-suggestion" style="background:#f59e0b; color:white; border:none; padding:6px 12px; font-size:11px; border-radius:6px; cursor:pointer;">
+            📸 Tomar Foto
+          </button>
+          <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:6px 12px; font-size:11px; border-radius:6px; cursor:pointer;">
+            📁 Subir Foto
+            <input type="file" id="suggestion-file-input" accept="image/*" style="display:none;">
+          </label>
+        </div>
+        <div id="suggestion-photo-preview" style="display:none; margin-top:8px;">
+          <img id="suggestion-thumb-img" src="" style="width:100px; height:100px; object-fit:cover; border-radius:6px; border:1px solid #f59e0b;">
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" style="flex:2; background:#f59e0b; border:none;">Enviar</button>
+      </div>
+    </form>
+  `);
+
+  const fileInp = document.getElementById("suggestion-file-input");
+  const camBtn = document.getElementById("btn-cam-suggestion");
+  const pBox = document.getElementById("suggestion-photo-preview");
+  const pImg = document.getElementById("suggestion-thumb-img");
+
+  if (fileInp) {
+    fileInp.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        capturaBase64 = ev.target.result;
+        pImg.src = capturaBase64;
+        pBox.style.display = "block";
+      };
+      r.readAsDataURL(f);
+    });
+  }
+
+  if (camBtn) {
+    camBtn.addEventListener("click", () => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = "image/*";
+      inp.capture = "environment";
+      inp.onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = (ev) => {
+          capturaBase64 = ev.target.result;
+          pImg.src = capturaBase64;
+          pBox.style.display = "block";
+        };
+        r.readAsDataURL(f);
+      };
+      inp.click();
+    });
+  }
+
+  const form = document.getElementById("suggestion-form");
+  if (form) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const tipo = document.getElementById("suggestion-type").value;
+      const descripcion = document.getElementById("suggestion-desc").value.trim();
+
+      if (!descripcion) {
+        alert("Por favor describe tu sugerencia o problema.");
+        return;
+      }
+
+      const newSuggestion = {
+        id: "SUG-" + Date.now(),
+        tipo: tipo,
+        descripcion: descripcion,
+        captura: capturaBase64,
+        autor: state.session?.name || "Usuario",
+        rol: state.session?.role || "trabajador",
+        fecha: new Date().toISOString(),
+        estado: 'pendiente'
+      };
+
+      const suggestions = getStoredSuggestions();
+      suggestions.unshift(newSuggestion);
+      saveStoredSuggestions(suggestions);
+
+      // Sincronizar con backend
+      try {
+        api("profile_save_suggestion", newSuggestion).catch(()=>{});
+      } catch(e){}
+
+      closeModal();
+      window.openSuggestionsModal();
+      showToast("✅ Sugerencia/problema enviado exitosamente.");
     });
   }
 };
@@ -10970,7 +11272,7 @@ function getOrderElapsedMinutes(order) {
   }
 
   const pausedMins = Math.max(0, Math.round(Number(order.tiempoPausadoMin || 0)));
-  const isPaused = (estado === "Pausado" || estado === "Esperando Imprenta");
+  const isPaused = (estado === "Pausado" || estado === "Esperando Imprenta" || estado === "Esperando Planchado");
 
   let endMs = Date.now();
   if (isPaused) {
@@ -11028,6 +11330,8 @@ if (!window._stopwatchInterval) {
         const human = formatMinutesToHuman(mins);
         if (ord.estado === 'Esperando Imprenta') {
           el.innerHTML = `<i class="fas fa-print"></i> ${mins} min (Imprenta)`;
+        } else if (ord.estado === 'Esperando Planchado') {
+          el.innerHTML = `<i class="fas fa-tshirt"></i> ${mins} min (Planchado)`;
         } else if (ord.estado === 'Pausado') {
           el.innerHTML = `<i class="fas fa-pause-circle"></i> ${mins > 0 ? `${mins} min (Pausado)` : 'Pausado'}`;
         } else {
@@ -11044,6 +11348,8 @@ if (!window._stopwatchInterval) {
         if (modalStopwatchText) {
           if (state.selectedOrder.estado === 'Esperando Imprenta') {
             modalStopwatchText.textContent = `${human} (Congelado por Imprenta Externa)`;
+          } else if (state.selectedOrder.estado === 'Esperando Planchado') {
+            modalStopwatchText.textContent = `${human} (Congelado por Planchado)`;
           } else if (state.selectedOrder.estado === 'Pausado') {
             modalStopwatchText.textContent = `${human} (Pausado)`;
           } else {
