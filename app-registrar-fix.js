@@ -1239,7 +1239,8 @@ function historyView() {
             </div>
             <div class="meta" data-action="detail" data-id="${escapeHtml(order.id)}" data-scope="finished">
               Entrega: ${escapeHtml(formatDate(order.entrega))}<br/>
-              ${order.finProduccion ? `🏁 <strong>Terminado:</strong> <span style="color:#059669; font-weight:700;">${escapeHtml(formatDate(order.finProduccion))}</span><br/>` : ''}
+              ${order.finProduccion ? `🏁 <strong>Terminado:</strong> <span style="color:#059669; font-weight:700;">${escapeHtml(formatDate(order.finProduccion))}</span><br/>` : 
+                `<span style="color:#f59e0b; font-weight:bold;">⚠️ Sin fecha de cierre</span> <button type="button" onclick="window.editOrderFinishDate('${escapeHtml(order.id)}')" style="background:#f59e0b; color:white; border:none; padding:2px 6px; font-size:10px; border-radius:4px; cursor:pointer; margin-left:4px;">✏️ Agregar fecha</button><br/>`}
               Responsable: ${escapeHtml(order.responsable)}<br/>
               ${order.telefono ? `📞 Teléfono: <strong>${escapeHtml(order.telefono)}</strong><br/>` : ''}
               ⏱️ Tiempo invertido: <strong>${order.duracionRealMin || 0} min</strong><br/>
@@ -4191,6 +4192,97 @@ function openFinishModal(order, targetStatus) {
     }
   });
 }
+
+window.editOrderFinishDate = function(orderId) {
+  if (!isLead()) {
+    showToast("⚠️ Solo gerencia puede editar fechas de cierre.");
+    return;
+  }
+
+  const order = [...(state.data.allOrders || []), ...(state.data.finishedOrders || [])].find(o => String(o.id).trim() === orderId.trim());
+  if (!order) {
+    showToast("⚠️ Pedido no encontrado.");
+    return;
+  }
+
+  const currentFinishDate = order.finProduccion ? new Date(order.finProduccion).toISOString().split('T')[0] : '';
+
+  openModal(`
+    <div class="modal-head">
+      <h2>✏️ Editar Fecha de Cierre</h2>
+      <button class="close-button" data-action="close">×</button>
+    </div>
+    <form id="edit-finish-date-form" style="margin-top:12px;">
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Pedido:</label>
+        <div style="font-size:14px; color:var(--text-main);">${escapeHtml(order.id)} - ${escapeHtml(order.cliente)}</div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Fecha actual de cierre:</label>
+        <div style="font-size:14px; color:${currentFinishDate ? '#10b981' : '#f59e0b'};">
+          ${currentFinishDate ? escapeHtml(formatDate(order.finProduccion)) : '⚠️ Sin fecha registrada'}
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Nueva fecha de cierre:</label>
+        <input type="date" id="new-finish-date" value="${currentFinishDate}" required style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Hora de cierre (opcional):</label>
+        <input type="time" id="new-finish-time" value="${order.finProduccion ? new Date(order.finProduccion).toTimeString().split(' ')[0].substring(0,5) : ''}" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:4px; font-weight:bold;">Motivo del cambio:</label>
+        <input type="text" id="finish-date-reason" placeholder="Ej: Corrección de fecha, Pedido terminado el día X" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+      </div>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button type="button" class="secondary-button" data-action="close" style="flex:1;">Cancelar</button>
+        <button type="submit" class="primary-button" style="flex:2;">Guardar Cambios</button>
+      </div>
+    </form>
+  `);
+
+  const form = document.getElementById("edit-finish-date-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const newDate = document.getElementById("new-finish-date").value;
+      const newTime = document.getElementById("new-finish-time").value;
+      const reason = document.getElementById("finish-date-reason").value.trim();
+
+      if (!newDate) {
+        alert("Por favor selecciona una fecha.");
+        return;
+      }
+
+      let finishDateTime;
+      if (newTime) {
+        finishDateTime = new Date(`${newDate}T${newTime}:00`);
+      } else {
+        finishDateTime = new Date(newDate);
+        finishDateTime.setHours(23, 59, 59); // Fin del día si no se especifica hora
+      }
+
+      try {
+        await api("profile_update_order", {
+          id: order.id,
+          user: state.session?.name || "Gerencia",
+          role: state.session?.role || "manager",
+          changes: {
+            finProduccion: finishDateTime.toISOString(),
+            comentarioCierre: reason ? `${order.comentarioCierre || ''}\n\n[CORRECCIÓN DE FECHA: ${reason}]` : order.comentarioCierre
+          }
+        }, 30000);
+
+        closeModal();
+        await refresh(false);
+        showToast("✅ Fecha de cierre actualizada exitosamente.");
+      } catch (err) {
+        alert("Error al actualizar fecha: " + err.message);
+      }
+    });
+  }
+};
 
 function openEditDeliveryDateModal(orderOrId) {
   let order = orderOrId;
