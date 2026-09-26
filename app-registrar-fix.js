@@ -379,7 +379,64 @@ const active = (order) => {
 const operable = (order) => active(order);
 const isLead = () => {
   const r = String(state.session?.role || "").toLowerCase().trim();
-  return ["manager", "jefe", "jefa", "recepcionista"].includes(r);
+  return ["manager", "jefe", "jefa"].includes(r);
+};
+const isReception = () => {
+  const r = String(state.session?.role || "").toLowerCase().trim();
+  return r === "recepcionista" || r === "mostrador";
+};
+const canAccessScreen = (screen) => {
+  const r = String(state.session?.role || "").toLowerCase().trim();
+  
+  // Gerencia/jefes tienen acceso a todo
+  if (["manager", "jefe", "jefa"].includes(r)) return true;
+  
+  // Recepcionistas: acceso limitado + pedidos activos para gestión
+  if (r === "recepcionista" || r === "mostrador") {
+    const allowedScreens = ["modules", "now", "queue", "team", "inventory", "workshopPrices", "schedules", "history", "settings"];
+    return allowedScreens.includes(screen);
+  }
+  
+  // Trabajadores: acceso limitado
+  const workerAllowed = ["modules", "now", "queue", "team", "history", "settings"];
+  return workerAllowed.includes(screen);
+};
+const isPausedProductionStatus = (est) => {
+  const s = String(est || "").toLowerCase().trim();
+  return s === "pausado" || s === "esperando imprenta" || s === "esperando planchado";
+};
+const productionStatusList = (includeEntregado) => {
+  const list = ["Pendiente", "En proceso", "Pausado", "Esperando Imprenta", "Esperando Planchado", "Terminado"];
+  if (includeEntregado) list.push("Entregado");
+  list.push("Cancelado");
+  return list;
+};
+const productionStatusLabel = (st) => {
+  if (st === "Esperando Imprenta") return "🖨️ Esperando Imprenta";
+  if (st === "Esperando Planchado") return "♨️ Esperando Planchado";
+  if (st === "Pausado") return "⏸️ Pausado";
+  return st;
+};
+const calendarDayKey = (raw) => {
+  const d = raw instanceof Date ? raw : safeParseDate(raw);
+  if (!d || isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const getOrderActualFinishDate = (o) => safeParseDate(o.fechaCierre) || safeParseDate(o.finProduccion);
+const isOrderDeliveredOnTime = (o) => {
+  const ent = safeParseDate(o.entrega);
+  const cie = getOrderActualFinishDate(o);
+  if (!ent || !cie) return false;
+  return calendarDayKey(cie) <= calendarDayKey(ent);
+};
+const applySessionRoleClass = () => {
+  const classes = ["role-trabajador", "role-trabajadora", "role-recepcionista", "role-mostrador", "role-jefe", "role-jefa", "role-manager"];
+  document.body.classList.remove(...classes);
+  const r = String(state.session?.role || "trabajador").toLowerCase().trim() || "trabajador";
+  document.body.classList.add("role-" + r);
 };
 
 const canSeeOrderAlert = (order) => {
@@ -389,8 +446,8 @@ const canSeeOrderAlert = (order) => {
   
   console.log("canSeeOrderAlert check:", { role: r, currentUser, orderResp, match: currentUser === orderResp });
   
-  // Gerencia, jefes y recepcionistas ven todas las alertas
-  if (["manager", "jefe", "jefa", "recepcionista"].includes(r)) {
+  // Gerencia y jefes ven todas las alertas operativas
+  if (["manager", "jefe", "jefa"].includes(r)) {
     console.log("User is lead, can see all alerts");
     return true;
   }
@@ -411,6 +468,7 @@ function formatRoleLabel(roleStr) {
   if (r === "jefe") return "Jefe";
   if (r === "jefa") return "Jefa";
   if (r === "manager") return "Manager";
+  if (r === "recepcionista" || r === "mostrador") return "Recepcionista";
   if (r === "trabajadora") return "Trabajadora";
   return "Trabajador";
 }
@@ -994,6 +1052,10 @@ function orderCard(order, position) {
             if (est === "Esperando Imprenta") {
               const elMin = getOrderElapsedMinutes(order);
               return `<span class="live-stopwatch-badge badge-imprenta" data-order-id="${escapeHtml(order.id)}" style="background:rgba(139,92,246,0.18); color:#a78bfa; border:1px solid rgba(139,92,246,0.35); padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-print"></i> ${elMin} min (Imprenta)</span>`;
+            }
+            if (est === "Esperando Planchado") {
+              const elMin = getOrderElapsedMinutes(order);
+              return `<span class="live-stopwatch-badge badge-planchado" data-order-id="${escapeHtml(order.id)}" style="background:rgba(249,115,22,0.18); color:#fb923c; border:1px solid rgba(249,115,22,0.35); padding:2px 7px; border-radius:12px; font-size:10px; font-weight:800;"><i class="fas fa-tshirt"></i> ${elMin} min (Planchado)</span>`;
             }
             if (est === "Pausado") {
               const elMin = getOrderElapsedMinutes(order);
@@ -1794,7 +1856,7 @@ function modulesView() {
             <i class="fas fa-inbox" style="color:#0ea5e9;"></i>
             <span>Bandeja Activa: <strong>${activeOrders.length}</strong></span>
           </div>
-          <div class="sics-metric-chip" onclick="navigate('reports')" style="cursor:pointer; ${overdueOrders.length ? 'border-color:#ef4444; color:#ef4444;' : ''}" title="Ver rezagados">
+          <div class="sics-metric-chip" onclick="navigate('${leadUser ? 'reports' : 'team'}')" style="cursor:pointer; ${overdueOrders.length ? 'border-color:#ef4444; color:#ef4444;' : ''}" title="Ver rezagados">
             <i class="fas fa-exclamation-triangle" style="color:${overdueOrders.length ? '#ef4444' : '#10b981'};"></i>
             <span>${overdueOrders.length ? `Casos Rezagados: <strong>${overdueOrders.length}</strong>` : 'Cero Rezagados (Al Día)'}</span>
           </div>
@@ -1856,7 +1918,8 @@ function modulesView() {
           </div>
         </div>
 
-        <!-- 3: Reportes y Avance -->
+        <!-- 3: Reportes y Avance (Solo Gerencia) -->
+        ${leadUser ? `
         <div class="sics-bento-card" onclick="navigate('reports')">
           <div>
             <div class="sics-bento-icon" style="background:rgba(139,92,246,0.12); color:#8b5cf6;">
@@ -1871,6 +1934,7 @@ function modulesView() {
             <span>Ver Métricas</span> <i class="fas fa-arrow-right"></i>
           </div>
         </div>
+        ` : ''}
 
         <!-- 4: Control de Proveedores y Cuentas por Pagar (Solo Jefes) -->
         ${leadUser ? `
@@ -1994,6 +2058,9 @@ function modulesView() {
 
 
 function reportsView() {
+  if (!isLead()) {
+    return `<div style="text-align:center; padding:50px; color:#ef4444;"><h2>🔒 Acceso Restringido</h2><p>Los reportes de cumplimiento son exclusivos para Gerencia.</p></div>`;
+  }
   const allOrders = state.data?.allOrders || [];
   const activeOrders = allOrders.filter(active);
   const finishedOrders = state.data?.finishedOrders || [];
@@ -2009,7 +2076,8 @@ function reportsView() {
   const filterByPeriod = (orderList) => {
     const now = new Date();
     return orderList.filter(o => {
-      const rawDate = o.fechaCierre || o.entrega || o.creado || "";
+      // Priorizar finProduccion (fecha real de terminación) para pedidos completados
+      const rawDate = o.finProduccion || o.fechaCierre || o.entrega || o.creado || "";
       const d = safeParseDate(rawDate);
       if (!d) return true;
       if (currentFilter === 'today') {
@@ -2061,6 +2129,16 @@ function reportsView() {
     // Compara fecha de cierre con fecha de entrega
     return cie <= ent;
   });
+  
+  // Pedidos terminados con retraso
+  const delayedFinished = periodFinishedOrders.filter(o => {
+    const ent = safeParseDate(o.entrega);
+    const cie = safeParseDate(o.fechaCierre) || safeParseDate(o.finProduccion);
+    
+    if (!ent || !cie) return false;
+    return cie > ent; // Terminado después de la fecha de entrega
+  });
+  
   const complianceRate = periodFinishedOrders.length ? Math.round((onTimeFinished.length / periodFinishedOrders.length) * 100) : 100;
 
   // Promedio en mesa
@@ -2186,6 +2264,14 @@ function reportsView() {
           <div style="font-size:28px; font-weight:900; color:var(--text-main);">${avgMins} <span style="font-size:14px; font-weight:bold; color:var(--text-muted);">min</span></div>
           <div style="font-size:11px; color:var(--text-muted);">Por orden física finalizada</div>
         </div>
+
+        <div class="sics-metric-card">
+          <div style="font-size:11px; font-weight:700; color:${delayedFinished.length ? '#ef4444' : '#10b981'}; text-transform:uppercase; margin-bottom:4px;">
+            <i class="fas fa-clock"></i> ENTREGADOS CON RETRASO
+          </div>
+          <div style="font-size:28px; font-weight:900; color:${delayedFinished.length ? '#ef4444' : '#10b981'};">${delayedFinished.length}</div>
+          <div style="font-size:11px; color:var(--text-muted);">De ${periodFinishedOrders.length} completados</div>
+        </div>
       </div>
 
       <!-- Detalles de Pedidos según Filtro -->
@@ -2217,30 +2303,43 @@ function reportsView() {
                 <th>Cliente</th>
                 <th>Tipo</th>
                 <th>Responsable</th>
-                <th>Entrega</th>
+                <th>Entrega Programada</th>
+                <th>Fecha Real Término</th>
                 <th>Estado</th>
                 <th>Tiempo</th>
+                <th>Entrega</th>
               </tr>
             </thead>
             <tbody>
               ${(viewType === 'completed' ? periodFinishedOrders : 
                  viewType === 'active' ? periodActiveOrders : 
                  viewType === 'overdue' ? overdueOrders : 
-                 [...periodActiveOrders, ...periodFinishedOrders]).map(o => `
+                 [...periodActiveOrders, ...periodFinishedOrders]).map(o => {
+                const actualFinishDate = safeParseDate(o.fechaCierre) || safeParseDate(o.finProduccion);
+                const scheduledDate = safeParseDate(o.entrega);
+                const isDelayed = actualFinishDate && scheduledDate && actualFinishDate > scheduledDate;
+                
+                return `
                 <tr onclick="navigate('team'); setTimeout(() => document.querySelector('[data-id="${escapeHtml(o.id)}"]')?.click(), 100);" style="cursor:pointer;">
                   <td style="font-family:monospace; font-weight:bold;">${escapeHtml(o.id)}</td>
                   <td style="font-weight:bold;">${escapeHtml(o.cliente)}</td>
                   <td>${escapeHtml(o.tipo)}</td>
                   <td>${escapeHtml(o.responsable)}</td>
                   <td>${escapeHtml(formatDate(o.entrega))}</td>
+                  <td>${actualFinishDate ? escapeHtml(formatDate(actualFinishDate)) : '-'}</td>
                   <td>
                     <span style="padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:bold; background:${o.estado === 'Terminado' || o.estado === 'Entregado' ? 'rgba(16,185,129,0.2); color:#10b981;' : o.estado === 'En proceso' ? 'rgba(59,130,246,0.2); color:#3b82f6;' : 'rgba(245,158,11,0.2); color:#f59e0b;'}">
                       ${escapeHtml(o.estado)}
                     </span>
                   </td>
                   <td style="font-weight:bold;">${o.duracionRealMin ? o.duracionRealMin + ' min' : '-'}</td>
+                  <td>
+                    ${isDelayed ? '<span style="color:#ef4444; font-weight:bold;">⚠️ Retrasado</span>' : 
+                      actualFinishDate && scheduledDate && actualFinishDate <= scheduledDate ? '<span style="color:#10b981; font-weight:bold;">✅ A tiempo</span>' : 
+                      '-'}
+                  </td>
                 </tr>
-              `).join('')}
+              `;}).join('')}
             </tbody>
           </table>
         </div>
@@ -3245,6 +3344,7 @@ function render() {
   
   try {
     applyTheme();
+    applySessionRoleClass();
     const screenNames = {
       modules: "Módulos de Producción",
       now: "Mesa Activa & Cronómetro", queue: "Mi Bandeja", team: "Bandeja Global de Operaciones",
@@ -3270,8 +3370,19 @@ function render() {
     const navLeadBtn = document.querySelector(".nav-lead-only");
     if (navLeadBtn) navLeadBtn.style.display = isLead() ? "inline-flex" : "none";
 
+    // Ocultar pestañas de gerencia para recepcionistas
+    document.querySelectorAll(".manager-only-tab").forEach(btn => {
+      btn.style.display = isLead() ? "inline-flex" : "none";
+    });
+
     const screenEl = $("#screen");
     if (screenEl) {
+      // Verificar acceso antes de renderizar
+      if (!canAccessScreen(state.screen)) {
+        console.log("Acceso denegado a pantalla:", state.screen, "para rol:", state.session?.role);
+        state.screen = "modules"; // Redirigir a módulos
+      }
+      
       const views = {
         modules: modulesView,
         now: nowView, queue: queueView, team: teamView,
@@ -3401,6 +3512,16 @@ function detail(order) {
         <span class="live-stopwatch-badge badge-imprenta" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="background:#7c3aed; color:white; font-size:13px; padding:6px 12px; border-radius:20px;">🖨️ ${elMin} min</span>
       </div>
     `;
+  } else if (order.estado === 'Esperando Planchado') {
+    liveTimerNotice = `
+      <div style="background:rgba(249,115,22,0.12); border:1.5px solid #f97316; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <div>
+          <strong style="color:#ea580c; font-size:13px; display:block;"><i class="fas fa-tshirt"></i> ESPERANDO PLANCHADO:</strong>
+          <span style="font-size:12px; color:var(--text-main);">Diseño listo. Cronómetro <strong id="modal-live-stopwatch-text">congelado en ${elMin} min</strong> mientras planchan camisa, DTF o taza.</span>
+        </div>
+        <span class="live-stopwatch-badge badge-planchado" id="modal-live-stopwatch-badge" data-order-id="${escapeHtml(order.id)}" style="background:#ea580c; color:white; font-size:13px; padding:6px 12px; border-radius:20px;">♨️ ${elMin} min</span>
+      </div>
+    `;
   } else if (order.estado === 'Pausado') {
     liveTimerNotice = `
       <div style="background:rgba(245,158,11,0.12); border:1.5px solid #f59e0b; border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
@@ -3501,7 +3622,7 @@ function detail(order) {
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--border-color); padding-bottom:6px;">
           <span style="font-weight:700; color:var(--text-muted); font-size:12px;">CAMBIAR ESTADO DE PRODUCCIÓN:</span>
           <select id="status-change-select" data-id="${escapeHtml(order.id)}" style="padding:4px 8px; border-radius:6px;">
-            ${(isLead() ? ["Pendiente", "En proceso", "Pausado", "Esperando Imprenta", "Terminado", "Entregado", "Cancelado"] : ["Pendiente", "En proceso", "Pausado", "Esperando Imprenta", "Terminado", "Cancelado"]).map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${st === "Esperando Imprenta" ? "🖨️ Esperando Imprenta" : (st === "Pausado" ? "⏸️ Pausado" : st)}</option>`).join("")}
+            ${productionStatusList(isLead()).map((st) => `<option value="${st}" ${order.estado === st ? "selected" : ""}>${productionStatusLabel(st)}</option>`).join("")}
           </select>
         </div>
 
@@ -4055,6 +4176,7 @@ function openFinishModal(order, targetStatus) {
           comentarioCierre: commentVal,
           duracionManualMin: finalDuration,
           duracionRealMin: finalDuration,
+          finProduccion: new Date().toISOString(),
           images: capturedEvidences
         }
       }, 60000);
@@ -7714,7 +7836,7 @@ window.doLogout = function() {
 // SICS 2026: NAVEGADOR GLOBAL ENTRE MÓDULOS Y FICHAS
 // =========================================================
 window.navigate = function(screenName) {
-  if ((screenName === 'providers' || screenName === 'cash') && !isLead()) {
+  if (['providers', 'cash', 'finances', 'reports'].includes(screenName) && !isLead()) {
     showToast("🔒 Módulo exclusivo para Gerencia y Jefes.");
     state.screen = "modules";
   } else {
@@ -8642,7 +8764,11 @@ function cashView() {
               </div>
               <div>
                 <span style="font-size:10.5px; color:var(--text-muted); display:block;">📲 PAGO MÓVIL:</span>
-                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalPagoMovilBs).toLocaleString('es-VE')}</strong>
+                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalPagoMovilBs || 0).toLocaleString('es-VE')}</strong>
+              </div>
+              <div>
+                <span style="font-size:10.5px; color:var(--text-muted); display:block;">🏦 TRANSFERENCIAS:</span>
+                <strong style="color:var(--text-main); font-size:13px;">Bs. ${Number(c.totalTransferenciaBs || 0).toLocaleString('es-VE')}</strong>
               </div>
               <div>
                 <span style="font-size:10.5px; color:var(--text-muted); display:block;">💵 EFECTIVO BS:</span>
@@ -8653,6 +8779,25 @@ function cashView() {
                 <strong style="color:#10b981; font-size:13px;">$${Number(c.totalEfectivoUSD).toFixed(2)}</strong>
               </div>
             </div>
+
+            <!-- Desglose de pagos móviles y transferencias -->
+            ${(c.detalles?.pagosMoviles?.length || 0) > 0 || (c.detalles?.transferencias?.length || 0) > 0 ? `
+              <div style="margin-top:10px; background:rgba(0,0,0,0.15); border-radius:8px; padding:10px;">
+                <span style="font-size:11px; font-weight:bold; color:#a78bfa; text-transform:uppercase; display:block; margin-bottom:6px;">
+                  📋 Desglose de Pagos Electrónicos:
+                </span>
+                ${(c.detalles?.pagosMoviles || []).map(pm => `
+                  <div style="font-size:11px; margin-bottom:4px; padding:4px; background:rgba(167,139,250,0.1); border-radius:4px;">
+                    <strong>Pago Móvil:</strong> Bs. ${Number(pm.monto).toLocaleString('es-VE')} <span style="color:#a78bfa;">Ref: ${escapeHtml(pm.referencia || 'N/A')}</span>
+                  </div>
+                `).join('')}
+                ${(c.detalles?.transferencias || []).map(tf => `
+                  <div style="font-size:11px; margin-bottom:4px; padding:4px; background:rgba(16,185,129,0.1); border-radius:4px;">
+                    <strong>Transferencia:</strong> Bs. ${Number(tf.monto).toLocaleString('es-VE')} <span style="color:#10b981;">Ref: ${escapeHtml(tf.referencia || 'N/A')}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
 
             ${c.fotoRespaldo ? `
               <div style="margin-top:10px;">
@@ -8670,6 +8815,7 @@ function cashView() {
 
 window.openNewCashCloseModal = function() {
   let photoRespaldoBase64 = "";
+  let pagosMoviles = [{ monto: "", referencia: "" }]; // Lista de pagos móviles individuales
 
   openModal(`
     <div class="modal-head">
@@ -8677,7 +8823,7 @@ window.openNewCashCloseModal = function() {
         <h2 style="margin:0; display:flex; align-items:center; gap:8px;">
           <i class="fas fa-cash-register" style="color:#f59e0b;"></i> Nuevo Cierre de Turno / Caja
         </h2>
-        <div style="font-size:12px; color:var(--text-muted);">Basado en la planilla física de Creaciones JJ.</div>
+        <div style="font-size:12px; color:var(--text-muted);">Basado en la planilla física de Creaciones JJ. Gerencia solo.</div>
       </div>
       <button class="close-button" data-action="close">×</button>
     </div>
@@ -8717,18 +8863,33 @@ window.openNewCashCloseModal = function() {
         <input type="number" id="caja-punto-bs" placeholder="Total cobrado en punto (Bs)" step="0.01" value="0.00" oninput="window.calcCashTotals()">
       </div>
 
-      <!-- 2. PAGO MÓVIL CON REFERENCIA -->
+      <!-- 2. PAGO MÓVIL CON REFERENCIAS (Desglose individual) -->
       <div style="background:rgba(0,0,0,0.2); border-radius:8px; padding:10px; margin-bottom:6px;">
         <span style="font-size:11px; font-weight:800; color:#a78bfa; text-transform:uppercase; display:block; margin-bottom:6px;">
-          📲 Pago Móvil (Monto Bs y Referencias):
+          📲 Pagos Móviles (Desglose individual con referencias):
         </span>
-        <div class="form-inline" style="gap:8px;">
-          <input type="number" id="caja-pagomovil-bs" placeholder="Monto total Pago Móvil (Bs)" step="0.01" value="0.00" oninput="window.calcCashTotals()" style="flex:1;">
-          <input type="text" id="caja-pagomovil-ref" placeholder="Últimos 4 dígitos / Ref (ej: 5407, 8812)" style="flex:1.5;">
+        <div id="pagos-moviles-container">
+          <!-- Se llena dinámicamente -->
         </div>
+        <button type="button" id="btn-add-pagomovil" style="background:#a78bfa; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer; margin-top:6px;">
+          + Agregar otro pago móvil
+        </button>
       </div>
 
-      <!-- 3. EFECTIVOS -->
+      <!-- 3. TRANSFERENCIAS BANCARIAS -->
+      <div style="background:rgba(0,0,0,0.2); border-radius:8px; padding:10px; margin-bottom:6px;">
+        <span style="font-size:11px; font-weight:800; color:#10b981; text-transform:uppercase; display:block; margin-bottom:6px;">
+          🏦 Transferencias Bancarias (Desglose individual con referencias):
+        </span>
+        <div id="transferencias-container">
+          <!-- Se llena dinámicamente -->
+        </div>
+        <button type="button" id="btn-add-transferencia" style="background:#10b981; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer; margin-top:6px;">
+          + Agregar otra transferencia
+        </button>
+      </div>
+
+      <!-- 4. EFECTIVOS -->
       <div class="form-inline" style="gap:8px;">
         <label class="field" style="flex:1;">
           <span class="field-label">💵 EFECTIVO BOLÍVARES (Bs):</span>
@@ -8756,15 +8917,15 @@ window.openNewCashCloseModal = function() {
       <div class="physical-invoice-box" style="margin-top:6px;">
         <div class="physical-invoice-header">
           <span style="font-size:11px; font-weight:800; color:#f59e0b; text-transform:uppercase;">
-            📸 Foto de la Planilla Física de Cierre (Auditoría):
+            📸 Foto/PDF de la Planilla Física de Cierre (Auditoría):
           </span>
           <div style="display:flex; gap:6px;">
             <button type="button" class="secondary-button" id="btn-cam-caja" style="background:#f59e0b; color:white; border:none; padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
               📸 Tomar Foto
             </button>
             <label class="secondary-button" style="background:var(--bg-main); border:1px solid var(--border-color); padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; cursor:pointer;">
-              📁 Subir Foto
-              <input type="file" id="caja-file-input" accept="image/*" style="display:none;">
+              📁 Subir Foto/PDF
+              <input type="file" id="caja-file-input" accept="image/*,.pdf" style="display:none;">
             </label>
           </div>
         </div>
@@ -8788,14 +8949,96 @@ window.openNewCashCloseModal = function() {
     </form>
   `);
 
+  // Función para renderizar pagos móviles
+  window.renderPagosMoviles = function() {
+    const container = document.getElementById("pagos-moviles-container");
+    if (!container) return;
+    
+    container.innerHTML = pagosMoviles.map((pm, idx) => `
+      <div class="form-inline" style="gap:8px; margin-bottom:6px;">
+        <input type="number" placeholder="Monto (Bs)" step="0.01" value="${pm.monto}" 
+               class="pm-monto" data-index="${idx}" oninput="window.calcCashTotals()" style="flex:1;">
+        <input type="text" placeholder="Referencia (ej: 5407)" value="${pm.referencia}" 
+               class="pm-ref" data-index="${idx}" style="flex:1.5;">
+        <button type="button" onclick="window.removePagoMovil(${idx})" 
+                style="background:#ef4444; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">×</button>
+      </div>
+    `).join('');
+  };
+
+  // Función para renderizar transferencias
+  window.renderTransferencias = function() {
+    const container = document.getElementById("transferencias-container");
+    if (!container) return;
+    
+    const transferencias = window.transferenciasList || [{ monto: "", referencia: "" }];
+    container.innerHTML = transferencias.map((tf, idx) => `
+      <div class="form-inline" style="gap:8px; margin-bottom:6px;">
+        <input type="number" placeholder="Monto (Bs)" step="0.01" value="${tf.monto}" 
+               class="tf-monto" data-index="${idx}" oninput="window.calcCashTotals()" style="flex:1;">
+        <input type="text" placeholder="Referencia bancaria" value="${tf.referencia}" 
+               class="tf-ref" data-index="${idx}" style="flex:1.5;">
+        <button type="button" onclick="window.removeTransferencia(${idx})" 
+                style="background:#ef4444; color:white; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">×</button>
+      </div>
+    `).join('');
+  };
+
+  // Funciones para agregar/remover pagos móviles
+  window.addPagoMovil = function() {
+    pagosMoviles.push({ monto: "", referencia: "" });
+    window.renderPagosMoviles();
+  };
+  window.removePagoMovil = function(idx) {
+    if (pagosMoviles.length > 1) {
+      pagosMoviles.splice(idx, 1);
+      window.renderPagosMoviles();
+      window.calcCashTotals();
+    }
+  };
+
+  // Funciones para agregar/remover transferencias
+  window.transferenciasList = [{ monto: "", referencia: "" }];
+  window.addTransferencia = function() {
+    window.transferenciasList.push({ monto: "", referencia: "" });
+    window.renderTransferencias();
+  };
+  window.removeTransferencia = function(idx) {
+    if (window.transferenciasList.length > 1) {
+      window.transferenciasList.splice(idx, 1);
+      window.renderTransferencias();
+      window.calcCashTotals();
+    }
+  };
+
+  // Renderizar iniciales
+  window.renderPagosMoviles();
+  window.renderTransferencias();
+
+  // Event listeners para botones
+  document.getElementById("btn-add-pagomovil")?.addEventListener("click", window.addPagoMovil);
+  document.getElementById("btn-add-transferencia")?.addEventListener("click", window.addTransferencia);
+
   window.calcCashTotals = function() {
     const pto = parseFloat(document.getElementById("caja-punto-bs")?.value || 0);
-    const pm = parseFloat(document.getElementById("caja-pagomovil-bs")?.value || 0);
+    
+    // Sumar pagos móviles
+    let totalPm = 0;
+    document.querySelectorAll(".pm-monto").forEach(el => {
+      totalPm += parseFloat(el.value || 0);
+    });
+    
+    // Sumar transferencias
+    let totalTf = 0;
+    document.querySelectorAll(".tf-monto").forEach(el => {
+      totalTf += parseFloat(el.value || 0);
+    });
+    
     const efBs = parseFloat(document.getElementById("caja-efectivo-bs")?.value || 0);
     const efUSD = parseFloat(document.getElementById("caja-efectivo-usd")?.value || 0);
     const tasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
 
-    const totalBs = pto + pm + efBs;
+    const totalBs = pto + totalPm + totalTf + efBs;
     const totalUSD = (totalBs / (tasa || 1)) + efUSD;
 
     const elBs = document.getElementById("caja-total-preview-bs");
@@ -8860,14 +9103,38 @@ window.openNewCashCloseModal = function() {
       const inicioBs = parseFloat(document.getElementById("caja-inicio-bs").value || 0);
       const inicioUSD = parseFloat(document.getElementById("caja-inicio-usd").value || 0);
       const pto = parseFloat(document.getElementById("caja-punto-bs").value || 0);
-      const pm = parseFloat(document.getElementById("caja-pagomovil-bs").value || 0);
-      const pmRef = document.getElementById("caja-pagomovil-ref").value.trim();
-      const efBs = parseFloat(document.getElementById("caja-efectivo-bs").value || 0);
-      const efUSD = parseFloat(document.getElementById("caja-efectivo-usd").value || 0);
+      
+      // Recopilar pagos móviles individuales
+      const pagosMovilesList = [];
+      document.querySelectorAll(".pm-monto").forEach((el, idx) => {
+        const monto = parseFloat(el.value || 0);
+        const refEl = document.querySelector(`.pm-ref[data-index="${idx}"]`);
+        const referencia = refEl ? refEl.value.trim() : "";
+        if (monto > 0) {
+          pagosMovilesList.push({ monto, referencia });
+        }
+      });
+      
+      // Recopilar transferencias individuales
+      const transferenciasList = [];
+      document.querySelectorAll(".tf-monto").forEach((el, idx) => {
+        const monto = parseFloat(el.value || 0);
+        const refEl = document.querySelector(`.tf-ref[data-index="${idx}"]`);
+        const referencia = refEl ? refEl.value.trim() : "";
+        if (monto > 0) {
+          transferenciasList.push({ monto, referencia });
+        }
+      });
+      
+      const efBs = parseFloat(document.getElementById("caja-efectivo-bs")?.value || 0);
+      const efUSD = parseFloat(document.getElementById("caja-efectivo-usd")?.value || 0);
       const obs = document.getElementById("caja-obs").value.trim();
       const tasa = parseFloat(store.get("pp_tasa_bcv", 798.33));
-
-      const totalBs = pto + pm + efBs;
+      
+      // Calcular totales
+      const totalPmBs = pagosMovilesList.reduce((sum, pm) => sum + pm.monto, 0);
+      const totalTfBs = transferenciasList.reduce((sum, tf) => sum + tf.monto, 0);
+      const totalBs = pto + totalPmBs + totalTfBs + efBs;
       const totalUSD = (totalBs / (tasa || 1)) + efUSD;
 
       const newClose = {
@@ -8877,13 +9144,17 @@ window.openNewCashCloseModal = function() {
         inicioBs: inicioBs,
         inicioUSD: inicioUSD,
         totalPuntoBs: pto,
-        totalPagoMovilBs: pm,
+        totalPagoMovilBs: totalPmBs,
+        totalTransferenciaBs: totalTfBs,
         totalEfectivoBs: efBs,
         totalEfectivoUSD: efUSD,
         tasaBCV: tasa,
         totalDiaBs: totalBs,
         totalDiaUSD: totalUSD,
-        detalles: { pmRef: pmRef },
+        detalles: {
+          pagosMoviles: pagosMovilesList,
+          transferencias: transferenciasList
+        },
         fotoRespaldo: photoRespaldoBase64,
         responsable: state.session?.name || "Gerencia",
         observaciones: obs
